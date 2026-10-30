@@ -1,0 +1,35 @@
+{
+  "tasks": {
+    "admin-employee-info-reconciliation": [
+      { "source": "employees.csv", "destination": "/workspace/employees.csv" }
+    ],
+    "admin-make-spreadsheet": [
+      { "source": "drinks_survey.csv", "destination": "/workspace/drinks_survey.csv" }
+    ],
+    "ds-fix-table-values-and-missing-answers": [
+      { "source": "ref_data.xlsx", "destination": "/workspace/ref_data.xlsx" }
+    ],
+    "ds-janusgraph-exercise": [
+      { "source": "employee_diagram.jpg", "destination": "/workspace/employee_diagram.jpg" }
+    ],
+    "finance-apply-tax-credit": [
+      { "source": "research_wages.csv", "destination": "/workspace/research_wages.csv" }
+    ],
+    "finance-substantial-presence-test": [
+      { "source": "travel_history.txt", "destination": "/workspace/travel_history.txt" }
+    ],
+    "hr-check-for-invalid-passwords-and-ask-for-valid-passwords": [
+      { "source": "passwords.txt", "destination": "/workspace/passwords.txt" }
+    ],
+    "hr-new-grad-job-description": [
+      { "source": "requirement.txt", "destination": "/workspace/requirement.txt" },
+      { "source": "template.md", "destination": "/workspace/template.md" }
+    ],
+    "hr-new-grad-job-description-2": [
+      { "source": "template.md", "destination": "/instruction/template.md" }
+    ],
+    "hr-new-grad-job-description-3": [
+      { "source": "template.md", "destination": "/instruction/template.md" }
+    ]
+  }
+}

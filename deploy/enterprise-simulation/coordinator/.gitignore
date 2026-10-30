@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv/
+config/runtime.json
+config/erpnext-compose.yml
+secrets/
+state/
+venv/

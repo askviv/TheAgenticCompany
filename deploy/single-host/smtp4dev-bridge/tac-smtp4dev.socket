@@ -1,0 +1,11 @@
+[Unit]
+Description=Private Mailu bridge to local Viv smtp4dev
+After=docker.service
+Requires=docker.service
+
+[Socket]
+ListenStream=172.22.0.1:19126
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target

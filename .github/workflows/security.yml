@@ -1,0 +1,84 @@
+name: Security scanning
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "23 9 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  osv-pr:
+    if: github.event_name == 'pull_request'
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+
+  osv-full:
+    if: github.event_name != 'pull_request'
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: google/osv-scanner-action/.github/workflows/osv-scanner-reusable.yml@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+
+  gitleaks:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out full Git history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Scan Git history with Gitleaks
+        shell: bash
+        env:
+          GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb
+        run: |
+          set -euo pipefail
+
+          report="${RUNNER_TEMP}/gitleaks-report.json"
+          stdout_log="${RUNNER_TEMP}/gitleaks.stdout"
+          stderr_log="${RUNNER_TEMP}/gitleaks.stderr"
+
+          set +e
+          docker run --rm --user "$(id -u):$(id -g)" \
+            --volume "${GITHUB_WORKSPACE}:/repo:ro" \
+            --volume "${RUNNER_TEMP}:/reports:rw" \
+            --workdir /repo \
+            "${GITLEAKS_IMAGE}" \
+            git --log-opts="--all" --redact --no-banner --report-format json --report-path /reports/gitleaks-report.json . \
+            >"${stdout_log}" 2>"${stderr_log}"
+          scan_status=$?
+          set -e
+
+          if [[ "${scan_status}" -eq 0 ]]; then
+            echo "Gitleaks completed with no findings."
+            exit 0
+          fi
+
+          if [[ "${scan_status}" -eq 1 && -s "${report}" ]]; then
+            jq -r '
+              group_by(.RuleID)[] |
+              "type=\(.[0].RuleID) count=\(length) paths=\([.[].File] | unique | @json)"
+            ' "${report}"
+            echo "::error::Gitleaks found secrets in Git history; values and raw reports are not printed or uploaded."
+            exit 1
+          fi
+
+          echo "::error::Gitleaks failed to complete (exit code ${scan_status}); scanner output was withheld to avoid logging sensitive data."
+          exit "${scan_status}"

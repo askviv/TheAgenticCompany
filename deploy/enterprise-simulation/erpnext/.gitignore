@@ -1,0 +1,6 @@
+secrets/
+runtime/
+golden/
+*.log
+*.sql.gz
+*.tar

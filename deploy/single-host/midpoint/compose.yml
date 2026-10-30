@@ -1,0 +1,97 @@
+name: tac-midpoint
+
+services:
+  midpoint-db:
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: midpoint
+      POSTGRES_USER: midpoint
+      POSTGRES_PASSWORD_FILE: /run/secrets/midpoint-db-password
+      POSTGRES_INITDB_ARGS: --lc-collate=en_US.utf8 --lc-ctype=en_US.utf8
+    volumes:
+      - midpoint-data:/var/lib/postgresql/data
+    networks:
+      - midpoint
+    secrets:
+      - midpoint-db-password
+    mem_limit: 1536m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U midpoint -d midpoint"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  midpoint-init:
+    image: evolveum/midpoint:4.11.0-alpine@sha256:1523589584f8c0cd28e382b8fc61065ddc13e4f57d3f53ca711506857f36310a
+    restart: "no"
+    profiles: ["initialize"]
+    mem_limit: 2g
+    depends_on:
+      midpoint-db:
+        condition: service_healthy
+    command:
+      - bash
+      - -e
+      - -c
+      - >-
+        cd /opt/midpoint &&
+        bin/midpoint.sh init-native &&
+        bin/ninja.sh run-sql --mode REPOSITORY --create &&
+        bin/ninja.sh run-sql --mode AUDIT --create
+    environment: &midpoint-environment
+      MP_SET_midpoint_repository_jdbcUsername: midpoint
+      MP_SET_midpoint_repository_jdbcPassword_FILE: /run/secrets/midpoint-db-password
+      MP_SET_midpoint_repository_jdbcUrl: jdbc:postgresql://midpoint-db:5432/midpoint
+      MP_SET_midpoint_repository_database: postgresql
+      MP_INIT_CFG: /opt/midpoint/var
+    volumes:
+      - midpoint-home:/opt/midpoint/var
+      - ./schema:/opt/midpoint/var/schema:ro
+    networks:
+      - midpoint
+    secrets:
+      - midpoint-db-password
+
+  midpoint:
+    image: evolveum/midpoint:4.11.0-alpine@sha256:1523589584f8c0cd28e382b8fc61065ddc13e4f57d3f53ca711506857f36310a
+    restart: unless-stopped
+    depends_on:
+      midpoint-db:
+        condition: service_healthy
+    command: ["/opt/midpoint/bin/midpoint.sh", "container"]
+    ports:
+      - "127.0.0.1:${MIDPOINT_PORT:-8080}:8080"
+    extra_hosts:
+      - "the-agent-company.com:host-gateway"
+    mem_limit: 4g
+    environment:
+      <<: *midpoint-environment
+      MP_MEM_INIT: 1g
+      MP_MEM_MAX: 3g
+      MP_SET_midpoint_administrator_initialPassword_FILE: /run/secrets/midpoint-admin-password
+      MP_UNSET_midpoint_repository_hibernateHbm2ddl: "1"
+      MP_NO_ENV_COMPAT: "1"
+    volumes:
+      - midpoint-home:/opt/midpoint/var
+      - ./schema:/opt/midpoint/var/schema:ro
+    networks:
+      - midpoint
+    secrets:
+      - midpoint-db-password
+      - midpoint-admin-password
+
+volumes:
+  midpoint-data:
+  midpoint-home:
+
+networks:
+  midpoint:
+    name: tac-midpoint
+    driver: bridge
+
+secrets:
+  midpoint-db-password:
+    file: ${MIDPOINT_DB_PASSWORD_FILE:?Set MIDPOINT_DB_PASSWORD_FILE in an untracked environment file}
+  midpoint-admin-password:
+    file: ${MIDPOINT_ADMIN_PASSWORD_FILE:?Set MIDPOINT_ADMIN_PASSWORD_FILE in an untracked environment file}

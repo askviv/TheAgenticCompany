@@ -1,0 +1,29 @@
+[Unit]
+Description=Private The Agent Company enterprise simulation coordinator
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+UMask=0077
+WorkingDirectory=/data/theagentcompany/enterprise/source
+Environment=SIMULATION_CONFIG=/data/theagentcompany/enterprise/config/runtime.json
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/data/theagentcompany/enterprise/venv/bin/python -m servers.simulation.runtime
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=40
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/data/theagentcompany/enterprise/state /data/theagentcompany/enterprise/erpnext/runtime
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

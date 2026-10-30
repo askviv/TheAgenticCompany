@@ -1,0 +1,177 @@
+name: tac-enterprise-erp
+
+x-erpnext-image: &erpnext_image
+  image: frappe/erpnext@sha256:74180ed84b3ae245ecad78da94d960034884664caf36d6ea4832cc3bd7152759
+  platform: linux/amd64
+  restart: unless-stopped
+  labels:
+    tac.environment: enterprise-simulation
+    tac.project: erpnext
+
+x-backend: &backend
+  <<: *erpnext_image
+  depends_on:
+    configurator:
+      condition: service_completed_successfully
+  volumes:
+    - /data/theagentcompany/enterprise/erpnext/sites:/home/frappe/frappe-bench/sites
+  extra_hosts:
+    - "mail.company.example.test:192.0.2.10"
+
+services:
+  configurator:
+    <<: *backend
+    restart: on-failure
+    entrypoint: ["bash", "-c"]
+    command:
+      - >
+        set -e;
+        mkdir -p sites;
+        if [ ! -f sites/common_site_config.json ]; then printf '{}\n' > sites/common_site_config.json; fi;
+        ls -1 apps > sites/apps.txt;
+        bench set-config -g db_host db;
+        bench set-config -gp db_port 3306;
+        bench set-config -g redis_cache redis://redis-cache:6379;
+        bench set-config -g redis_queue redis://redis-queue:6379;
+        bench set-config -g redis_socketio redis://redis-queue:6379;
+        bench set-config -gp socketio_port 9000;
+        bench set-config -g chromium_path /usr/lib/chromium/chromium-headless-shell;
+    depends_on:
+      db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_started
+      redis-queue:
+        condition: service_started
+    mem_limit: 256m
+
+  backend:
+    <<: *backend
+    environment:
+      GUNICORN_THREADS: 2
+      GUNICORN_WORKERS: 1
+      GUNICORN_TIMEOUT: 120
+    volumes:
+      - /data/theagentcompany/enterprise/erpnext/sites:/home/frappe/frappe-bench/sites
+      - /data/theagentcompany/source/servers/simulation/erpnext.py:/opt/erpnext_adapter.py:ro
+    mem_limit: 1g
+
+  frontend:
+    <<: *erpnext_image
+    command: ["nginx-entrypoint.sh"]
+    environment:
+      BACKEND: backend:8000
+      SOCKETIO: websocket:9000
+      NGINX_LISTEN_PORT: 8080
+      FRAPPE_SITE_NAME_HEADER: $$host
+      UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
+      UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
+      UPSTREAM_REAL_IP_RECURSIVE: "off"
+      PROXY_READ_TIMEOUT: 120
+      CLIENT_MAX_BODY_SIZE: 10m
+    ports:
+      - "192.0.2.10:8130:8080"
+    volumes:
+      - /data/theagentcompany/enterprise/erpnext/sites:/home/frappe/frappe-bench/sites
+    depends_on:
+      - backend
+      - websocket
+    mem_limit: 128m
+
+  websocket:
+    <<: *backend
+    command: ["node", "/home/frappe/frappe-bench/apps/frappe/socketio.js"]
+    mem_limit: 256m
+
+  queue-short:
+    <<: *backend
+    command: ["bench", "worker", "--queue", "short,default"]
+    mem_limit: 512m
+
+  queue-long:
+    <<: *backend
+    command: ["bench", "worker", "--queue", "long,default,short"]
+    mem_limit: 512m
+
+  scheduler:
+    <<: *backend
+    command: ["bench", "schedule"]
+    profiles: ["scheduler"]
+    mem_limit: 256m
+
+  db:
+    image: mariadb@sha256:c4124d1afa875e47f2892edf26b482fa54f796e2f342d3717a04ca091a22a9bd
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+    environment:
+      MARIADB_AUTO_UPGRADE: 1
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db-root-password
+    secrets:
+      - db-root-password
+    volumes:
+      - /data/theagentcompany/enterprise/erpnext/db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 5s
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 1280m
+    labels:
+      tac.environment: enterprise-simulation
+      tac.project: erpnext
+
+  redis-cache:
+    image: redis@sha256:f4ed7d6732f9a5dcc6b64e2b347860b9f329334bfd4839a672f78cd981a8bba6
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "96mb", "--maxmemory-policy", "allkeys-lru"]
+    mem_limit: 128m
+    labels:
+      tac.environment: enterprise-simulation
+      tac.project: erpnext
+
+  redis-queue:
+    image: redis@sha256:f4ed7d6732f9a5dcc6b64e2b347860b9f329334bfd4839a672f78cd981a8bba6
+    restart: unless-stopped
+    command: ["redis-server", "--maxmemory", "96mb", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - /data/theagentcompany/enterprise/erpnext/redis-queue:/data
+    mem_limit: 128m
+    labels:
+      tac.environment: enterprise-simulation
+      tac.project: erpnext
+
+  site-admin:
+    <<: *erpnext_image
+    user: "0:0"
+    profiles: ["admin"]
+    working_dir: /home/frappe/frappe-bench
+    environment:
+      PYTHONPATH: /opt/erpnext-contracts
+    entrypoint: ["/home/frappe/frappe-bench/env/bin/python", "/opt/erpnext-admin/owned_site.py"]
+    volumes:
+      - /data/theagentcompany/enterprise/erpnext/sites:/home/frappe/frappe-bench/sites
+      - /data/theagentcompany/enterprise/erpnext/golden:/opt/erpnext-golden
+      - /data/theagentcompany/enterprise/erpnext/runtime:/opt/erpnext-runtime
+      - /data/theagentcompany/source/deploy/enterprise-simulation/erpnext/admin:/opt/erpnext-admin:ro
+      - /data/theagentcompany/source/servers/simulation/integration_contracts.py:/opt/erpnext-contracts/integration_contracts.py:ro
+      - /data/theagentcompany/source/deploy/single-host/company-identities.json:/opt/company-identities.json:ro
+      - /data/theagentcompany/source/servers/simulation/erpnext.py:/opt/erpnext_adapter.py:ro
+      - /data/theagentcompany/mailu/service-credentials.json:/run/secrets/mailu-service-credentials.json:ro
+    secrets:
+      - db-root-password
+      - site-admin-password
+    depends_on:
+      configurator:
+        condition: service_completed_successfully
+    mem_limit: 2g
+    restart: "no"
+
+secrets:
+  db-root-password:
+    file: /data/theagentcompany/enterprise/erpnext/secrets/db-root-password
+  site-admin-password:
+    file: /data/theagentcompany/enterprise/erpnext/secrets/site-admin-password

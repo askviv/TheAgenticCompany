@@ -1,0 +1,21 @@
+[project]
+name = "tac-tau2-customer-actor"
+version = "0.1.0"
+description = "Isolated τ-bench UserSimulator worker for enterprise customer actors"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "tau2 @ git+https://github.com/sierra-research/tau2-bench.git@7aad81c37a3a78b4ed3e4866769f851400c64415",
+  "fastapi>=0.115.11",
+  "uvicorn>=0.34.0",
+  "rank-bm25>=0.2.2",
+]
+
+[tool.uv]
+package = false
+# Security overrides: pinned tau2 caps litellm below the patched release, and
+# current transitive metadata selects filelock 3.x below its patched release.
+# Keep tau2's source SHA fixed while resolving these vulnerable pins.
+override-dependencies = ["litellm==1.106.6", "filelock==4.2.5"]
+
+[dependency-groups]
+dev = ["pytest>=8.3.5"]

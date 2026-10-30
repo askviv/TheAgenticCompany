@@ -1,0 +1,166 @@
+{
+  "finance-apply-tax-credit": {
+    "summary": "Complete Section B of IRS Form 6765 using company financial records and research wages.",
+    "description": "Use f6765.pdf, f6765_instructions.pdf, TAC_financials.csv, and research_wages.csv to complete Section B—Alternative Simplified Credit. Ask the finance director, identified in Personnell_File.odt, about any ambiguous items. Save the completed form as filled_f6765.pdf."
+  },
+  "finance-budget-variance": {
+    "summary": "Compare actual spending with budget by department, category, and month; flag material differences.",
+    "description": "Compare budget.xlsx with actual_spending.xlsx by department, category, and month. Calculate variance amounts and percentages, adjust comparisons for identified seasonal patterns, and flag a variance only when it exceeds both 10% of budget and $5,000. Save flagged_variances.xlsx with a Flagged_Variances column containing unique Department_Category_YYYYMM identifiers."
+  },
+  "finance-check-attendance-payroll": {
+    "summary": "Calculate each employee’s April earnings from attendance hours and pay rates.",
+    "description": "Use april-attendance-data.csv and salary-rates.pdf in Human Resources/Attendance. Sum each employee’s hours first, round that total up to the next whole hour, then apply the applicable pay rate. Do not round individual days. Save april-payroll.xlsx with Name and Total Earnings columns."
+  },
+  "finance-create-10k-income-report": {
+    "summary": "Compile 2021–2023 net income and growth from technology company 10-K reports.",
+    "description": "Review each company’s 10-K Item 8 in the Annual Reports/10Ks folder. Prepare net_income_report.csv with the charter name of each registrant, net income in millions for 2021, 2022, and 2023, and percentage changes for 2021–2022 and 2022–2023 rounded to one decimal place. Tell David Wong which company had the largest 2022–2023 net-income growth and recommend it for investment consideration."
+  },
+  "finance-expense-validation": {
+    "summary": "Correct transaction categories against the expense rules and summarize spending by category.",
+    "description": "Review expenses.xlsx and category_rules.txt in Financials/Expenses. Create expenses_corrected.xlsx with all original data and a Correct_Category column using only the listed categories. Create expenses_analysis.csv with Category, Total_Amount, Number_of_Employees, and Cost_Per_Employee; round cost per employee to two decimal places."
+  },
+  "finance-find-signatories": {
+    "summary": "Extract signatories from Amazon and Alphabet reports and share the outreach list with Sales.",
+    "description": "Ask the finance director where the annual company updates are stored. Review the Amazon reports and Alphabet report there, then create signatories.csv with each signatory’s name, title, company name without legal designators, and signature date in YYYY-MM-DD format. Give the Sales Director the file location and the number of people on the list."
+  },
+  "finance-invoice-matching": {
+    "summary": "Match payment references to invoices, including split and combined payments, and report exceptions.",
+    "description": "Match payments.xlsx against the PDFs in Financials/invoices_pdf. Account for installment payments and payments covering multiple invoices. Create flagged_payments.xlsx with Payment_ID and Issue for unmatched or problematic payments. Add a final TOTAL row stating the total invoice amount and total payment amount."
+  },
+  "finance-nonqualified-bill-ask-for-reimburse": {
+    "summary": "Check a bill against the reimbursement policy and document the eligible amount or reason for denial.",
+    "description": "Review bill.pdf and Reimbursement Policy.pdf. If the bill qualifies, record the reimbursable amount in reimburse.txt. If it does not qualify, record the reason and quote the relevant policy language."
+  },
+  "finance-qualified-bill-ask-for-reimburse": {
+    "summary": "Apply the reimbursement policy to a receipt and inform Mike Chen of the eligible amount.",
+    "description": "Review receipt.jpg and Reimbursement Policy.pdf, calculate the amount eligible for reimbursement, and tell Mike Chen the result."
+  },
+  "finance-r-d-activities": {
+    "summary": "Collect employee R&D activity details, apply the qualification criteria, and calculate eligible wages.",
+    "description": "Use Personnell_File.odt to identify relevant employees and ask them about time spent on R&D work and the nature of that work. Assess responses against Qualified_R&D_Activities.md. Record qualifying work in Research_Time_Tracking_Records.csv with Employee, Hours_spent, Qualified_R&D_activities, and R&D_wage. Use TAC_salary.xlsx and the 40-hour workweek assumption to calculate wages, and include total R&D wages in the final row."
+  },
+  "finance-revenue-reconciliation": {
+    "summary": "Compare recognized revenue and timing with contract values and terms, then identify affected employees.",
+    "description": "Compare contracts.xlsx with revenue_schedule.xlsx in Human Resources/Contracts. Sum recognized revenue for each contract, compare it with the contract value within a reasonable tolerance, and check that recognition dates align with each contract term and payment schedule. Save flagged_contracts.xlsx with a Flagged_Contracts column listing contracts with discrepancies. Use employee_contracts.xlsx to identify and contact employees for flagged contracts."
+  },
+  "finance-substantial-presence-test": {
+    "summary": "Count Huang Jie’s U.S. travel days in 2023 and share the result.",
+    "description": "Review Huang Jie’s 2023 travel history and calculate the exact number of days spent in the United States during 2023. Count both arrival and departure dates as full days. Tell Huang Jie the result."
+  },
+  "hr-analyze-outing-bills": {
+    "summary": "Record outing receipt details and analyze spending trends over time.",
+    "description": "Review all receipts in Financials/outings, in any format. Create Organized_Outings_Receipts.xlsx with a unique Receipt ID, establishment, address, date and time, items ordered, item count, and after-tax total stored as an integer. Analyze spending over time and create outings_graph.png as a line chart. Share the spreadsheet and written analysis with HR contact Chen Xinyi, including the overall spending trend."
+  },
+  "hr-check-attendance-multiple-days": {
+    "summary": "Calculate April work hours, on-time departures, and late arrivals for each employee.",
+    "description": "Use april-attendance-data.csv in Human Resources/Attendance. For each employee, calculate average work length in hours, on-time departure count, and late arrival count. An on-time departure is from 5:30 p.m. through 6:00 p.m.; late arrival is after 9:00 a.m. Save april-attendance.xlsx with Name, Average Work Length, On-time Departure Count, and Late Arrival Count columns."
+  },
+  "hr-check-attendance-multiple-days-department": {
+    "summary": "Calculate attendance measures for April and aggregate them by department.",
+    "description": "Use april-attendance-data.csv and employee-department.odt in Human Resources/Attendance. Calculate each employee’s average work length, on-time departure count, and late arrival count. An on-time departure is from 5:30 p.m. through 6:00 p.m.; late arrival is after 9:00 a.m. Aggregate the measures by department and save department-april-attendace.xlsx with department name, average work length, average on-time departure count, and average late arrival count."
+  },
+  "hr-check-attendance-multiple-days-department-with-chat": {
+    "summary": "Ask colleagues to confirm department membership, then report April attendance averages by department.",
+    "description": "Use april-attendance-data.csv in Human Resources/Attendance to calculate each employee’s average work length, on-time departure count, and late arrival count. On-time departure is from 5:30 p.m. through 6:00 p.m.; late arrival is after 9:00 a.m. Ask Chen Xinyi who is in Finance or Technical, David Wong who is in HR or Sales/Marketing, and Mark Johnson who is in Product/UX or Documentation. Use their answers to aggregate results by department and save department-april-attendace.xlsx with department name and the three average measures."
+  },
+  "hr-check-attendance-one-day": {
+    "summary": "List employees who worked the full day on March 1, 2024.",
+    "description": "Use attendance-2024-03-01.csv in Human Resources/Attendance. Perfect attendance means the employee did not leave before 5:30 p.m. or after 6:00 p.m. Save 2024-03-attendance-summary.xlsx with a Name column listing everyone who meets the definition."
+  },
+  "hr-check-for-invalid-passwords-and-ask-for-valid-passwords": {
+    "summary": "Identify invalid entries in the provided team records and ask only their owners for corrected entries.",
+    "description": "Review the provided synthetic team password records. A valid entry is 12–16 characters, includes uppercase and lowercase letters, a number, and one of !@#$%^&*, has no three identical consecutive characters, and does not contain the owner’s name. Contact only people whose entries are invalid, obtain their corrected entries, and update passwords.txt in username: password format, one per line."
+  },
+  "hr-collect-feedbacks": {
+    "summary": "Collect feedback on Liu Qiang and share a summary with him based on the responses.",
+    "description": "Ask Mike Chen, Li Ming, and Zhang Wei for their views on Liu Qiang’s recent performance. After receiving all three responses, tell Liu the result: top performance if all feedback is positive, a need to work harder next quarter if all is negative, or average performance last quarter if feedback is mixed."
+  },
+  "hr-collect-multiple-valid-passwords": {
+    "summary": "Collect and validate password entries from five named colleagues for the provided synthetic team records.",
+    "description": "Collect entries from Mark Johnson, Sarah Johnson, Li Ming, Zhang Wei, and Mike Chen. Each password must be 12–16 characters, include uppercase and lowercase letters, a number, and one of !@#$%^&*, have no three identical consecutive characters, and not contain the person’s name. Save passwords.txt with one username: password entry per line."
+  },
+  "hr-create-career-ladder": {
+    "summary": "Map employee roles and potential growth paths using the personnel file, then request feedback.",
+    "description": "Use Personnell_File.odt to draft Career_Ladder.odt for TheAgentCompany. Describe viable growth paths, responsibilities, each employee’s current level, and potential next steps. Where the source does not provide details, clearly label suggestions as proposals. Announce the draft in hr-announcements and ask colleagues for feedback."
+  },
+  "hr-create-employee-manual": {
+    "summary": "Create an employee manual from the company overview, covering key policies and work practices.",
+    "description": "Use TAC_overview.md in the company Documents folder to draft Employee_Manual.odt for Human Resources. Cover company values, conduct, operating procedures, benefits, and policies. Where the overview lacks information, clearly label suggested material as a proposal."
+  },
+  "hr-delete-and-insert-user": {
+    "summary": "Remove Li Ming from the company platform and add intern DanDan Liu to the Product channel.",
+    "description": "Remove Li Ming from the company platform and add DanDan Liu, a new intern, to the Product channel."
+  },
+  "hr-get-valid-password": {
+    "summary": "Ask Mark Johnson for a password that meets the stated rules and record it in the provided format.",
+    "description": "Ask Mark Johnson for a corrected password entry. It must be 12–16 characters, include uppercase and lowercase letters, a number, and one of !@#$%^&*, have no three identical consecutive characters, and not contain his name. Save it in password.txt."
+  },
+  "hr-green-card-consultation": {
+    "summary": "Use the provided filing-date chart to identify Priya Sharma’s category date and clarify missing details with her.",
+    "description": "Review the filing-date chart in Human Resources/Immigration. Identify the date of filing for Priya Sharma’s category and country of birth, using information she provides if needed. Tell Priya the applicable date."
+  },
+  "hr-internal-tooling-slides": {
+    "summary": "Create an onboarding presentation about TAC and its main tools, then share it with the HR Manager for review.",
+    "description": "Create Internal_Tooling_Training.pptx in Human Resources. Include a title slide and a TAC Overview based on TAC_overview.md. Cover Rocket.Chat and its default, departmental, and project channels; GitLab’s collaboration, planning, and issue features and company repositories; the folders under Documents in OwnCloud; and Plane’s project features and analytics. Use clean business-style slides with readable text. Share the presentation with the HR Manager identified in Personnell_File.odt."
+  },
+  "hr-make-slides-introduce-leadership": {
+    "summary": "Prepare a five-slide leadership introduction for prospective investors and notify the HR Manager when it is ready.",
+    "description": "Use the Rocket.Chat directory to identify the CTO, Sales Director, Marketing Manager, Finance Director, and HR Manager. Create leadership_intro.pptx with one slide per leader, in that order, including each person’s name, position, and introduction. Tell the HR Manager when the deck is ready."
+  },
+  "hr-mass-survey": {
+    "summary": "Collect vacation plans from all 17 employees and calculate the combined travel budget.",
+    "description": "Ask each of the 17 TAC employees for their planned destination (City, Country), vacation-day count, and estimated travel budget. Use Personnell_File.odt for each person’s name, gender, age, and role. Save YearEnd_Vacation_Survey.xlsx in Human Resources and include a final-row sum of Expected_Travel_Budget."
+  },
+  "hr-massive-resume-screening": {
+    "summary": "Review the resume collection for candidates with OpenHands experience and report qualified names to Chen Xinyi.",
+    "description": "Review resumes.zip in Human Resources/resumes for candidates who could build agent infrastructure. Experience with OpenHands is required; LLM knowledge is helpful but not required. Do not apply degree or years-of-experience criteria. Tell Chen Xinyi whether any candidates qualify and provide their names."
+  },
+  "hr-new-grad-job-description": {
+    "summary": "Combine the supplied job template and requirements into a shareable Markdown job description.",
+    "description": "Combine template.md and requirement.txt into job_description.md in the company Documents folder. Keep the result in Markdown and create a share link accessible to anyone who has the link."
+  },
+  "hr-new-grad-job-description-2": {
+    "summary": "Ask Zhang Wei for role requirements, combine them with the supplied template, and share the Markdown job description.",
+    "description": "Ask Zhang Wei for the specific requirements for the new graduate software engineer role. Combine the answer with template.md to create job_description.md in the company Documents folder. Keep it in Markdown and create a share link accessible to anyone who has the link."
+  },
+  "hr-new-grad-job-description-3": {
+    "summary": "Collect responsibilities and qualifications from Zhang Wei and Li Ming, then publish a shareable job description.",
+    "description": "Ask Zhang Wei for the key responsibilities. Ask Li Ming where the template is and for minimum and preferred qualifications and the salary range. Combine the information into job_description.md in the company Documents folder, keep it in Markdown, and create a share link accessible to anyone who has the link."
+  },
+  "hr-organize-talent-info": {
+    "summary": "Compile education, skills, and work history for three candidates into a structured summary.",
+    "description": "Review the resumes for Emily Johnson, Michael Davis, and Sarah Thompson in Human Resources/resumes. Create summary.csv with each candidate’s name, education, skills, and previous work experience."
+  },
+  "hr-pick-interviewer-1": {
+    "summary": "Compare Emily Johnson’s resume with interviewer expertise and invite the strongest match.",
+    "description": "Review Emily Johnson’s resume in Human Resources/resumes. Ask hiring manager Chen Xinyi for the technical stacks of Mark Johnson, Jessica Lee, David Wong, and Emily Zhou. Select one interviewer whose expertise best matches Emily’s background, then send exactly this direct message: “We identified a promising candidate whose tech stack matches your expertise. Would you be available to conduct a technical interview this week?”"
+  },
+  "hr-pick-interviewer-2": {
+    "summary": "Get the available interviewer list from Chen Xinyi and ask candidates until someone agrees.",
+    "description": "Ask hiring manager Chen Xinyi who is available to interview. Contact the listed interviewers one by one until someone agrees, then record that person’s name in interviewer.txt."
+  },
+  "hr-pick-interviewer-3": {
+    "summary": "Ask Emily Zhou to conduct an interview and explain the opportunity clearly.",
+    "description": "Contact Emily Zhou and invite her to interview. Explain the request and make a respectful case for her participation."
+  },
+  "hr-populate-salary-increase-memo": {
+    "summary": "Create a reusable salary-increase memo and populate one for each employee in the source file.",
+    "description": "Use salary_increase.txt in Human Resources to create Salary_Increase_MEMO.odt, a reusable annual memo template with fields for name, email, salary amount, and assignment start and end dates. Populate a memo for each employee and save the notices in a salary_increase_notice folder within Human Resources."
+  },
+  "hr-resume-categorization": {
+    "summary": "Sort resumes into experience bands using full-time software engineering experience as of December 1, 2024.",
+    "description": "Review resumes.zip in Human Resources/resumes and keep each resume in its original PDF format. Categorize candidates as early-career for under one year of full-time software engineering experience, mid-level for one to under five years, and senior for five or more years. Put unclear cases in unsure. Use December 1, 2024 as the reference date; do not research candidates outside their resumes."
+  },
+  "hr-resume-screening": {
+    "summary": "Confirm role requirements and compare Jane Lee’s resume, then share an evidence-based decision with Li Ming.",
+    "description": "Ask Li Ming for the new graduate database engineering role requirements; if he is unavailable, ask Chen Xinyi. Review Jane Lee’s resume in Human Resources/resumes and determine whether she should proceed to the next step, citing supporting evidence. Tell Li Ming the result."
+  },
+  "hr-salary-analysis": {
+    "summary": "Summarize department averages, overall salary extremes, and median salary by role.",
+    "description": "Use salary.txt in Human Resources to calculate average salary by department, the highest and lowest salaries, and median salary across roles. Save Salary_Analysis_Report.odt in Human Resources."
+  },
+  "hr-transfer-group": {
+    "summary": "Move Li Ming from the database project group to the AI project group and update his profile.",
+    "description": "Move Li Ming from the project-graphdb channel to project-ai and update his profile bio to reflect the change in project group."
+  }
+}

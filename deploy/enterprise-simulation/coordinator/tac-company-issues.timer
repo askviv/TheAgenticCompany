@@ -1,0 +1,11 @@
+[Unit]
+Description=Recover company evidence and outstanding issue notification work
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=60s
+AccuracySec=1s
+Unit=tac-company-issues.service
+
+[Install]
+WantedBy=timers.target

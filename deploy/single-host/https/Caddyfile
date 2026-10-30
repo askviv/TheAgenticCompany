@@ -1,0 +1,53 @@
+{
+    admin unix//run/tac-https/admin.sock
+    auto_https disable_redirects
+}
+
+(tac_tls) {
+    bind 192.0.2.10
+    tls /data/theagentcompany/https-tls/fullchain.pem /data/theagentcompany/https-tls/privkey.pem
+}
+
+https://owncloud.company.example.test {
+    import tac_tls
+    reverse_proxy 127.0.0.1:8092 {
+        header_up Host the-agent-company.com:8092
+    }
+}
+https://chat.company.example.test {
+    import tac_tls
+    reverse_proxy 127.0.0.1:3000
+}
+https://plane.company.example.test {
+    import tac_tls
+    reverse_proxy 127.0.0.1:8091
+}
+https://gitlab.company.example.test {
+    import tac_tls
+    reverse_proxy 127.0.0.1:8929 {
+        header_up X-Forwarded-Ssl on
+    }
+}
+
+https://mail.company.example.test {
+    import tac_tls
+    reverse_proxy 127.0.0.1:8112
+}
+
+https://erp.company.example.test {
+    import tac_tls
+    reverse_proxy 192.0.2.10:8130 {
+        header_up Host erp-sim-4472c9ce758f548598f1be6379f9f42b.localhost
+    }
+}
+
+https://midpoint.company.example.test {
+    import tac_tls
+    redir / /midpoint/
+    reverse_proxy 127.0.0.1:18121
+}
+
+https://experiments.company.example.test {
+    import tac_tls
+    reverse_proxy 127.0.0.1:8110
+}

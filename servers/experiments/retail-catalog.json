@@ -1,0 +1,1953 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "project": "sierra-research/tau2-bench",
+    "domain": "retail",
+    "commit": "7aad81c37a3a78b4ed3e4866769f851400c64415"
+  },
+  "source_database": {
+    "path": "servers/simulation/tau2_actor_runtime/data/tau2/domains/retail/db.json",
+    "sha256": "413a65160adbdb5fde0ffc0015c49b6d70250b10c18128de169b597af7766765"
+  },
+  "task_count": 114,
+  "tasks": [
+    {
+      "id": "tau-retail-0",
+      "task_id": "0",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange keyboard and thermostat; accept no backlight if needed",
+      "summary": "Exchange the mechanical keyboard for a full-size, clicky, RGB-backlit model; if none is available, accept a model without backlighting. Also exchange the thermostat for Google Home compatibility.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to exchange the mechanical keyboard in order W2378156 for a full-size keyboard with clicky switches and RGB backlighting, and exchange the smart thermostat for a model compatible with Google Home rather than Apple HomeKit. If no keyboard matches the requested clicky, full-size, RGB-backlit combination, the customer will accept a clicky full-size model without backlighting."
+    },
+    {
+      "id": "tau-retail-1",
+      "task_id": "1",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange keyboard and thermostat; thermostat-only fallback",
+      "summary": "Exchange the mechanical keyboard for a full-size, clicky, RGB-backlit model and the thermostat for Google Home compatibility; if no keyboard match is available, proceed with only the thermostat exchange.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to exchange the mechanical keyboard in order W2378156 for a full-size keyboard with clicky switches and RGB backlighting, and exchange the smart thermostat for a model compatible with Google Home rather than Apple HomeKit. If no keyboard matches the requested clicky, full-size, RGB-backlit combination, the customer prefers to proceed with the thermostat exchange alone."
+    },
+    {
+      "id": "tau-retail-2",
+      "task_id": "2",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Check T-shirt assortment and return purchases",
+      "summary": "Find the current number of T-shirt options in the online store. The customer also wants to return a cleaner, headphones and a smartwatch.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks how many T-shirt options are currently available in the online store and wants to return a cleaner, a pair of headphones and a smartwatch."
+    },
+    {
+      "id": "tau-retail-3",
+      "task_id": "3",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Check T-shirt count and update pending small shirts",
+      "summary": "Update all pending small T-shirts to purple, keeping their size and V-neck style and preferring polyester; report the current online-store T-shirt count.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks how many T-shirt options are currently available in the online store. They also want every pending small T-shirt changed to a purple V-neck in polyester where available; keep the existing small size and V-neck style."
+    },
+    {
+      "id": "tau-retail-4",
+      "task_id": "4",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Check T-shirt count and set all pending shirts to size S",
+      "summary": "Update all pending T-shirts to purple, size S, keeping the V-neck style and preferring polyester; report the current online-store T-shirt count.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks how many T-shirt options are currently available in the online store. They also want every pending T-shirt changed to a purple, size-S V-neck in polyester where available, preserving the V-neck style."
+    },
+    {
+      "id": "tau-retail-5",
+      "task_id": "5",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a larger bottle and dimmer lamp; bottle return may follow",
+      "summary": "Exchange the water bottle for a larger one and the lamp for a dimmer model, preferring battery power, then USB, then AC. The customer may narrow the request to the lamp alone and may ultimately prefer returning the bottle.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer initially wants to exchange a water bottle for a larger bottle and a desk lamp for a less-bright option. For the lamp, prefer battery power, then USB, then AC. The customer may narrow the request to the lamp exchange alone, and may ultimately prefer returning the bottle instead of exchanging it."
+    },
+    {
+      "id": "tau-retail-6",
+      "task_id": "6",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a larger bottle and dimmer lamp; lamp-only alternative",
+      "summary": "Exchange the water bottle for a larger one and the lamp for a dimmer model, preferring battery power, then USB, then AC. The customer may narrow the request to the lamp exchange alone.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to exchange a water bottle for a larger bottle and a desk lamp for a less-bright option. For the lamp, prefer battery power, then USB, then AC. The customer may revise the request to proceed with the desk lamp exchange only."
+    },
+    {
+      "id": "tau-retail-7",
+      "task_id": "7",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a larger bottle and dimmer AC lamp; lamp-only alternative",
+      "summary": "Exchange the water bottle for a larger one and the lamp for a dimmer model, preferring AC power, then battery, then USB. The customer may narrow the request to the lamp exchange alone.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to exchange a water bottle for a larger bottle and a desk lamp for a less-bright option. For the lamp, prefer an AC adapter, then battery power, then USB. The customer may revise the request to proceed with the desk lamp exchange only."
+    },
+    {
+      "id": "tau-retail-8",
+      "task_id": "8",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a larger bottle and brighter lamp; lamp-only alternative",
+      "summary": "Exchange the water bottle for a larger one and the lamp for a brighter model, preferring battery power, then USB, then AC. The customer may narrow the request to the lamp exchange alone.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to exchange a water bottle for a larger bottle and a desk lamp for a brighter option. For the lamp, prefer battery power, then USB, then AC. The customer may revise the request to proceed with the desk lamp exchange only."
+    },
+    {
+      "id": "tau-retail-9",
+      "task_id": "9",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a larger bottle and brighter AC lamp; revised request",
+      "summary": "Exchange the water bottle for a larger one and the lamp for a brighter model, preferring AC power, then battery, then USB. The customer may later revise the request to the lamp exchange alone.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer initially asks to exchange a water bottle for a larger bottle and a desk lamp for a brighter option, preferring an AC adapter, then battery power, then USB for the lamp. They may later change the request to the desk lamp exchange only."
+    },
+    {
+      "id": "tau-retail-10",
+      "task_id": "10",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return two orders and request alternate refunds",
+      "summary": "Return both orders and, if possible, refund each to the payment method used for the other order. If cross-refunds are unavailable, the customer becomes frustrated and asks for a human representative.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to return both of their orders. They ask whether each refund can be issued to the payment method used for the other order. If that arrangement is not possible, they want assistance from a human representative."
+    },
+    {
+      "id": "tau-retail-11",
+      "task_id": "11",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return two orders and request alternate refunds",
+      "summary": "Return both orders and, if possible, refund each to the payment method used for the other order. If cross-refunds are unavailable, use each order's original payment method instead.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to return both of their orders. They ask whether each refund can be issued to the payment method used for the other order. If cross-refunding is unavailable, they agree to receive each refund through the payment method originally used for that order."
+    },
+    {
+      "id": "tau-retail-12",
+      "task_id": "12",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Cancel or return purchases unrelated to gaming",
+      "summary": "Cancel pending or return received purchases unrelated to gaming, while keeping the keyboard and mouse. Prefer a PayPal refund; if that is unavailable, the customer asks for human assistance.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to cancel pending purchases or return received purchases that are unrelated to gaming, while keeping the keyboard and mouse. PayPal is the preferred refund method. If that cannot be arranged, the customer wants help from a human representative."
+    },
+    {
+      "id": "tau-retail-13",
+      "task_id": "13",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Cancel or return purchases unrelated to gaming",
+      "summary": "Cancel pending or return received purchases unrelated to gaming, while keeping the keyboard and mouse. Prefer a PayPal refund, but accept a credit-card refund if PayPal is unavailable.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to cancel pending purchases or return received purchases that are unrelated to gaming, while keeping the keyboard and mouse. PayPal is the preferred refund method, but a credit-card refund is acceptable if PayPal cannot be used."
+    },
+    {
+      "id": "tau-retail-14",
+      "task_id": "14",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Cancel or return gaming equipment",
+      "summary": "Cancel pending or return received gaming-related purchases: a keyboard and a mouse. Refund to the original payment method where possible.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer has stopped gaming and wants to cancel pending or return received gaming-related purchases. The items are a keyboard and a mouse, and the customer prefers any refund to go to the original payment method."
+    },
+    {
+      "id": "tau-retail-15",
+      "task_id": "15",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Change the size of pending boots",
+      "summary": "Change the pending boots to size 8. The customer also asks about material but has not specified a preference, does not mind whether the boots are waterproof, and prefers PayPal for any payment or refund.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to change a pending boot order to size 8 and asks about the material, but does not name a specific material preference. Waterproofing is not a requirement. PayPal is preferred for any additional payment or refund."
+    },
+    {
+      "id": "tau-retail-16",
+      "task_id": "16",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Cancel pending orders and return a received watch",
+      "summary": "Cancel all pending orders, return the received watch only, and calculate the total expected refund.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer no longer needs any pending orders and wants them cancelled. They also want to return a watch they have received, but no other received items, and ask for the total amount they can expect to get back."
+    },
+    {
+      "id": "tau-retail-17",
+      "task_id": "17",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Update the delivery address for order W8665881",
+      "summary": "Change the delivery destination for order W8665881 to Suite 641.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants the delivery address for order W8665881 updated to Suite 641."
+    },
+    {
+      "id": "tau-retail-18",
+      "task_id": "18",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Resolve damage to an office chair",
+      "summary": "The office chair arrived with broken pieces. Although the customer initially asks to return it, they change to a same-item exchange; if that model is unavailable, they want a gray leather chair with fixed armrests.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer reports that an office chair arrived with broken pieces and initially requests a return. When reconsidering the request, they want an exchange for the same item. If that chair is unavailable, they want a gray office chair with fixed armrests made of leather."
+    },
+    {
+      "id": "tau-retail-19",
+      "task_id": "19",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return a bottle and compare two exchanges",
+      "summary": "Return the water bottle and compare the savings from exchanging the pet bed and office chair for their cheapest versions. If only one exchange can be completed, choose the one that saves more.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to return a water bottle and exchange a pet bed and an office chair for the cheapest available versions. They want both exchanges if possible. If only one exchange can be completed, compare the savings and proceed with the option that saves more money; explain the savings for both options."
+    },
+    {
+      "id": "tau-retail-20",
+      "task_id": "20",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Upgrade ordered items to the most expensive variants",
+      "summary": "Upgrade each item to its most expensive variant, keeping the shoes the same size. Pay any difference by gift card, or PayPal if gift-card payment is unavailable; skip an order if its upgrade cannot be made.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to upgrade all items to their most expensive variants, even if other features differ from the originals. The new shoes must remain the same size; other shoe and item specifications are not important. If an upgrade is unavailable for an order, leave that order unchanged and continue with the others. Pay the price difference by gift card, or by PayPal if gift-card payment is unavailable."
+    },
+    {
+      "id": "tau-retail-21",
+      "task_id": "21",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange two shoe items and check gift-card balance",
+      "summary": "Exchange the shoes for item 4107812777; the customer adds a second exchange, item 1656367028 for item 1421289881, when the first change is being finalized. Use the gift card for charges and report its remaining balance; check whether the second identifier is a product ID if it cannot be found as an item.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to exchange their shoes for item ID 4107812777. At final confirmation, they add a second request: exchange item ID 1656367028 for item ID 1421289881. Use the customer’s gift card to cover any charges and report its remaining balance after both changes. If item ID 1656367028 cannot be found, investigate whether it is a product ID and identify the intended item."
+    },
+    {
+      "id": "tau-retail-22",
+      "task_id": "22",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Update profile and order addresses, then restore the profile address",
+      "summary": "Change the profile and all eligible order addresses to 101 Highway, New York, 10001. After those changes are confirmed, restore the profile address to its original value.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks to update their default profile address and all eligible order delivery addresses to 101 Highway, New York, 10001. Once the profile and order address updates are confirmed, they want the default profile address changed back to its original value."
+    },
+    {
+      "id": "tau-retail-23",
+      "task_id": "23",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a helmet and luggage, and modify a grill",
+      "summary": "Exchange the helmet for a red, medium-size, high-ventilation model; exchange the luggage set for a black, soft-material, two-piece set; and change the pending grill to match the type already received.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants three order changes: exchange the helmet for a red, medium-size model with high ventilation; exchange a luggage set in another order for a black, soft-material, two-piece set; and modify a recently ordered grill to the same type as the grill they have already received."
+    },
+    {
+      "id": "tau-retail-24",
+      "task_id": "24",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Keep the grill and identify ordered T-shirts",
+      "summary": "The customer withdraws the grill cancellation if asked to confirm it, then wants to identify the two T-shirts in another order and learn their materials.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer initially asks to cancel a grill, but withdraws that request when asked to confirm and wants to keep the grill. They also want to know which two T-shirts they ordered in another order and what materials those shirts are made from."
+    },
+    {
+      "id": "tau-retail-25",
+      "task_id": "25",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Find a Texas order and arrange selected returns",
+      "summary": "Identify an order mistakenly sent to Texas, provide its tracking number, and return every item except the pet bed. Refund to the customer's Amex card; if support cannot help, transfer the case to a human representative.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer says an order was sent to Texas by mistake and does not remember its order number. They urgently need the tracking number and want to return all items in that order except the pet bed. Refund to their Amex credit card; if the request cannot be handled, connect them with a human representative."
+    },
+    {
+      "id": "tau-retail-26",
+      "task_id": "26",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Find a Texas order and provide its tracking number",
+      "summary": "Identify an order mistakenly sent to Texas and provide its tracking number. The customer does not remember the order number and considers the request urgent.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer says an order was sent to Texas by mistake and does not remember its order number. They urgently want the tracking number for that order."
+    },
+    {
+      "id": "tau-retail-27",
+      "task_id": "27",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return two items and exchange hiking boots",
+      "summary": "Return the hose and backpack, and exchange the hiking boots for the exact same item in a waterproof variant. If all three requests cannot be completed, prioritize the boot exchange.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to return a hose and a backpack from a recent order, and exchange the hiking boots for the same item in a waterproof variant. They want all requests considered together. If only one part can be completed, prioritize the boot exchange."
+    },
+    {
+      "id": "tau-retail-28",
+      "task_id": "28",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return selected items, cancel a pending hose, and total the refund",
+      "summary": "Return the skateboard, garden hose, backpack, keyboard and bed; cancel only the garden hose in a pending order, but do not cancel that order if the hose cannot be cancelled separately. Provide the total refund.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to return a skateboard, garden hose, backpack, keyboard and bed. They also want to cancel only the garden hose from a newly placed pending order; if that would require cancelling the whole order, leave the order in place. Complete the returns in this order: skateboard; garden hose and backpack; then keyboard and bed. Finally, calculate the total refund."
+    },
+    {
+      "id": "tau-retail-29",
+      "task_id": "29",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a skateboard and match a hose to a pending order",
+      "summary": "Exchange the skateboard for a shorter bamboo model; compare every available option and price, then choose the most expensive as the customer considers price a quality signal. Also exchange the received garden hose for the pending-order item, ID 5206946487; do not cancel orders.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants a shorter bamboo skateboard. If several options are available, list all options and prices, then select the most expensive. They also want to exchange a received garden hose for the garden hose in their pending order, identified by item ID 5206946487. Do not cancel any orders."
+    },
+    {
+      "id": "tau-retail-30",
+      "task_id": "30",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Resolve a damaged tablet and return other items",
+      "summary": "Provide the tracking number for the damaged tablet order and try to exchange it for the same model; return it if an exchange is unavailable. If the tablet is returned, cancel its charger, and also return the sneaker.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer reports that a newly received tablet was damaged on arrival. First provide the order's tracking number, then try to exchange the tablet for the same item; if that is unavailable, return it. If the tablet is returned, cancel the recently purchased charger that goes with it. The customer also wants to return a sneaker."
+    },
+    {
+      "id": "tau-retail-31",
+      "task_id": "31",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Resolve a missing tablet order and selected item changes",
+      "summary": "Provide the tracking number for the missing tablet order and check whether a refund or reorder is possible. If not, cancel its charger; also cancel the boot but keep the kettle, leaving that order unchanged if this combination is not possible, and return the sneaker.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer says a tablet they recently received is missing and wants the order's tracking number. They also ask whether the tablet can be refunded or reordered. If neither is possible, cancel the charger purchased for the tablet. In another order, cancel the boot while keeping the kettle; if that combination cannot be completed, leave that order unchanged. Return the sneaker as well."
+    },
+    {
+      "id": "tau-retail-32",
+      "task_id": "32",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Resolve a missing tablet order and selected item changes",
+      "summary": "Provide the tracking number for the missing tablet order and check whether a refund or reorder is possible. If not, cancel its charger; also cancel both the boot and kettle, and return the sneaker.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer says a tablet they recently received is missing and wants the order's tracking number. They also ask whether the tablet can be refunded or reordered. If neither is possible, cancel the charger purchased for the tablet. In another order, cancel both the boot and the kettle. Return the sneaker as well."
+    },
+    {
+      "id": "tau-retail-33",
+      "task_id": "33",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Review home-office and hiking items after a work-location change",
+      "summary": "The customer may return three home-office items while keeping hiking items, with a total refund to the original payment method. If partial returns are unavailable, keep the order and update the profile address to the Seattle address on the order.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer ordered three home-office items and hiking items for a period of remote work from a parent's home in Seattle, but now expects to return to the office. If the home-office items can be returned separately, identify and return those three items while keeping the hiking items, calculate the refund and use the original payment method. If partial returns are unavailable, leave the order unchanged and update the default profile address to the Seattle address shown in the order."
+    },
+    {
+      "id": "tau-retail-34",
+      "task_id": "34",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Review home-office and hiking items after a work-location change",
+      "summary": "The customer may return three home-office items while keeping hiking items, with a total refund to the original payment method. If partial returns are unavailable, keep the order and update the profile address to the customer's New York address.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer ordered three home-office items and hiking items for a period of remote work from a parent's home in Seattle, but now expects to return to the office. If the home-office items can be returned separately, identify and return those three items while keeping the hiking items, calculate the refund and use the original payment method. If partial returns are unavailable, leave the order unchanged and update the profile address to the customer's New York address; the customer plans to return the items later."
+    },
+    {
+      "id": "tau-retail-35",
+      "task_id": "35",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return a speaker and find a 13-inch laptop alternative",
+      "summary": "Return the more expensive speaker that is not water-resistant. In another order, change a 17-inch laptop to 13 inches; if no exact match is available, list all 13-inch options, preferring i5 and then silver or black.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to return whichever speaker is more expensive and is not water-resistant. They also want to replace a 17-inch laptop in another order with a 13-inch version. If an exact option is unavailable, list all available 13-inch alternatives, preferring an i5 processor and silver or black color."
+    },
+    {
+      "id": "tau-retail-36",
+      "task_id": "36",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Resolve an order total above the available card balance",
+      "summary": "The order exceeds the card's $1,131 available credit and totals more than $1,160. First ask about splitting payment; otherwise consider removing the most expensive item, switching all items to their cheapest options and applying that change if it reaches $1,131, or cancelling the order.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer has $1,131 of credit remaining on their card, while the new order total is above $1,160. They want to know whether payment can be split across another card. If not, identify the most expensive item and its price and see whether it can be cancelled. If that is not possible, check whether changing every item to its cheapest option would bring the total to $1,131; make that change if it does. If the total cannot be brought within the available credit, the customer asks to cancel the order so they can reorder."
+    },
+    {
+      "id": "tau-retail-37",
+      "task_id": "37",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Resolve an order total above the available card balance",
+      "summary": "The order exceeds the card's $1,150 available credit and totals more than $1,160. Ask about splitting payment; otherwise consider removing the most expensive item, switching all items to their cheapest options and applying that change if it reaches $1,150, or cancelling the order.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer has $1,150 of credit remaining on their card, while the new order total is above $1,160. They want to know whether payment can be split across another card. If not, identify the most expensive item and its price and see whether it can be cancelled. If that is not possible, check whether changing every item to its cheapest option would bring the total to $1,150; if so, make the change. If the total cannot be brought within the available credit, the customer asks to cancel the order so they can reorder."
+    },
+    {
+      "id": "tau-retail-38",
+      "task_id": "38",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Resolve an order total above the available card balance",
+      "summary": "The order exceeds the card's $950 available credit and totals more than $1,100. Ask about splitting payment; otherwise consider removing the most expensive item, switching all items to their cheapest options to reach $950, or cancelling the order, in that order.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer has $950 of credit remaining on their card, while the new order total is above $1,100. They want to know whether payment can be split across another card. If not, identify the most expensive item and its price and see whether it can be cancelled. If that is not possible, check whether changing every item to its cheapest option would bring the total to $950. If it cannot, the customer asks to cancel the order so they can reorder."
+    },
+    {
+      "id": "tau-retail-39",
+      "task_id": "39",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Update a moved customer's address and find a T-shirt",
+      "summary": "Update the address after a move from Florida to Phoenix, using the address on a recent order because the customer does not want to provide it again. Also find the cheapest currently available T-shirt and explain whether it can be ordered through customer support.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer has moved from Florida to Phoenix but their account still has the old address. They want the address updated using the current address shown in a recent order and do not want to provide that address again. They also want to know the price of the cheapest currently available T-shirt and whether it can be ordered through customer support."
+    },
+    {
+      "id": "tau-retail-40",
+      "task_id": "40",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Check gift-card balance and recent-order payment",
+      "summary": "Report the gift-card balance and whether the recent order was paid with Visa, Mastercard or Amex. Check whether the gift card can be applied; if not, change the payment method to Visa.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to know their gift-card balance and whether their recent order was paid with Visa, Mastercard or Amex. They also ask whether the gift-card balance can be applied to that order. If it cannot, change the payment method to Visa."
+    },
+    {
+      "id": "tau-retail-41",
+      "task_id": "41",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Check an address and find an easier jigsaw puzzle",
+      "summary": "For account mei_patel_7272, check a possibly incorrect address and, if needed, correct the profile and all order addresses. Also change the 1,000-piece intermediate jigsaw to the easiest option with the fewest pieces; address and puzzle requests should be handled together.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer using account mei_patel_7272 has two requests: check whether the address entered at signup is correct and, if necessary, update both the profile and all order addresses; and replace a 1,000-piece intermediate jigsaw with the easiest option available, with the fewest pieces. They want both matters addressed together."
+    },
+    {
+      "id": "tau-retail-42",
+      "task_id": "42",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Check an address and update an unshipped jigsaw order",
+      "summary": "For account mei_patel_7272, check a possibly incorrect address and, if needed, correct the profile and all order addresses. Then check whether the jigsaw has shipped; if not, change it to the easiest option with the fewest pieces. PayPal is the usual payment method.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer using account mei_patel_7272 wants to check whether the address entered at signup is correct and, if necessary, update both the profile and all order addresses. Then check the jigsaw order's shipping status. If it has not shipped, change it to the easiest jigsaw available, with the fewest pieces. The customer normally uses PayPal."
+    },
+    {
+      "id": "tau-retail-43",
+      "task_id": "43",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Investigate a daughter's delivery and update the profile address",
+      "summary": "Identify where the daughter's order was sent, provide its tracking number and confirm whether it is still in transit. Also check the tablet's storage capacity and set the profile's default address to the daughter's address.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer ordered items for their daughter, who has not received them. They want to know the delivery address, the tracking number and whether the order remains in transit. They also want to check the storage capacity of the tablet they ordered and update their default profile address to their daughter's address."
+    },
+    {
+      "id": "tau-retail-44",
+      "task_id": "44",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Replace the desk lamp in order W9300146",
+      "summary": "Change the desk lamp in order W9300146 to the cheapest available desk lamp, credit any price difference to a gift card, and report the total amount returned.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to replace the desk lamp in order W9300146 with the cheapest desk lamp available. Credit any price difference to a gift card and calculate the total amount the customer will receive back."
+    },
+    {
+      "id": "tau-retail-45",
+      "task_id": "45",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a robotic vacuum for a canister model",
+      "summary": "Exchange a robotic vacuum from recent order reference 9502127 for a canister model in the same product line. If several replacements are available, choose the bagless option; request a gift card for the price difference if possible. The reference may be missing its leading W.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to exchange a robotic vacuum cleaner from a recent order for a canister-based model in the same product line. The order reference they provide is 9502127; if it does not match, it may be missing a leading W. If multiple replacement options are available, select the bagless version. The customer prefers the price difference as a gift card rather than a refund to the original payment method, if available."
+    },
+    {
+      "id": "tau-retail-46",
+      "task_id": "46",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return an air purifier and robotic vacuum",
+      "summary": "Return an air purifier and the robotic vacuum from the order identified first by reference 9502126. If that reference is incorrect, the customer will correct it to 9502127; either may be missing a leading W. Provide the expected refund total and requested three-day timing, then report the amount paid for the remaining items.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to return an air purifier and the robotic vacuum cleaner from the same recent order. The first order reference they provide is 9502126; if that is incorrect, they will correct it to 9502127. The reference may be missing a leading W. They ask for the refund within three days and want the expected refund amount. After the return, report the total paid for the remaining items in that order."
+    },
+    {
+      "id": "tau-retail-47",
+      "task_id": "47",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return an air purifier and canister vacuum",
+      "summary": "Return an air purifier and the canister vacuum from the order identified first by reference 9502126. If that reference is incorrect, the customer will correct it to 9502127; either may be missing a leading W. Provide the expected refund total and requested three-day timing, then report the amount paid for the remaining items.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to return an air purifier and the canister vacuum cleaner from the same recent order. The first order reference they provide is 9502126; if that is incorrect, they will correct it to 9502127. The reference may be missing a leading W. They ask for the refund within three days and want the expected refund amount. After the return, report the total paid for the remaining items in that order."
+    },
+    {
+      "id": "tau-retail-48",
+      "task_id": "48",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return a faulty air purifier and check vacuum eligibility",
+      "summary": "Return the received air purifier because it does not work well and refund the original payment method. Check whether the vacuum cleaner can be returned, but do not process a vacuum return yet.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer says a received air purifier does not work well and wants to return it, with the refund sent to the original payment method. They also want to know whether the vacuum cleaner can be returned, but they have not decided and do not want that return processed yet."
+    },
+    {
+      "id": "tau-retail-49",
+      "task_id": "49",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a wireless earbud for a cheaper alternative",
+      "summary": "Exchange the mistakenly ordered IPX7 wireless earbud for the cheapest earbud in the same order, matching the water-resistance level of the customer's other wireless earbuds.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer ordered an IPX7 wireless earbud by mistake and does not need that water-resistance level. They want to exchange it for the cheapest wireless earbud among the other items in that order, with the same water-resistance level as the wireless earbuds they already purchased."
+    },
+    {
+      "id": "tau-retail-50",
+      "task_id": "50",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Reinstate a cancelled order for prompt delivery",
+      "summary": "The customer wants a previously cancelled order reinstated and all its original items delivered as soon as possible.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to undo the cancellation of a previously placed order and have the order delivered as soon as possible, including all items that were originally included."
+    },
+    {
+      "id": "tau-retail-51",
+      "task_id": "51",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return a digital camera for a refund",
+      "summary": "Return the received digital camera and refund the original payment method. The customer believes the order number may be W8855135 but is not certain.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants to return a digital camera they received and have the refund sent to the original payment method. They believe the order number is W8855135 but are not sure, so the order should be identified before the return is handled."
+    },
+    {
+      "id": "tau-retail-52",
+      "task_id": "52",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a camera for maximum zoom",
+      "summary": "The camera's zoom is insufficient for bird-watching. Exchange it for a model with the maximum zoom while keeping every other specification the same; price is not a concern, and PayPal is preferred for any additional payment.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer uses their digital camera for bird-watching but finds its zoom range insufficient. They want an exchange for a camera with the maximum available zoom while keeping all other specifications unchanged. Price is not a concern, and any additional payment should be charged to PayPal. The customer wants the exchange completed as soon as possible."
+    },
+    {
+      "id": "tau-retail-53",
+      "task_id": "53",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Refund a bicycle damaged in delivery",
+      "summary": "The bicycle arrived damaged and the customer wants a prompt refund to the original credit card.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer reports that an expensive bicycle was damaged during delivery and wants a refund as soon as possible. Credit the refund to the original credit card."
+    },
+    {
+      "id": "tau-retail-54",
+      "task_id": "54",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Cancel or return eligible orders while protecting a boot purchase",
+      "summary": "Cancel or return all eligible purchases, except the boots. If cheaper boots of the same size and material are available, exchange for them; otherwise keep the boot order and cancel other items. Report the total refund.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer facing financial difficulty wants to cancel pending purchases and return received purchases wherever possible, while keeping the boots they value. They will exchange the boots only for a cheaper pair in the exact same size and material. If no such cheaper pair is available, keep the boot order and cancel the other items. At the end, calculate the total expected refund."
+    },
+    {
+      "id": "tau-retail-55",
+      "task_id": "55",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Cancel undelivered orders and review delivered items for return",
+      "summary": "Cancel orders that have not arrived. For delivered orders, list the items for the customer before proceeding with returns for those items.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer facing financial difficulty wants to cancel orders that have not yet arrived. For delivered orders, they do not remember which items were purchased, so first list those items for review and then proceed with the requested returns."
+    },
+    {
+      "id": "tau-retail-56",
+      "task_id": "56",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Track an air purifier and explore cancellation or replacement",
+      "summary": "Check when the air purifier is expected. If it has not shipped, try cancelling it; if it cannot be cancelled separately, consider the cheapest available purifier and a gift-card refund. If the replacement or gift-card refund is unavailable, take no action.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants an estimated arrival date for an air purifier. If it has not shipped, they want to cancel that item. If it cannot be cancelled separately, they want to replace it with the cheapest available air purifier and receive the refund to the gift card associated with their account. If the replacement cannot be made or the refund cannot be issued to a gift card, leave the order unchanged."
+    },
+    {
+      "id": "tau-retail-57",
+      "task_id": "57",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Order arrival and conditional cancellation",
+      "summary": "Check arrival for W4284542. If unshipped, cancel only the purifier; cancel the full order only with a gift-card refund.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks about the expected arrival of order W4284542. If it has not shipped, the customer prefers cancellation of only the air purifier. If an item-level cancellation is unavailable, the customer accepts cancellation of the full order only with a gift-card refund; otherwise, nothing should be cancelled."
+    },
+    {
+      "id": "tau-retail-58",
+      "task_id": "58",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Change a coffee machine and laptop",
+      "summary": "Exchange the coffee machine using pressure preference 8, then 9, then 7 bar; leave it if none is available. Replace the laptop with the cheapest i7-or-higher model.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer has received an order containing a coffee machine and a laptop and requests changes to both. The coffee machine should retain its capacity and type, with pressure changed to 8 bar; if unavailable, 9 bar is preferred, then 7 bar. If none is available, the coffee machine should remain unchanged. The laptop should be exchanged for the least expensive available model with an i7 processor or higher, regardless of other specifications. For any price difference, gift-card payment is preferred despite the customer’s reluctance to pay more; a credit card is the fallback."
+    },
+    {
+      "id": "tau-retail-59",
+      "task_id": "59",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Review two orders and update a delivery address",
+      "summary": "Compare pending W2702727 and W8268610; cancel the older unless processing within five days is guaranteed. Update W2702727’s Springfield address and confirm totals.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks why orders W2702727 and W8268610 are both pending despite being placed at different times, with one placed much earlier in the year. The older order should be cancelled unless processing within five days can be guaranteed, and the customer wants the refund total confirmed if it is cancelled. For W2702727, the customer requests delivery to 1234 Elm St, Springfield, IL 62701, because a move will occur before delivery next month. The updated address and order total after the change should be confirmed."
+    },
+    {
+      "id": "tau-retail-60",
+      "task_id": "60",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Blue earbuds with a conditional water-resistance preference",
+      "summary": "Conditional variant: only if multiple options are offered, prefer earbuds without water resistance. Request blue at the same or lower price and verify; give details upfront.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests a blue replacement for the wireless earbuds in W5061109, at the same or a lower price, and asks for the price comparison to be verified. All requested details should be included in the opening message. Only if multiple replacement options are offered should the customer’s preference for the option without water resistance apply."
+    },
+    {
+      "id": "tau-retail-61",
+      "task_id": "61",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Blue earbuds at the same or lower price",
+      "summary": "No water-resistance preference is specified. Request blue earbuds at the same or lower price and resolve the change promptly.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests a blue replacement for the wireless earbuds in W5061109 at the same or a lower price and asks for the change to be resolved as soon as possible. All requested details should be included up front."
+    },
+    {
+      "id": "tau-retail-62",
+      "task_id": "62",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Bluetooth speaker replacement threshold: under $100",
+      "summary": "Replacement threshold is under $100. Check the existing speaker and cancel it if over $300; add the cheapest qualifying replacement only if available.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer first asks the company to identify a famous poem from its first line; if that request is declined, the conversation should continue with an order enquiry. The customer asks for the purchased Bluetooth speaker’s price and battery life, and wants it cancelled if it cost more than $300. A replacement may be added only if a speaker under $100 is available, in which case the least expensive qualifying option should be selected and the revised total confirmed. The full order must not be cancelled; if removing the purchased speaker would require cancelling the whole order, it should remain in place for a possible later return."
+    },
+    {
+      "id": "tau-retail-63",
+      "task_id": "63",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Bluetooth speaker replacement threshold: under $300",
+      "summary": "Replacement threshold is under $300. Check the existing speaker and cancel it if over $300; add the cheapest qualifying replacement if available.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer first asks the company to identify a famous poem from its first line; if that request is declined, the conversation should continue with an order enquiry. The customer asks for the purchased Bluetooth speaker’s price and battery life, and wants it cancelled if it cost more than $300. A replacement may be added only if a speaker under $300 is available, in which case the least expensive qualifying option should be selected and the revised total confirmed. The full order must not be cancelled; if removing the purchased speaker would require cancelling the whole order, it should remain in place for a possible later return."
+    },
+    {
+      "id": "tau-retail-64",
+      "task_id": "64",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a camera for the highest-resolution waterproof option",
+      "summary": "Exchange the camera for the highest-resolution waterproof model available at or below the price already paid.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests an exchange of the camera for the highest-resolution waterproof model available at no more than the amount paid for the original purchase."
+    },
+    {
+      "id": "tau-retail-65",
+      "task_id": "65",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a bookshelf for a similarly priced camera",
+      "summary": "Exchange the most recent order’s bookshelf for the closest-priced camera that does not cost more.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests an exchange of the bookshelf in the most recent order for the camera whose price is closest to, but not greater than, the bookshelf’s price."
+    },
+    {
+      "id": "tau-retail-66",
+      "task_id": "66",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Replace a luggage set with a coat",
+      "summary": "Replace the luggage set with a coat; if order modification is unavailable, return it. Cancel the full order if any issue arises.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants the luggage set replaced with a coat. If an order change is unavailable, the customer prefers a return of the luggage set. If any issue arises, the customer requests cancellation of the full order."
+    },
+    {
+      "id": "tau-retail-67",
+      "task_id": "67",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Check the latest order total",
+      "summary": "Confirm the amount paid for the most recent order; its order date is uncertain.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks the company to confirm the amount paid for the most recently placed order. The date of that order is uncertain."
+    },
+    {
+      "id": "tau-retail-68",
+      "task_id": "68",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Check the latest order total",
+      "summary": "Confirm the amount paid for the most recent order; its order date is uncertain.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks the company to confirm the amount paid for the most recently placed order. The date of that order is uncertain."
+    },
+    {
+      "id": "tau-retail-69",
+      "task_id": "69",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return a recently received laptop",
+      "summary": "Return a recently received laptop for a full refund; purchase date is uncertain, around April 2023. If return is unavailable, check cancellation.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests a full refund for a recently received laptop after finding a better deal elsewhere. The purchase was probably around April 2023, but the date is uncertain. If a return is unavailable, the customer asks whether cancellation is possible."
+    },
+    {
+      "id": "tau-retail-70",
+      "task_id": "70",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a helmet for a larger, better-ventilated option",
+      "summary": "Exchange the undersized helmet for medium with high ventilation, preferring blue if offered. Prefer original payment for any difference and confirm today’s amount.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer says the recently received helmet is too small and requests a medium-size helmet with high ventilation. Blue is preferred if several colors are available. For a price difference, the original payment method is preferred, and the customer wants to know the amount due today."
+    },
+    {
+      "id": "tau-retail-71",
+      "task_id": "71",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Address and item changes with a late payment-method switch",
+      "summary": "Change the address and two items; at confirmation switch gift card to PayPal and proceed with only the backpack change.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests that an order be moved from the son’s Washington, DC address to the default Charlotte address, which is in the profile and should not be volunteered. The customer also requests a black desk lamp and a medium polyester backpack, preferring grey if multiple backpack colors are available. If asked for a payment method, the initial choice is gift card; at the confirmation stage the choice changes to PayPal, and only the backpack modification should proceed."
+    },
+    {
+      "id": "tau-retail-72",
+      "task_id": "72",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Item-first opening and late payment-method switch",
+      "summary": "Mention both the item changes and address change together, item changes first; at confirmation switch gift card to PayPal and modify only the backpack.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests an address change from the son’s Washington, DC address to the default Charlotte address, plus changes to a desk lamp and backpack. Both requests should be mentioned together in the opening message, with the item changes first. The customer initially selects gift card, then switches to PayPal at confirmation and proceeds with only the backpack change; the address should not be volunteered."
+    },
+    {
+      "id": "tau-retail-73",
+      "task_id": "73",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return everything except the coffee machine",
+      "summary": "Return everything in the recent order except the coffee machine.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests returns for every item in a recently purchased order except the coffee machine."
+    },
+    {
+      "id": "tau-retail-74",
+      "task_id": "74",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a laptop for an i9 model and cancel a pending order",
+      "summary": "Exchange the laptop for i9, preferring 256GB SSD and silver; also cancel the pending five-item order whose ID is unknown.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests an exchange of a recently purchased laptop for an i9 processor model, preferring a 256GB SSD if multiple storage options exist and silver if multiple colors exist. The customer also asks to cancel a pending five-item order but does not know its order number."
+    },
+    {
+      "id": "tau-retail-75",
+      "task_id": "75",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange blue earbuds for black earbuds",
+      "summary": "For W6908222, exchange blue 8-hour IPX4 earbuds for black 4-hour earbuds without water resistance.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "For W6908222, a customer requests exchange of blue wireless earbuds with an eight-hour battery and IPX4 water resistance for black earbuds with a four-hour battery and no water resistance."
+    },
+    {
+      "id": "tau-retail-76",
+      "task_id": "76",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Remove a jacket, modify a skateboard, and total past grill purchases",
+      "summary": "Remove a mistaken fleece jacket and modify a skateboard, with full-order cancellation as each change’s fallback; also total past grill purchases.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks to remove a fleece jacket ordered by mistake from a pending order; if that item cannot be removed separately, the full order should be cancelled. The customer also requests a skateboard with maple material, 34-inch length, and graphic design; if that change is unavailable, the order should be cancelled because it is no longer needed. Finally, the customer asks for the total price of all grills purchased in previous orders."
+    },
+    {
+      "id": "tau-retail-77",
+      "task_id": "77",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Increase a perfume to the largest available size",
+      "summary": "Increase the liked perfume to the largest available size.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer has tried a small amount of a recently ordered perfume, likes it, and requests the largest available size."
+    },
+    {
+      "id": "tau-retail-78",
+      "task_id": "78",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Update two orders and cancel a mistaken purchase",
+      "summary": "For W5056519, copy W8277957’s address and exchange the makeup kit; cancel W5995614 as a mistaken order.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests that order W5056519 use the delivery address from W8277957. The Makeup Kit in W5056519, currently light skin tone, professional size, Brand B, should be exchanged for a dark skin tone, Brand A kit. The customer also asks to cancel W5995614 because it was ordered by mistake."
+    },
+    {
+      "id": "tau-retail-79",
+      "task_id": "79",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Change a 500 ml bottle to match a 1 litre bottle",
+      "summary": "Replace a 500 ml bottle with the 1 litre bottle from another order; if unavailable, material may differ but color should match.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer regrets purchasing a 500 ml water bottle and asks to replace it with the 1 litre bottle from another recent order. If the exact item is unavailable, a different material is acceptable, but the color should match the other 1 litre bottle."
+    },
+    {
+      "id": "tau-retail-80",
+      "task_id": "80",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a blue small polyester T-shirt for a red XXL cotton shirt",
+      "summary": "For W7209932, exchange the blue small polyester V-neck T-shirt for red XXL cotton crew neck; use gift card.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "For W7209932, a customer requests exchange of a blue, size S, polyester V-neck T-shirt for a red, size XXL, cotton crew-neck T-shirt. The gift card should be used for the exchange."
+    },
+    {
+      "id": "tau-retail-81",
+      "task_id": "81",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Cancel orders containing items no longer needed",
+      "summary": "Cancel the order containing six no-longer-needed items; cancel the whole order if item-level cancellation is unavailable.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer no longer needs the hiking boots, watch, keyboard, charger, jacket, and running shoes in an order and asks for that order to be cancelled. If those items cannot be cancelled separately, cancelling the full order is acceptable."
+    },
+    {
+      "id": "tau-retail-82",
+      "task_id": "82",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Tablet return fallback: cancel the full order for gift-card refund",
+      "summary": "Fallback requires returning the full order for a gift-card refund if the preferred credit-card refund is unavailable.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks to return the more expensive of two received tablets and refund to the credit card. If a credit-card refund is unavailable, the fallback is to return everything in the order and refund to a gift card."
+    },
+    {
+      "id": "tau-retail-83",
+      "task_id": "83",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Tablet return fallback: gift-card refund",
+      "summary": "Fallback is a gift-card refund only; unlike the other variant, no return of the rest of the order is requested.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks to return the more expensive of two received tablets and refund to the credit card. If a credit-card refund is unavailable, the fallback is a gift-card refund instead; the summary does not request returning the other order items."
+    },
+    {
+      "id": "tau-retail-84",
+      "task_id": "84",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return a tablet, changing the choice at confirmation",
+      "summary": "At confirmation, switch from returning the cheaper tablet for credit-card refund to the more expensive tablet for gift-card refund.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer initially requests return of the less expensive of two received tablets with a credit-card refund. When asked to confirm, the customer changes the request to the more expensive tablet and asks for a gift-card refund."
+    },
+    {
+      "id": "tau-retail-85",
+      "task_id": "85",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a fleece jacket for a large red half-zip",
+      "summary": "Exchange the fleece jacket for a large red half-zip.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests exchange of a fleece jacket for a red fleece jacket in size large with a half-zip closure."
+    },
+    {
+      "id": "tau-retail-86",
+      "task_id": "86",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Change a fleece jacket and default address",
+      "summary": "Change the jacket to red with a half zipper and set the default address to the Washington, DC address in an order.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests that the fleece jacket be changed to red with a half zipper and that the profile’s default address be changed to the Washington, DC address recorded in an existing order. The address should not be volunteered in the conversation."
+    },
+    {
+      "id": "tau-retail-87",
+      "task_id": "87",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Update addresses on pending orders and the profile",
+      "summary": "Change every pending-order address and the profile default to the Washington, DC address recorded in an order.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks to change the delivery address on every pending order and the profile’s default address to the Washington, DC address recorded on an existing order. The address should not be volunteered."
+    },
+    {
+      "id": "tau-retail-88",
+      "task_id": "88",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Change a bookshelf to four feet",
+      "summary": "Change the bookshelf to four feet, retaining material and color; if unavailable, cancel the full order as a mistaken purchase.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests a four-foot bookshelf with the same material and color as the current one. If that size is unavailable, the customer wants the full order cancelled and, if asked for a reason, says it was ordered by mistake."
+    },
+    {
+      "id": "tau-retail-89",
+      "task_id": "89",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Find the least expensive available mechanical keyboard",
+      "summary": "Find the cheapest available mechanical keyboard; exchange if under $200, otherwise return the current keyboard.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks for the least expensive mechanical keyboard currently available and its options. If it costs less than $200, the customer wants to exchange the current keyboard for it; otherwise, the current keyboard should be returned."
+    },
+    {
+      "id": "tau-retail-90",
+      "task_id": "90",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Check a camera’s zoom and change or cancel the order",
+      "summary": "Check for 10x zoom and preserve other options; cancel if unavailable, or if an available 10x model costs over $3,000.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks whether the recently purchased digital camera has 10x zoom. If it does not, the customer requests 10x zoom while keeping other options unchanged. If 10x is unavailable, the order should be cancelled because it is no longer needed; if a 10x model is available but costs more than $3,000, cancel because it was ordered by mistake."
+    },
+    {
+      "id": "tau-retail-91",
+      "task_id": "91",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Skateboard return with conditional e-reader exchange",
+      "summary": "In addition to the skateboards, address the smartwatch and e-reader; exchange the e-reader for the same model if available, otherwise request 32GB.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests return of two poor-quality skateboards for a credit-card refund. If asked to confirm before proceeding, the customer should not agree immediately because the smartwatch and e-reader must also be addressed. The e-reader may be exchanged for the same item if it is available online; if exchange is not allowed, the customer prefers a 32GB e-reader."
+    },
+    {
+      "id": "tau-retail-92",
+      "task_id": "92",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return skateboards, smartwatch, and e-reader",
+      "summary": "Return two poor-quality skateboards for credit-card refund, plus the smartwatch and e-reader; do not confirm the skateboard return immediately.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests return of two poor-quality skateboards with a credit-card refund, as well as the smartwatch and e-reader. If asked to confirm the skateboard returns, the customer should not agree immediately."
+    },
+    {
+      "id": "tau-retail-93",
+      "task_id": "93",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Laptop to exchange: 15-inch, 32GB",
+      "summary": "Exchange the 15-inch, 32GB laptop for i7, 8GB memory, and 1TB SSD.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests an i7 laptop with 8GB memory and a 1TB SSD in exchange for the received laptop. If identification is needed, the current laptop is 15 inches with 32GB memory."
+    },
+    {
+      "id": "tau-retail-94",
+      "task_id": "94",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Laptop to exchange: 15-inch, 16GB",
+      "summary": "Exchange the 15-inch, 16GB laptop for i7, 8GB memory, and 1TB SSD.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests an i7 laptop with 8GB memory and a 1TB SSD in exchange for the received laptop. If identification is needed, the current laptop is 15 inches with 16GB memory."
+    },
+    {
+      "id": "tau-retail-95",
+      "task_id": "95",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange two laptops and confirm the total due",
+      "summary": "Exchange two 15-inch laptops for i7, 8GB memory, 1TB SSD models; confirm total due today.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests exchange of two laptops for i7 models with 8GB memory and 1TB SSDs. If asked which laptops, the current models are 15 inches. The customer also asks to confirm the total amount due today."
+    },
+    {
+      "id": "tau-retail-96",
+      "task_id": "96",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Address and speaker change",
+      "summary": "Change the LA order to the recorded New York address and exchange its speaker for the cheapest green model.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests that the Los Angeles order be sent to the New York address recorded in another order, without volunteering the address, and asks to exchange its Bluetooth Speaker for the least expensive green model."
+    },
+    {
+      "id": "tau-retail-97",
+      "task_id": "97",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Same changes, with the speaker request first",
+      "summary": "Same address and speaker changes as the related variant, but request both together with the speaker exchange first.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants both changes included in the same opening message, with the speaker exchange mentioned first. The Los Angeles order should use the New York address recorded in another order, and its Bluetooth Speaker should be exchanged for the least expensive green model. The address should not be volunteered."
+    },
+    {
+      "id": "tau-retail-98",
+      "task_id": "98",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Puzzle preference: animal theme; payment: other card",
+      "summary": "Prefer animal theme for the larger same-difficulty puzzle; use the other card if asked and cancel the skateboard in another order.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests three exchanges together: a larger-frame bicycle for a child (a mountain bike is acceptable), a same-difficulty puzzle with 1,000 more pieces (prefer animal theme), and a slightly lower-resolution camera with other options unchanged. If asked to confirm, the customer prefers the other card for payment or refund, and also wants the skateboard in another order cancelled."
+    },
+    {
+      "id": "tau-retail-99",
+      "task_id": "99",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Puzzle preference: art theme; use Visa",
+      "summary": "Prefer art theme for the larger same-difficulty puzzle; use Visa for both orders and cancel only the skateboard.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests three exchanges together: a larger-frame bicycle for a child (a mountain bike is acceptable), a same-difficulty puzzle with 1,000 more pieces (prefer art theme), and a slightly lower-resolution camera with other options unchanged. Use Visa for both orders, and cancel only the skateboard in one order."
+    },
+    {
+      "id": "tau-retail-100",
+      "task_id": "100",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return luggage and a skateboard; exchange and return other items",
+      "summary": "Return the luggage for the same item in red and the skateboard for a 34-inch custom design; also return hiking boots.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests return of a luggage set and replacement with the exact same item in red. The skateboard in that order should also be returned for a new one with 34-inch length and custom design. The credit card should be used for the pending-order modification. The customer also requests return of the hiking boots."
+    },
+    {
+      "id": "tau-retail-101",
+      "task_id": "101",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Purifier is in an order with a speaker",
+      "summary": "The purifier is in an order with a speaker; change it to large/night mode with HEPA, alongside the watch and address changes.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks to change the address on an order containing two watches to the New York address recorded in another order, without volunteering it, and to change the silicone watch to metal (prefer white). Separately, the air purifier is in an order with a speaker; it should be changed to large size with night mode and HEPA filter."
+    },
+    {
+      "id": "tau-retail-102",
+      "task_id": "102",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Purifier was received with sneakers",
+      "summary": "The purifier was received with sneakers; exchange it for large/night mode with HEPA, alongside the watch and address changes.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks to change the address on an order containing two watches to the New York address recorded in another order, without volunteering it, and to change the silicone watch to metal (prefer white). The air purifier was received with sneakers and should be exchanged for a large, night-mode model that retains the HEPA filter."
+    },
+    {
+      "id": "tau-retail-103",
+      "task_id": "103",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Bookshelf and puzzle are from the same order",
+      "summary": "Return the bookshelf and jigsaw from the same order, plus the backpack received with the vacuum; update a pending order and provide tracking.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants the bookshelf and jigsaw returned and specifies that both are from the same order; this should be stated at the beginning. The customer also asks to return the backpack received with the vacuum cleaner, change a pending order to the default Chicago address and a red item, and provide the tracking number for the cancelled order."
+    },
+    {
+      "id": "tau-retail-104",
+      "task_id": "104",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Bookshelves and puzzles are from different orders",
+      "summary": "Return bookshelves and puzzles from different orders, plus the vacuum-order backpack; update a pending order and provide tracking.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer wants all bookshelves and jigsaw puzzles returned and specifies that these items are from different orders; this should be stated at the beginning. The customer also asks to return the backpack received with the vacuum cleaner, change the pending order’s item to red, and change its delivery address to the default Chicago home. The address should not be volunteered. The tracking number for the cancelled order should be provided."
+    },
+    {
+      "id": "tau-retail-105",
+      "task_id": "105",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange two tea kettles",
+      "summary": "For W4316152, exchange two glass 2-litre induction kettles: one to ceramic/gas and one to 1.5-litre/gas.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "For W4316152, a customer requests exchange of two glass, 2-litre, induction-compatible tea kettles. One should become ceramic with gas-stovetop compatibility; the other should become 1.5 litres with gas-stovetop compatibility."
+    },
+    {
+      "id": "tau-retail-106",
+      "task_id": "106",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Exchange a T-shirt for a smaller cotton option",
+      "summary": "Exchange the oversized T-shirt for one size smaller, retaining cotton; prefer black if available.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer says the T-shirt is too large and requests a replacement one size smaller, retaining the cotton feel. Black is preferred if multiple colors are available."
+    },
+    {
+      "id": "tau-retail-107",
+      "task_id": "107",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Replace worn hiking boots and exchange a jigsaw puzzle",
+      "summary": "Replace apparently worn hiking boots with the same specifications; fallback is size 9 leather waterproof boots. Also change the puzzle theme and piece count.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer says the received hiking boots appear to have been worn and requests a new pair with the same specifications. If exchange is not allowed, the preferred alternative is size 9 leather boots that are waterproof. The customer also requests a fancier-theme jigsaw with 500 fewer pieces and the same difficulty."
+    },
+    {
+      "id": "tau-retail-108",
+      "task_id": "108",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Return items from a recently delivered order",
+      "summary": "Return all items in a recently delivered order except the tablet; specifically include the e-reader.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer requests return of every item in a recently delivered order except the tablet. The e-reader in the order is specifically included in the return request."
+    },
+    {
+      "id": "tau-retail-109",
+      "task_id": "109",
+      "scenario_id": "TAU_RETAIL",
+      "title": "The new-address order contains a luggage set",
+      "summary": "The luggage set identifies the new-address order; correct another order and the default address, and exchange the tablet for the cheapest option.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer in Houston has moved to a new home on Elm Avenue. A luggage set was sent to the new address, while another order went to the old address. The customer asks for the incorrectly addressed order and profile default address to be updated to the new home, without disclosing the address in conversation, and also asks to exchange the tablet for the least expensive option."
+    },
+    {
+      "id": "tau-retail-110",
+      "task_id": "110",
+      "scenario_id": "TAU_RETAIL",
+      "title": "The new-address order contains a tablet",
+      "summary": "The tablet identifies the new-address order; correct another order and the default address, and exchange the tablet for the cheapest option.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer in Houston has moved to a new home on Elm Avenue. A tablet was sent to the new address, while another order went to the old address. The customer asks for the incorrectly addressed order and profile default address to be updated to the new home, without disclosing the address in conversation, and also asks to exchange the tablet for the least expensive option."
+    },
+    {
+      "id": "tau-retail-111",
+      "task_id": "111",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Laptop change by specifications",
+      "summary": "Configure the laptop by specs (i5, 256GB SSD, space grey); also change the watch dial to black while keeping leather strap.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks for the laptop order to use the New York address in the order profile, without volunteering it. The laptop should become an i5 with 256GB SSD and space grey color; the watch should have a black dial and retain its leather strap."
+    },
+    {
+      "id": "tau-retail-112",
+      "task_id": "112",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Laptop change by item number",
+      "summary": "Configure the laptop by item number 9844888101; also change the watch dial to black while keeping leather strap.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks for the laptop order to use the New York address in the order profile, without volunteering it. Change the laptop to item number 9844888101; the watch should have a black dial and retain its leather strap."
+    },
+    {
+      "id": "tau-retail-113",
+      "task_id": "113",
+      "scenario_id": "TAU_RETAIL",
+      "title": "Cancel all pending orders",
+      "summary": "Cancel every pending order.",
+      "role": "Customer support",
+      "dependencies": [
+        "ERPNext",
+        "Email"
+      ],
+      "kind": "simulation",
+      "benchmarks": [
+        "τ-bench"
+      ],
+      "description": "A customer asks the company to cancel all pending orders."
+    }
+  ]
+}

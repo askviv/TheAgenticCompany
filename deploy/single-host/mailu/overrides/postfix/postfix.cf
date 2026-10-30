@@ -1,0 +1,15 @@
+# Local test mail only: map explicit recipients to smtp4dev if configured.
+# The mounted map is intentionally empty until the smtp4dev endpoint is confirmed.
+# Mailu compiles each mounted *.map file into its configured Postfix map backend.
+# Keep the two built-in Mailu lookups so user-configured relay domains still work.
+transport_maps = lmdb:/etc/postfix/recipient-transport.map, lmdb:/etc/postfix/transport.map, \${podop}transport
+
+# Permit only the authenticated smtp4dev relay account to submit this one exact
+# Viv From address. Mailu's normal sender-login map remains authoritative for
+# every other sender.
+smtpd_sender_login_maps = lmdb:/etc/postfix/viv-sender-login.map, \${podop}senderlogin
+
+# Prevent accidental direct delivery to public MX hosts. Exact recipients listed
+# in recipient-transport.map still use their explicit transport above.
+default_transport = error:5.7.1 External email delivery is disabled on this test server
+relay_transport = error:5.7.1 External email delivery is disabled on this test server

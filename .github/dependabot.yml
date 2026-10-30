@@ -1,0 +1,65 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dependency-updates:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dependency-updates:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /servers/simulation
+    schedule:
+      interval: weekly
+    groups:
+      dependency-updates:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /servers/simulation/tau2_actor_runtime
+    schedule:
+      interval: weekly
+    groups:
+      dependency-updates:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /servers/company
+    schedule:
+      interval: weekly
+    groups:
+      dependency-updates:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /third_party/ecommercebench
+    schedule:
+      interval: weekly
+    groups:
+      dependency-updates:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /third_party/coffeebench/upstream
+    schedule:
+      interval: weekly
+    groups:
+      dependency-updates:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /servers/experiments/web
+    schedule:
+      interval: weekly
+    groups:
+      dependency-updates:
+        patterns: ["*"]

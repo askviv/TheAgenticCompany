@@ -1,0 +1,1 @@
+{"spec":{"template":{"spec":{"hostAliases":[{"ip":"192.0.2.10","hostnames":["mail.company.example.test"]}]}}}}

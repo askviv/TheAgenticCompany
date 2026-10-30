@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<resource xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
+          xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3"
+          xmlns:rc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/com.evolveum.polygon.scimrest.connector-rocketchat/com.evolveum.polygon.rocketchat.RocketChatConnector"
+          xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
+          oid="57a19684-cfe8-4f21-b7b4-0fb02b5ec001">
+    <name>Rocket.Chat accounts</name>
+    <description>Reads existing Rocket.Chat accounts by immutable user ID, creates accounts for newly assigned employees, and updates only centrally managed display name and email. Username, roles, account state, password, and immutable ID remain unchanged.</description>
+    <connectorRef type="c:ConnectorType">
+        <filter>
+            <q:text>connectorType = "com.evolveum.polygon.rocketchat.RocketChatConnector" and connectorVersion = "0.2.0-tac.1"</q:text>
+        </filter>
+    </connectorRef>
+    <connectorConfiguration>
+        <icfc:configurationProperties>
+            <rc:baseAddress>https://chat.company.example.test/api/v1</rc:baseAddress>
+            <rc:restTestEndpoint>/users.list?count=1</rc:restTestEndpoint>
+            <rc:timeoutSeconds>20</rc:timeoutSeconds>
+        </icfc:configurationProperties>
+    </connectorConfiguration>
+    <schemaHandling>
+        <objectType>
+            <kind>account</kind>
+            <displayName>Rocket.Chat user</displayName>
+            <default>true</default>
+            <delineation>
+                <objectClass>ri:User</objectClass>
+            </delineation>
+            <attribute>
+                <ref>ri:username</ref>
+                <outbound>
+                    <strength>weak</strength>
+                    <source><path>$focus/name</path></source>
+                </outbound>
+            </attribute>
+            <attribute>
+                <ref>ri:name</ref>
+                <outbound><strength>normal</strength><source><path>$focus/fullName</path></source></outbound>
+            </attribute>
+            <attribute>
+                <ref>ri:email</ref>
+                <outbound><strength>normal</strength><source><path>$focus/emailAddress</path></source></outbound>
+            </attribute>
+            <attribute>
+                <ref>ri:roles</ref>
+                <outbound><strength>weak</strength><expression><value>user</value></expression></outbound>
+            </attribute>
+            <credentials>
+                <password>
+                    <outbound>
+                        <strength>weak</strength>
+                        <source><path>$focus/credentials/password/value</path></source>
+                        <condition><script><code>operation == 'add'</code></script></condition>
+                    </outbound>
+                </password>
+            </credentials>
+        </objectType>
+    </schemaHandling>
+    <capabilities xmlns:cap="http://midpoint.evolveum.com/xml/ns/public/resource/capabilities-3">
+        <configured>
+            <cap:liveSync><cap:enabled>false</cap:enabled></cap:liveSync>
+            <cap:update><cap:enabled>true</cap:enabled></cap:update>
+            <cap:delete><cap:enabled>false</cap:enabled></cap:delete>
+            <cap:script><cap:enabled>false</cap:enabled></cap:script>
+        </configured>
+    </capabilities>
+</resource>

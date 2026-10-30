@@ -1,0 +1,122 @@
+{
+  "admin-arrange-meeting-rooms": {
+    "summary": "Find the fewest rooms needed for six teams’ meetings next Tuesday.",
+    "description": "Find the minimum number of conference rooms needed for all meetings next Tuesday. A room is available for another meeting as soon as the previous meeting ends.\n\nEngineering: 9:00–10:30 AM, 12:00–1:00 PM, and 2:00–3:00 PM.\nMarketing: 9:15–10:00 AM, 11:30 AM–12:30 PM, and 2:30–3:30 PM.\nSales: 9:45–11:00 AM, 11:30 AM–12:15 PM, and 2:00–3:30 PM.\nHR: 10:45–11:30 AM and 1:00–2:00 PM.\nProduct: 11:00 AM–12:30 PM and 1:30–3:00 PM.\nCustomer Support: 11:30 AM–12:15 PM and 1:15–2:00 PM.\n\nSave only the room count in ans.txt, without calculation steps, and send the answer to Chen Xinyi on Rocket.Chat."
+  },
+  "admin-ask-for-meeting-feedback": {
+    "summary": "Ask attendees for feedback and a 1–5 score, then organize the responses in a workbook.",
+    "description": "Ask Huang Jie for the names of everyone who attended the all-hands meeting. Contact each attendee to collect their feedback and a score from 1 to 5.\n\nCreate meeting_feedback.xlsx with the columns Name, Feedback, and Score. Include a row for every attendee. If someone does not respond, keep their name in the workbook and leave Feedback and Score blank."
+  },
+  "admin-ask-for-upgrade-reimbursement": {
+    "summary": "Review Chen Xinyi’s expense record and pursue reimbursement, including an escalation if it is late.",
+    "description": "Find Chen Xinyi’s expense record in Documents/Financials/expenses and ask Chen to reimburse the expense. If Chen declines because the request is past the deadline, ask CTO Sarah Johnson about the late-bill procedure and whether half of the expense can be reimbursed."
+  },
+  "admin-check-employees-budget-and-reply": {
+    "summary": "Price equipment requests from three department managers and confirm whether each $10,000 budget is sufficient.",
+    "description": "Collect each manager’s requested equipment and quantities: Jessica Lee for Marketing, Huang Jie for Product, and Chen Xinyi for HR. Use products.pdf in Documents/Administrative Specialist to determine prices.\n\nEach department has a $10,000 equipment budget. Calculate each department’s total requested cost and tell its manager the total and whether the budget is sufficient."
+  },
+  "admin-check-employees-budget-and-reply-2": {
+    "summary": "Compare three employees’ equipment requests with their remaining budgets after first-half spending.",
+    "description": "Collect equipment names and quantities requested by Huang Jie, Sophia Rodriguez, and Mike Chen. Use products.pdf in Documents/Administrative Specialist for prices. Ask Chen Xinyi for each person’s total budget and expenses from the first half of this month.\n\nCalculate whether each person’s remaining budget covers their request, then share the result with each employee."
+  },
+  "admin-check-employees-budget-and-reply-and-record": {
+    "summary": "Price four employees’ equipment requests, check department budgets, and record any reductions.",
+    "description": "Collect equipment names and quantities from Li Ming and Zhang Wei in Database, and Huang Jie and Sophia Rodriguez in Product. Use products.pdf in Documents/Administrative Specialist to price the requests and tell each person the total cost.\n\nThe Database Department has a $10,000 budget and Product has a $5,000 budget. Check whether each department can cover its requests. If a department is over budget, contact everyone in that department and ask them to reduce their expenses. Record any changes in result.txt as “Name removed Equipment” (for example, “Chen Xinyi removed Printer”). Do not create a change record if no one changes a request."
+  },
+  "admin-collect-requests-and-compute-total-price": {
+    "summary": "Collect equipment and quantity requests from four colleagues and calculate the total costs.",
+    "description": "Ask Huang Jie, Sophia Rodriguez, Mike Chen, and Sarah Johnson which equipment they need and how many of each item. Use products.pdf in Documents/Administrative Specialist to find prices. Calculate the requested costs and record the totals in result.txt."
+  },
+  "admin-employee-info-reconciliation": {
+    "summary": "Bring employees.csv up to date with current employee details and correct any errors.",
+    "description": "Use employees.csv as the starting employee directory. The file may omit current employees or contain outdated or incorrect details. Confirm the current employee list and any needed information with colleagues on Rocket.Chat, then update employees.csv so it includes every current employee with accurate information."
+  },
+  "admin-get-best-vendor-quote": {
+    "summary": "Compare vendor quotes against the requirements and share a shortlist of qualifying prices.",
+    "description": "Ask Emma Lewis where she saved the server vendor quotes and discuss the server requirements with Sarah Johnson. Review the quotes and identify only companies that meet the requirements.\n\nCreate valid-quotes.csv with the columns name and price, and save it in Documents/Administrative Specialist. Create a public share link that anyone can access and provide the link for the handoff."
+  },
+  "admin-make-spreadsheet": {
+    "summary": "Complete a beverage preference spreadsheet showing how many employees like each drink.",
+    "description": "Use drinks_survey.pdf and the employee responses in drinks_survey.csv to prepare the beverage purchasing summary. Complete drinks_survey.csv with the number of people who like each type of beverage."
+  },
+  "admin-mass-forms-filling": {
+    "summary": "Complete Section A of the I-9 for each employee listed in TAC_personell_data.csv.",
+    "description": "Use i-9.pdf and TAC_personell_data.csv in Documents/Admin to complete Section A, Employee Eligibility Verification, for every listed employee. Name each completed file i-9_[employee_firstname]_[employee_lastname].pdf and save the forms in Documents/Admin/i_9_forms. Format numeric values to fit the form."
+  },
+  "admin-read-survey-and-summarise": {
+    "summary": "Identify the three most popular drinks in the employee survey and report them to HR.",
+    "description": "Review drinks_survey.pdf and identify the three most popular beverage choices. Tell HR manager Chen Xinyi which three drinks employees selected most often."
+  },
+  "admin-remove-pages-pdf": {
+    "summary": "Shorten the OpenHands paper by removing everything after References while keeping that section.",
+    "description": "Find the OpenHands paper in Documents/Research. Create a shortened copy that includes the References section and removes all content after it. Save the result as openhands_short.pdf for the paper reading session."
+  },
+  "admin-translate-sales-chat": {
+    "summary": "Use the sales conversation to calculate one year’s rent for a Type B office in local currency.",
+    "description": "Review office_sales_chat_history.jpg, which contains Mandy’s conversation with a local salesperson. Calculate the cost of renting a Type B office for one full year in the local currency. Do not convert the amount to US dollars. Round to the nearest whole number and save only the amount in ans.txt."
+  },
+  "admin-watch-video": {
+    "summary": "Check the proposed office gym and report how many treadmills it contains.",
+    "description": "Review gym.mp4, the salesperson’s video of the proposed office gym. Count the treadmills and save only the number in ans.txt."
+  },
+  "bm-classify-nationality": {
+    "summary": "Label customers as domestic or international based on location, then report order totals.",
+    "description": "In Customer.xlsx in Documents/Data Analysis, classify each entry with a location. Use Domestic for locations in the United States and International for all other locations, recording the classification in the next cell.\n\nCount domestic and international orders and send Sarah Johnson the totals in this format:\nDomestic: {domestic_count}\nInternational: {international_count}"
+  },
+  "ds-answer-numerical-data-question": {
+    "summary": "Use beverage_stats.xlsx to answer three questions about beverage consumption in 2015 and 2004.",
+    "description": "Use beverage_stats.xlsx in Documents/Data Analysis to answer these questions:\n\n1. What was the fifth most commonly consumed beverage among teenagers aged 14 to 18 in 2015?\n2. What was the average percentage of children and teenagers who drank water in 2015?\n3. What was the average percentage of children and teenagers who drank water in 2004?\n\nWrite each answer as a short phrase on its own line in answer.docx."
+  },
+  "ds-answer-spreadsheet-questions": {
+    "summary": "Analyze agriculture.xlsx for marital status, sector relationships, and female worker share.",
+    "description": "Use agriculture.xlsx in Documents/Data Analysis to answer these questions:\n\n1. What marital status was the majority for New Brunswick agricultural workers in 2011, for both English-language and French-language workers?\n2. In 2011, which worker sector was more likely to be in a common-law relationship?\n3. If every agricultural region has the same number of French-language workers, what percentage of all French-language workers are female? Round to two decimal places.\n\nAnswer each question with a short phrase on a separate line, then send the answers to Li Ming on Rocket.Chat."
+  },
+  "ds-calculate-spreadsheet-stats": {
+    "summary": "Calculate the average row and column counts across spreadsheets in Data Analysis.",
+    "description": "Review every spreadsheet in Documents/Data Analysis. Calculate the average number of rows and the average number of columns across all tables. For workbooks with multiple sheets, include every table on every sheet. Save a reproducible calculation script as data_stats.py.\n\nSend Jessica Lee the results rounded to two decimal places in this format:\nAverage Rows: {average_rows}\nAverage Columns: {average_columns}\n\nAlso tell Jessica that the analysis is finished and that the script is named data_stats.py."
+  },
+  "ds-coffee-shop-database-management": {
+    "summary": "Turn the Coffee Shop records into reorder guidance and per-product sales, revenue, and profit details.",
+    "description": "Use the CSV records in Documents/Data Analysis/Coffee Shop to prepare an inventory and sales analysis. Identify products that should be reordered, with product_id, quantity_in_stock, and reorder_point. Also provide per-product sales details with product_id, average_sales, revenue_generated, and profit_generated. Round floating-point values to two decimal places.\n\nComplete the unanswered questions in analysis.txt using the records and your analysis."
+  },
+  "ds-find-meeting-spreadsheet": {
+    "summary": "Locate the spreadsheet about predicting seed area for Canadian field crops for an upcoming meeting.",
+    "description": "Find the Excel spreadsheet in Documents/Data Analysis that contains information about using AI to predict seed area for field crops in Canada. Make the relevant spreadsheet available to the team for its upcoming meeting."
+  },
+  "ds-fix-table-values-and-missing-answers": {
+    "summary": "Replace missing values with zero, answer the workbook’s questions, and save a corrected copy.",
+    "description": "Open Other Corp Area Totals.xlsx in Documents/Data Analysis. In the data sheet, replace missing values with 0. Answer the questions listed below the table in their corresponding answer cells. Save the corrected workbook as corrected_other_corp_area_totals.xlsx."
+  },
+  "ds-format-excel-sheets": {
+    "summary": "Create a formatted worksheet with sky-blue headers and centered cell values.",
+    "description": "In respondent_counts.xlsx, use the unformatted sheet to create a formatted sheet. Set the top-header cells to sky blue (#87CEEB) and horizontally center all cell values. Leave the unformatted sheet unchanged and save the updated workbook."
+  },
+  "ds-janusgraph-exercise": {
+    "summary": "Create an accurate organization chart from employee_diagram.jpg, including titles and reporting relationships.",
+    "description": "Use employee_diagram.jpg to create the company’s organization chart. Include every employee’s full name and job title, and represent each reporting relationship from the subordinate to their manager. The chart must match the structure shown in the image."
+  },
+  "ds-merge-multiple-sheets": {
+    "summary": "Determine whether two sugar-source spreadsheets cover the same topic and propose a merge or clearer names.",
+    "description": "Compare top-sugar-sources.xlsx and Top Sources of Total Sugars.xlsx in Documents/Data Analysis. Determine whether they contain the same topic. Tell Wang Fang on Rocket.Chat that you recommend merging them if they cover the same topic, or renaming them to avoid confusion if they do not.\n\nIf the files contain similar data, prepare merged.xlsx while awaiting Wang Fang’s response. Keep it as a working copy and do not upload it unless Wang Fang requests that."
+  },
+  "ds-organise-report-sus-data": {
+    "summary": "Find filenames that are meaningless, numeric-only, or contain unusual characters, then report each category.",
+    "description": "Review filenames in Documents/Data Analysis and list files with these issues. A file may belong to more than one category. Include each filename with its extension.\n\n- Files without Meaningful Names: names with no clear context or interpretability, such as “rxuts 31t3b.xlsx”.\n- Files with All-Numerical Names: names made only of numbers, such as “3030.xlsx”.\n- Files with Unusual Characters: names containing symbols beyond letters, numbers, hyphens, and underscores, such as semicolons, exclamation marks, at signs, hashes, or tildes.\n\nSend Jessica Lee one line per category in this format: “Category: file_name_1.xlsx, file_name_2.xlsx, ...”. Use the exact category titles above."
+  },
+  "ds-predictive-modeling": {
+    "summary": "Use historical stock prices to predict the test period’s daily closing prices and deliver the forecasts.",
+    "description": "Use stock_train_raw.csv as the historical training data to predict daily closing prices for the dates in stock_test.csv. Save the predictions in stock_test_answer.csv with exactly one column named Close Price. Forecast quality is assessed using Mean Squared Error (MSE), Mean Absolute Error (MAE), and R², with priority on maximizing R²."
+  },
+  "ds-sql-exercise": {
+    "summary": "Report product counts, category counts, and the three most expensive Electronics products.",
+    "description": "Use the product data to answer three questions, saving each answer in its own file:\n\n1. Total number of products in task1.txt.\n2. Number of distinct product categories in task2.txt.\n3. The three most expensive products in the Electronics category in task3.txt. For each product, include only its name and price, with prices shown to two decimal places, one product per line."
+  },
+  "ds-stock-analysis-slides": {
+    "summary": "Create board-ready stock analysis slides, supporting charts, cleaned data, and presenter notes.",
+    "description": "Use stock_data_raw.csv to prepare a clear presentation of the company’s stock trends for board members. Clean the data and save it as stock_cleaned.csv in a stock_presentation folder.\n\nCreate stock_analysis.pptx with a clearly labeled slide for each of these visualizations and a brief explanation: closing prices over time; closing prices with 50-day and 200-day moving averages; a correlation matrix focused on price, volume, and returns; daily returns calculated as the percentage change between consecutive closing prices; and the distribution of trading volume.\n\nWrite a presenter script describing and analyzing each slide, and save it as stock_analysis_script.md in the same folder."
+  },
+  "ds-visualize-data-in-pie-and-bar-chart": {
+    "summary": "Compare vegetable crop categories in 2011 and 2016 using a pie chart and a bar chart.",
+    "description": "Use Number of Agri Ops.xlsx to visualize agricultural operations by vegetable crop category. Create a pie chart for 2011 and a bar chart for 2016. Save the figures as 2011_pie.png and 2016_bar.png."
+  }
+}

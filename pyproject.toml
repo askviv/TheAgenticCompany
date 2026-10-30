@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "TheAgentCompany"
+version = "1.0.0"
+description = "A benchmark for agents that could do professional jobs"
+authors = ["The Agent Company"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/TheAgentCompany/TheAgentCompany"
+include = ["poetry.lock"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.14"
+
+[tool.poetry.group.reporting]
+optional = true
+
+[tool.poetry.group.reporting.dependencies]
+pyyaml = "6.0.3"

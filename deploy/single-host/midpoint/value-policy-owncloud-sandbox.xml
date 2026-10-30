@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<valuePolicy xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+             oid="d91d826c-01ca-4e9d-9305-08bf3bca41b5">
+    <name>ownCloud sandbox account password policy</name>
+    <description>Resource-scoped policy for seeded sandbox ownCloud account creation. Does not alter the global employee password policy.</description>
+    <stringPolicy>
+        <limitations>
+            <minLength>15</minLength>
+            <maxLength>128</maxLength>
+            <minUniqueChars>3</minUniqueChars>
+        </limitations>
+    </stringPolicy>
+</valuePolicy>

@@ -1,0 +1,29 @@
+# Compose merges this with servers/docker-compose.yml.
+# Docker's existing data-root is /data/docker, so container layers and volumes survive host restarts.
+# Benchmark reset endpoints deliberately recreate GitLab/ownCloud from their seeded images.
+services:
+  gitlab:
+    environment:
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://the-agent-company.com:8929'
+        gitlab_rails['gitlab_shell_ssh_port'] = 2424
+        puma['worker_processes'] = 0
+        puma['min_threads'] = 2
+        puma['max_threads'] = 2
+        sidekiq['concurrency'] = 5
+        prometheus_monitoring['enable'] = false
+    restart: unless-stopped
+  owncloud:
+    volumes:
+      - /data/theagentcompany/source/deploy/single-host/https/owncloud.config.php:/var/www/html/config/tac-https.config.php:ro
+    image: tac-owncloud:1.0.0-seed-repair
+    pull_policy: never
+    restart: unless-stopped
+  owncloud-collabora:
+    restart: unless-stopped
+  rocketchat:
+    restart: unless-stopped
+  mongodb:
+    restart: unless-stopped
+  redis-stack:
+    restart: unless-stopped

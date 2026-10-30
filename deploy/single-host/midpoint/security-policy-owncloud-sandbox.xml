@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<securityPolicy xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+                oid="824a9e86-f42e-4e34-9d6b-bfdab1a33f04">
+    <name>ownCloud sandbox account security policy</name>
+    <description>Applies only to the ownCloud account object type. Employee and other service password policies remain unchanged.</description>
+    <credentials>
+        <password>
+            <valuePolicyRef oid="d91d826c-01ca-4e9d-9305-08bf3bca41b5" type="ValuePolicyType"/>
+        </password>
+    </credentials>
+</securityPolicy>

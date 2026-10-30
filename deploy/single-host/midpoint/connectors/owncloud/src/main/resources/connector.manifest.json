@@ -1,0 +1,10 @@
+{
+  "application": {"name": "ownCloud", "description": "Discover and centrally manage ownCloud user identity through the OCS Provisioning API."},
+  "connector": {
+    "schema": [
+      {"script": "/User.native.schema.groovy"},
+      {"script": "/User.connid.schema.groovy"}
+    ],
+    "operation": [{"script": "/User.search.groovy"}, {"script": "/User.update.op.groovy"}]
+  }
+}

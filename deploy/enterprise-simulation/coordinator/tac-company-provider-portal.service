@@ -1,0 +1,34 @@
+[Unit]
+Description=The Agent Company employee external-provider portal
+After=network-online.target tac-customer-actor.service tac-enterprise-simulation.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+WorkingDirectory=/data/theagentcompany/enterprise/source
+Environment=PYTHONPATH=/data/theagentcompany/enterprise/source
+Environment=PROVIDER_PORTAL_CONFIG_FILE=/data/theagentcompany/enterprise/config/provider-portal.json
+ExecStart=/data/theagentcompany/enterprise/venv/bin/uvicorn servers.company.provider_portal_runtime:app_from_environment --factory --host 192.0.2.10 --port 8132 --workers 1 --no-access-log --no-server-header
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+PrivateDevices=yes
+ReadWritePaths=/data/theagentcompany/enterprise/state
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LimitNOFILE=4096
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

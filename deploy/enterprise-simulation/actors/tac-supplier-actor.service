@@ -1,0 +1,37 @@
+[Unit]
+Description=Private The Agent Company CoffeeBench supplier actor worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=company
+Group=company
+UMask=0077
+WorkingDirectory=/data/theagentcompany/enterprise/actors/state/supplier
+EnvironmentFile=/data/theagentcompany/enterprise/actors/secrets/supplier.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/data/theagentcompany/enterprise/source
+ExecStart=/data/theagentcompany/enterprise/actors/venvs/coffeebench/bin/uvicorn servers.simulation.supplier_worker_entrypoint:app --host 127.0.0.1 --port 8142 --workers 1 --no-access-log --no-server-header
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+PrivateDevices=yes
+ReadWritePaths=/data/theagentcompany/enterprise/actors/state/supplier /home/company/.codex
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CPUQuota=100%
+MemoryMax=2G
+LimitNOFILE=4096
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

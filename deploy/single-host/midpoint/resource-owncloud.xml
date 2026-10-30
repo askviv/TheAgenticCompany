@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<resource xmlns="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:c="http://midpoint.evolveum.com/xml/ns/public/common/common-3"
+          xmlns:q="http://prism.evolveum.com/xml/ns/public/query-3"
+          xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3"
+          xmlns:oc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/com.evolveum.polygon.scimrest.connector-owncloud/com.evolveum.polygon.owncloud.OwnCloudConnector"
+          xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
+          xmlns:ea="https://theagentcompany.com/xml/ns/midpoint/employee-accounts"
+          oid="57a19684-cfe8-4f21-b7b4-0fb02b5ec003">
+    <name>ownCloud accounts</name>
+    <description>Discovers ownCloud accounts by immutable native user ID and updates only centrally managed display name and email. Initial account passwords are supplied through the native MidPoint account projection and checked by an ownCloud account-type policy; the global employee password policy is unchanged. Existing account authentication, groups, files, and shares remain unchanged.</description>
+    <connectorRef type="c:ConnectorType">
+        <filter>
+            <q:text>connectorType = "com.evolveum.polygon.owncloud.OwnCloudConnector" and connectorVersion = "0.2.0-tac.1"</q:text>
+        </filter>
+    </connectorRef>
+    <connectorConfiguration>
+        <icfc:configurationProperties>
+            <oc:baseAddress>https://owncloud.company.example.test/ocs/v1.php/cloud</oc:baseAddress>
+            <oc:restTestEndpoint>/users?format=json</oc:restTestEndpoint>
+            <oc:timeoutSeconds>20</oc:timeoutSeconds>
+        </icfc:configurationProperties>
+    </connectorConfiguration>
+    <schemaHandling>
+        <objectType>
+            <kind>account</kind>
+            <displayName>ownCloud user</displayName>
+            <default>true</default>
+            <delineation><objectClass>ri:User</objectClass></delineation>
+            <securityPolicyRef oid="824a9e86-f42e-4e34-9d6b-bfdab1a33f04" type="SecurityPolicyType"/>
+            <attribute>
+                <ref>ri:uid</ref>
+                <outbound><strength>weak</strength><source><path>$focus/extension/ea:rocketchatUsername</path></source></outbound>
+            </attribute>
+            <attribute>
+                <ref>ri:displayname</ref>
+                <outbound><strength>normal</strength><source><path>$focus/fullName</path></source></outbound>
+            </attribute>
+            <attribute>
+                <ref>ri:email</ref>
+                <outbound><strength>normal</strength><source><path>$focus/emailAddress</path></source></outbound>
+            </attribute>
+        </objectType>
+    </schemaHandling>
+    <capabilities xmlns:cap="http://midpoint.evolveum.com/xml/ns/public/resource/capabilities-3">
+        <configured>
+            <cap:liveSync><cap:enabled>false</cap:enabled></cap:liveSync>
+            <cap:update><cap:enabled>true</cap:enabled></cap:update>
+            <cap:delete><cap:enabled>false</cap:enabled></cap:delete>
+            <cap:script><cap:enabled>false</cap:enabled></cap:script>
+        </configured>
+    </capabilities>
+</resource>

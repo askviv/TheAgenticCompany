@@ -1,0 +1,33 @@
+services:
+  experiments:
+    image: tac-experiments:local
+    container_name: tac-experiments
+    network_mode: host
+    restart: unless-stopped
+    labels:
+      tac.environment: single-host
+    env_file: ${TAC_ROOT}/experiments.env
+    volumes:
+      - ${TAC_ROOT}/source:/repo:ro
+      - type: bind
+        source: ${TAC_ROOT}/enterprise/source/deploy/single-host/company-identities.json
+        target: /repo/deploy/single-host/company-identities.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - ${TAC_ROOT}/experiments-data:/data
+      - type: bind
+        source: ${TAC_ROOT}/enterprise/secrets/dashboard-controller-token
+        target: /run/secrets/simulation-controller-token
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${TAC_ROOT}/enterprise/secrets/experiments-operator-key
+        target: /run/secrets/experiments-operator-key
+        read_only: true
+        bind:
+          create_host_path: false
+    environment:
+      SIMULATION_COORDINATOR_URL: ${SIMULATION_COORDINATOR_URL:-http://192.0.2.10:8131}
+      SIMULATION_CONTROLLER_TOKEN_FILE: /run/secrets/simulation-controller-token

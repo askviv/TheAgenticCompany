@@ -1,0 +1,25 @@
+title = "Project secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Confirmed non-credential benchmark ID or in-process test input; exact file and value only"
+condition = "AND"
+regexTarget = "secret"
+paths = ["^servers/simulation/tests/test_background_evaluation\\.py$"]
+regexes = ["^correlation_id=$"]
+
+[[allowlists]]
+description = "Confirmed non-credential benchmark ID or in-process test input; exact file and value only"
+condition = "AND"
+regexTarget = "secret"
+paths = ["^tests/test_simulation_api\\.py$"]
+regexes = ["^idempotency_key=$"]
+
+[[allowlists]]
+description = "Confirmed non-credential benchmark ID or in-process test input; exact file and value only"
+condition = "AND"
+regexTarget = "secret"
+paths = ["^workspaces/tasks/pm\\-assign\\-issues/evaluator\\.py$"]
+regexes = ["^4b52537b\\-5bec\\-49b3\\-b3ed\\-41fa601f4287$"]

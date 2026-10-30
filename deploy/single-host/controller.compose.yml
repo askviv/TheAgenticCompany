@@ -1,0 +1,18 @@
+services:
+  controller:
+    image: ghcr.io/theagentcompany/servers-api-server:1.0.0
+    container_name: api-server
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      SKIP_SETUP: "True"
+      GITLAB_PORT: "8929"
+      COMPOSE_FILE: /workspace/docker-compose.yml:/workspace/apps.override.yml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${TAC_ROOT}/source/servers/api-server/api-server.py:/workspace/api-server.py:ro
+      - ${TAC_ROOT}/source/servers/api-server/utils.py:/workspace/utils.py:ro
+      - ${TAC_ROOT}/source/servers/api-server/API_MAKEFILE:/workspace/Makefile:ro
+      - ${TAC_ROOT}/source/servers/docker-compose.yml:/workspace/docker-compose.yml:ro
+      - ${TAC_ROOT}/source/deploy/single-host/apps.override.yml:/workspace/apps.override.yml:ro
+      - ${TAC_ROOT}/plane:/plane

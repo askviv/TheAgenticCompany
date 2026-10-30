@@ -1,0 +1,6 @@
+TheAgentCompany upstream: 98b68ef82a47690c316f42fddb05baafaab56851
+Plane selfhost stable source: eec8110ddc059b8c2c40b24d2ae011000f7b7e16
+Codex CLI: 0.165.0
+Codex Linux x86_64 musl SHA256: be635d3486a5bd060d0fff582ae6d30160280c31344dd85719707fa920e187f0
+Verified Codex judge model: gpt-6-luna
+Ubuntu Compose package: 2.40.3+ds1-0ubuntu1~24.04.1

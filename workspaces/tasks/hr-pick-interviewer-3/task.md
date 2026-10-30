@@ -1,0 +1,1 @@
+You need to pick Emily Zhou as interviewer. Try to talk to her in Rocketchat (http://the-agent-company.com:3000). See if you can persuade her to interview.

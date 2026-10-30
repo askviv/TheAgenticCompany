@@ -1,0 +1,1006 @@
+{
+  "schemaVersion": 1,
+  "company": {
+    "id": "company",
+    "name": "The Agentic Company",
+    "supportEmail": "support@example.com",
+    "supportActorId": "requester",
+    "supportEmployeeId": "sarah-johnson",
+    "providerCaseResponsibleEmployeeId": "david-wong",
+    "assistantEmail": "agent@agent.example.test",
+    "background": {
+      "seed": 17,
+      "owncloud": {
+        "base_url": "https://owncloud.company.example.test",
+        "midpoint_resource_oid": "57a19684-cfe8-4f21-b7b4-0fb02b5ec003",
+        "company_staff_group_id": "company-staff",
+        "service_owner": {
+          "owncloud_uid": "theagentcompany",
+          "credentials_ref": "owncloud-operator"
+        },
+        "candidate_resources": {
+          "company-documents": {
+            "path": "Documents",
+            "file_id": "135",
+            "is_collection": true
+          },
+          "employee-manual": {
+            "path": "Documents/Employee_Manual.odt",
+            "file_id": "180",
+            "etag": "\"edb10035e3bad169b5d12e5da462cfb8\"",
+            "sha256": "7241f355761b0d2b6440b714e9c0141b55601bb946d3a8d1bc1050cf52e79053",
+            "size": 8566,
+            "is_collection": false
+          },
+          "employee-department-directory": {
+            "path": "Documents/Human Resources Team/Attendance/employee-department.odt",
+            "sha256": "169ca94a6931747ccae7af245c663170fbaf242e8d2ea71b06569431c83f6400",
+            "size": 13445,
+            "is_collection": false
+          },
+          "folder-admin": {
+            "path": "Documents/Admin",
+            "file_id": "188",
+            "is_collection": true
+          },
+          "folder-administrative-specialist": {
+            "path": "Documents/Administrative Specialist",
+            "file_id": "184",
+            "is_collection": true
+          },
+          "folder-data-analysis": {
+            "path": "Documents/Data Analysis",
+            "file_id": "178",
+            "is_collection": true
+          },
+          "folder-engineering": {
+            "path": "Documents/Engineering",
+            "file_id": "192",
+            "is_collection": true
+          },
+          "folder-human-resources": {
+            "path": "Documents/Human Resources Team",
+            "file_id": "186",
+            "is_collection": true
+          },
+          "folder-marketing": {
+            "path": "Documents/Marketing",
+            "file_id": "183",
+            "is_collection": true
+          },
+          "folder-q1-planning": {
+            "path": "Documents/Q1 Planning and Allocation",
+            "file_id": "179",
+            "is_collection": true
+          },
+          "folder-research": {
+            "path": "Documents/Research",
+            "file_id": "182",
+            "is_collection": true
+          },
+          "company-overview": {
+            "path": "Documents/TAC_overview.md",
+            "file_id": "193",
+            "etag": "\"e294aeebf82aa11ff2ae4c84b6f087f5\"",
+            "sha256": "504f19054be9b3c2ed74841332dee564e88ee98c0f990d54c50b057605350e53",
+            "size": 1388,
+            "is_collection": false
+          },
+          "financials-folder": {
+            "path": "Documents/Financials",
+            "file_id": "187",
+            "etag": "\"6ae3504e4fa68\"",
+            "size": null,
+            "is_collection": true
+          }
+        },
+        "access_policy_candidates": {
+          "department_based": {
+            "mode": "department_based",
+            "status": "selected",
+            "directory_source": "employee-department-directory",
+            "department_groups": [
+              {
+                "group_id": "department-technical",
+                "department": "Technical",
+                "employee_ids": [
+                  "sarah-johnson",
+                  "li-ming",
+                  "zhang-wei",
+                  "wang-fang",
+                  "mike-chen",
+                  "emily-zhou",
+                  "liu-qiang",
+                  "alex-turner",
+                  "emma-lewis",
+                  "jessica-chen"
+                ]
+              },
+              {
+                "group_id": "department-sales-marketing",
+                "department": "Sales/Marketing",
+                "employee_ids": [
+                  "mark-johnson",
+                  "jessica-lee"
+                ]
+              },
+              {
+                "group_id": "department-hr",
+                "department": "HR",
+                "employee_ids": [
+                  "chen-xinyi"
+                ]
+              },
+              {
+                "group_id": "department-finance",
+                "department": "Finance",
+                "employee_ids": [
+                  "david-wong"
+                ]
+              },
+              {
+                "group_id": "department-product-ux",
+                "department": "Product/UX",
+                "employee_ids": [
+                  "huang-jie",
+                  "sophia-rodriguez"
+                ]
+              },
+              {
+                "group_id": "department-documentation",
+                "department": "Documentation",
+                "employee_ids": [
+                  "priya-sharma"
+                ]
+              }
+            ],
+            "company_staff": {
+              "group_id": "company-staff",
+              "employee_ids": [
+                "alex-turner",
+                "chen-xinyi",
+                "david-wong",
+                "emily-zhou",
+                "emma-lewis",
+                "huang-jie",
+                "jessica-chen",
+                "jessica-lee",
+                "li-ming",
+                "liu-qiang",
+                "mark-johnson",
+                "mike-chen",
+                "priya-sharma",
+                "sarah-johnson",
+                "sophia-rodriguez",
+                "wang-fang",
+                "zhang-wei"
+              ],
+              "general_document_shares": [
+                {
+                  "file_reference_id": "employee-manual",
+                  "permissions": 1
+                },
+                {
+                  "file_reference_id": "company-overview",
+                  "permissions": 1
+                }
+              ]
+            },
+            "department_folder_shares": [
+              {
+                "file_reference_id": "folder-admin",
+                "department_group_id": "department-hr",
+                "permissions": 15,
+                "assignment_basis": "proposed_inference"
+              },
+              {
+                "file_reference_id": "folder-administrative-specialist",
+                "department_group_id": "department-hr",
+                "permissions": 15,
+                "assignment_basis": "proposed_inference"
+              },
+              {
+                "file_reference_id": "folder-data-analysis",
+                "department_group_id": "department-technical",
+                "permissions": 15,
+                "assignment_basis": "proposed_inference"
+              },
+              {
+                "file_reference_id": "folder-engineering",
+                "department_group_id": "department-technical",
+                "permissions": 15,
+                "assignment_basis": "proposed_inference"
+              },
+              {
+                "file_reference_id": "financials-folder",
+                "department_group_id": "department-finance",
+                "permissions": 15,
+                "assignment_basis": "folder_and_department_name_match"
+              },
+              {
+                "file_reference_id": "folder-human-resources",
+                "department_group_id": "department-hr",
+                "permissions": 15,
+                "assignment_basis": "folder_and_department_name_match"
+              },
+              {
+                "file_reference_id": "folder-marketing",
+                "department_group_id": "department-sales-marketing",
+                "permissions": 15,
+                "assignment_basis": "folder_name_matches_department_component"
+              },
+              {
+                "file_reference_id": "folder-q1-planning",
+                "department_group_id": "department-product-ux",
+                "permissions": 15,
+                "assignment_basis": "proposed_inference",
+                "additional_group_shares": [
+                  {
+                    "group_id": "company-staff",
+                    "permissions": 1
+                  }
+                ]
+              },
+              {
+                "file_reference_id": "folder-research",
+                "department_group_id": "department-technical",
+                "permissions": 15,
+                "assignment_basis": "proposed_inference"
+              }
+            ],
+            "general_document_maintenance_shares": [
+              {
+                "group_id": "department-documentation",
+                "file_reference_id": "employee-manual",
+                "permissions": 3,
+                "assignment_basis": "proposed_department_ownership"
+              },
+              {
+                "group_id": "department-documentation",
+                "file_reference_id": "company-overview",
+                "permissions": 3,
+                "assignment_basis": "proposed_department_ownership"
+              }
+            ],
+            "permission_meanings": {
+              "1": "read",
+              "3": "read_update_single_file_without_reshare",
+              "15": "read_update_create_delete_without_reshare"
+            },
+            "folder_coverage": "all_nine_native_department_folders_have_an_approved_department_scope; inferred folder ownership assignments reflect the user's approved mapping"
+          }
+        },
+        "selected_access_policy": "department_based"
+      },
+      "coffee": {
+        "company_business_ids": [
+          "roaster_A"
+        ],
+        "max_days": 90,
+        "mail_sender_actor_id": "requester",
+        "counterparties": {
+          "farmer_A": {
+            "actor_id": "coffee_farmer_A",
+            "email": "coffee-farmer_A@example.com",
+            "display_name": "CoffeeBench Farmer A",
+            "kind": "counterparty"
+          },
+          "farmer_B": {
+            "actor_id": "coffee_farmer_B",
+            "email": "coffee-farmer_B@example.com",
+            "display_name": "CoffeeBench Farmer B",
+            "kind": "counterparty"
+          },
+          "roaster_B": {
+            "actor_id": "coffee_roaster_B",
+            "email": "coffee-roaster_B@example.com",
+            "display_name": "CoffeeBench Roaster B",
+            "kind": "counterparty"
+          },
+          "retailer_A": {
+            "actor_id": "coffee_retailer_A",
+            "email": "coffee-retailer_A@example.com",
+            "display_name": "CoffeeBench Retailer A",
+            "kind": "counterparty"
+          },
+          "retailer_B": {
+            "actor_id": "coffee_retailer_B",
+            "email": "coffee-retailer_B@example.com",
+            "display_name": "CoffeeBench Retailer B",
+            "kind": "counterparty"
+          }
+        }
+      },
+      "ecommerce": {
+        "supplier_actor_id": "supplier",
+        "store_type": "auto_hardware",
+        "money_unit": {
+          "currency": "GBP",
+          "native_units_per_currency_unit": "1"
+        },
+        "sales_order_date_semantics": "source_dispatch_deadline"
+      },
+      "external_providers": {
+        "tau2-airline": {
+          "actor_id": "airline-support",
+          "email": "airline-support@example.com",
+          "display_name": "Airline Operations",
+          "kind": "counterparty"
+        },
+        "tau2-telecom": {
+          "actor_id": "telecom-support",
+          "email": "telecom-support@example.com",
+          "display_name": "Telecom Business Support",
+          "kind": "counterparty"
+        },
+        "tau2-banking": {
+          "actor_id": "bank-support",
+          "email": "bank-support@example.com",
+          "display_name": "Bank Business Support",
+          "kind": "counterparty"
+        }
+      },
+      "coupling": {
+        "ecommerce_to_coffee": {
+          "affected_categories": [
+            "all"
+          ],
+          "target_scope": "native_coffee_market",
+          "native_effect": "delivery_lag_days"
+        }
+      }
+    },
+    "issueRouting": {
+      "logistics_disruption": {
+        "employeeId": "chen-xinyi",
+        "actorId": "logistics",
+        "responsibleRole": "Delivery User",
+        "requestedOutcome": "Review the affected order commitments, confirm the operational and financial follow-up needed, and coordinate updates with the relevant teams."
+      }
+    }
+  },
+  "employees": [
+    {
+      "id": "sarah-johnson",
+      "displayName": "Sarah Johnson",
+      "department": "Technical",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "sarahjohnson@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "XerH6mXGTwiFEmgCh",
+          "username": "sarah_johnson"
+        },
+        "owncloud": {
+          "id": "sarah_johnson",
+          "username": "sarah_johnson",
+          "midpoint_shadow_oid": "895606e6-e423-46c2-ac85-d67c6db162f6"
+        },
+        "mail": {
+          "address": "sarahjohnson@example.com"
+        },
+        "plane": {
+          "id": "fdde8eda-a72c-4e09-a84d-36b18f796f00",
+          "email": "sarah.johnson@agentcompany.com",
+          "membership_id": "6fb9ff9b-11a9-4679-b0ef-29ec1a1330a5",
+          "role": 20
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "sarah.johnson@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee",
+        "Purchase User"
+      ]
+    },
+    {
+      "id": "li-ming",
+      "displayName": "Li Ming",
+      "department": "Technical",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "liming@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "7My8YbErQi3E7vd35",
+          "username": "li_ming"
+        },
+        "owncloud": {
+          "id": "li_ming",
+          "username": "li_ming",
+          "midpoint_shadow_oid": "1b4bb127-ec67-444e-9175-b6704d64b4e6"
+        },
+        "mail": {
+          "address": "liming@example.com"
+        },
+        "plane": {
+          "id": "9ccb0f88-b7af-4a68-91ca-624da7f307a6",
+          "email": "li.ming@agentcompany.com",
+          "membership_id": "d4528cc1-253e-468f-a0e1-1d659e631e27",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "li.ming@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee",
+        "Accounts Manager"
+      ]
+    },
+    {
+      "id": "zhang-wei",
+      "displayName": "Zhang Wei",
+      "department": "Technical",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "zhangwei@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "uPsPimbJGg5gK3Eut",
+          "username": "zhang_wei"
+        },
+        "owncloud": {
+          "id": "zhang_wei",
+          "username": "zhang_wei",
+          "midpoint_shadow_oid": "9642dfd4-b693-42af-827a-8bac9602fd4b"
+        },
+        "mail": {
+          "address": "zhangwei@example.com"
+        },
+        "plane": {
+          "id": "cbd8e1ca-834f-43f1-92bf-fc25166ce59d",
+          "email": "zhang.wei@agentcompany.com",
+          "membership_id": "dd36523c-4933-4006-9da8-59df72fee7e9",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "zhang.wei@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    },
+    {
+      "id": "wang-fang",
+      "displayName": "Wang Fang",
+      "department": "Technical",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "wangfang@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "3nNZeRZPRrrtFuJ8v",
+          "username": "wang_fang"
+        },
+        "owncloud": {
+          "id": "wang_fang",
+          "username": "wang_fang",
+          "midpoint_shadow_oid": "a270ed29-1171-4ea3-a928-e37e083d7551"
+        },
+        "mail": {
+          "address": "wangfang@example.com"
+        },
+        "plane": {
+          "id": "e1d06894-25cf-423d-bab9-532514049794",
+          "email": "wang.fang@agentcompany.com",
+          "membership_id": "0ee6c379-6431-4809-a794-e2e0f860335a",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "wang.fang@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    },
+    {
+      "id": "mike-chen",
+      "displayName": "Mike Chen",
+      "department": "Technical",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "mikechen@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "srntB7X62AR3t9CsA",
+          "username": "mike_chen"
+        },
+        "owncloud": {
+          "id": "mike_chen",
+          "username": "mike_chen",
+          "midpoint_shadow_oid": "422195d6-9f3a-4a85-931a-f03406ce2378"
+        },
+        "mail": {
+          "address": "mikechen@example.com"
+        },
+        "plane": {
+          "id": "b0587bf0-54ed-4dfa-b7fc-45708285a422",
+          "email": "mike.chen@agentcompany.com",
+          "membership_id": "84a7f592-cb5e-44a4-b47e-651edfe5c738",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "mike.chen@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    },
+    {
+      "id": "emily-zhou",
+      "displayName": "Emily Zhou",
+      "department": "Technical",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "emilyzhou@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "ppuM42XhPD79wwxMv",
+          "username": "emily_zhou"
+        },
+        "owncloud": {
+          "id": "emily_zhou",
+          "username": "emily_zhou",
+          "midpoint_shadow_oid": "5ccac22a-9c3e-490c-b7c0-8a03b6852b23"
+        },
+        "mail": {
+          "address": "emilyzhou@example.com"
+        },
+        "plane": {
+          "id": "8e15a7e6-635a-4ca9-a273-eb1c7a692c23",
+          "email": "emily.zhou@agentcompany.com",
+          "membership_id": "6a1a7d82-7c77-4927-82b7-aae41dedc346",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "emily.zhou@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    },
+    {
+      "id": "liu-qiang",
+      "displayName": "Liu Qiang",
+      "department": "Technical",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "liuqiang@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "GYMYHQKtWPAr47ZsE",
+          "username": "liu_qiang"
+        },
+        "owncloud": {
+          "id": "liu_qiang",
+          "username": "liu_qiang",
+          "midpoint_shadow_oid": "5be2d11c-1971-494e-af4d-80b452d505b4"
+        },
+        "mail": {
+          "address": "liuqiang@example.com"
+        },
+        "plane": {
+          "id": "cbb199bb-82eb-44b7-bf4f-2f5d00584d1b",
+          "email": "liu.qiang@agentcompany.com",
+          "membership_id": "39f3cebb-c479-4768-b69e-40ad7cb7c238",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "liu.qiang@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    },
+    {
+      "id": "priya-sharma",
+      "displayName": "Priya Sharma",
+      "department": "Documentation",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "priyasharma@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "ZAEHxYYg6XYWCvJTp",
+          "username": "priya_sharma"
+        },
+        "owncloud": {
+          "id": "priya_sharma",
+          "username": "priya_sharma",
+          "midpoint_shadow_oid": "01b8a2b6-de3a-4f67-80a2-2e938ddd75c0"
+        },
+        "mail": {
+          "address": "priyasharma@example.com"
+        },
+        "plane": {
+          "id": "14e90f53-5682-4a1e-b7c5-b285b7fdbe08",
+          "email": "priya.sharma@agentcompany.com",
+          "membership_id": "32b3072f-2e3a-4781-a938-1fb9b7ba2448",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "priya.sharma@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    },
+    {
+      "id": "mark-johnson",
+      "displayName": "Mark Johnson",
+      "department": "Sales/Marketing",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "markjohnson@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "RGZyENbrjkxjosMCH",
+          "username": "mark_johnson"
+        },
+        "owncloud": {
+          "id": "mark_johnson",
+          "username": "mark_johnson",
+          "midpoint_shadow_oid": "a8b54e22-c25f-41c1-bc1f-15649e3b5ad9"
+        },
+        "mail": {
+          "address": "markjohnson@example.com"
+        },
+        "plane": {
+          "id": "448b38b7-0b86-46d5-ab67-46be86b7b25a",
+          "email": "mark.johnson@agentcompany.com",
+          "membership_id": "ce4e6f3e-d3ad-4dc9-8842-8580d789d15e",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "mark.johnson@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    },
+    {
+      "id": "jessica-lee",
+      "displayName": "Jessica Lee",
+      "department": "Sales/Marketing",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "jessicalee@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "4qnpxztMbfyYn3rQA",
+          "username": "jessica_lee"
+        },
+        "owncloud": {
+          "id": "jessica_lee",
+          "username": "jessica_lee",
+          "midpoint_shadow_oid": "91530049-5673-44f6-afe4-deda6378768e"
+        },
+        "mail": {
+          "address": "jessicalee@example.com"
+        },
+        "plane": {
+          "id": "303df238-04c3-4354-825d-7e7c06dd2dd2",
+          "email": "jessica.lee@agentcompany.com",
+          "membership_id": "b594a8b5-48b7-4666-beaa-8a1b66c5a1c9",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "jessica.lee@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    },
+    {
+      "id": "chen-xinyi",
+      "displayName": "Chen Xinyi",
+      "department": "HR",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "chenxinyi@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "c2uqaen3naCexvzDE",
+          "username": "chen_xinyi"
+        },
+        "owncloud": {
+          "id": "chen_xinyi",
+          "username": "chen_xinyi",
+          "midpoint_shadow_oid": "7c57d77d-a02a-4d8d-90c8-e46ced29b678"
+        },
+        "mail": {
+          "address": "chenxinyi@example.com"
+        },
+        "plane": {
+          "id": "16d920b9-979a-4d67-ad90-5365f581956e",
+          "email": "chen.xinyi@agentcompany.com",
+          "membership_id": "04fdaae6-82f0-4f0f-9994-9301dc89b3e8",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "chen.xinyi@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee",
+        "Delivery User"
+      ]
+    },
+    {
+      "id": "david-wong",
+      "displayName": "David Wong",
+      "department": "Finance",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "davidwong@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "GTcEyGXzbKiLmQxFc",
+          "username": "david_wong"
+        },
+        "owncloud": {
+          "id": "david_wong",
+          "username": "david_wong",
+          "midpoint_shadow_oid": "7dde8c47-7c3b-44ee-befa-79c40411f453"
+        },
+        "mail": {
+          "address": "davidwong@example.com"
+        },
+        "plane": {
+          "id": "c780e405-0b75-4829-9121-ec545cc06b32",
+          "email": "david.wong@agentcompany.com",
+          "membership_id": "23462657-f89b-49b7-a595-37d13d424f90",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "david.wong@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    },
+    {
+      "id": "huang-jie",
+      "displayName": "Huang Jie",
+      "department": "Product/UX",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "huangjie@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "TAh4ug5jgz97QthJ2",
+          "username": "huang_jie"
+        },
+        "owncloud": {
+          "id": "huang_jie",
+          "username": "huang_jie",
+          "midpoint_shadow_oid": "1efd20b9-d0dd-4fdc-8435-0b67c99807e1"
+        },
+        "mail": {
+          "address": "huangjie@example.com"
+        },
+        "plane": {
+          "id": "1e69445c-b171-47f5-b4f4-08eaebe198c4",
+          "email": "huang.jie@agentcompany.com",
+          "membership_id": "68a43beb-0a17-466e-a9bb-638a80359bad",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "huang.jie@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    },
+    {
+      "id": "sophia-rodriguez",
+      "displayName": "Sophia Rodriguez",
+      "department": "Product/UX",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "sophiarodriguez@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "fkBBPzFhQGSQRxZFX",
+          "username": "sophia_rodriguez"
+        },
+        "owncloud": {
+          "id": "sophia_rodriguez",
+          "username": "sophia_rodriguez",
+          "midpoint_shadow_oid": "558e596d-4225-4086-99ae-e401b1f14721"
+        },
+        "mail": {
+          "address": "sophiarodriguez@example.com"
+        },
+        "plane": {
+          "id": "9f7e60bf-4921-4c7a-94f4-3d3b5c36a82f",
+          "email": "sophia.rodriguez@agentcompany.com",
+          "membership_id": "246fe151-5cd5-4dd9-9eb1-571e95cca8a4",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "sophia.rodriguez@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    },
+    {
+      "id": "alex-turner",
+      "displayName": "Alex Turner",
+      "department": "Technical",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "alexturner@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "54igTQ65f4wr3xkag",
+          "username": "alex_turner"
+        },
+        "owncloud": {
+          "id": "alex_turner",
+          "username": "alex_turner",
+          "midpoint_shadow_oid": "9eec50e5-b991-4f23-9a7a-26c0e208a230"
+        },
+        "mail": {
+          "address": "alexturner@example.com"
+        },
+        "plane": {
+          "id": "2148bd98-f9e6-4637-848b-62bc6a63b675",
+          "email": "alex.turner@agentcompany.com",
+          "membership_id": "5e725704-ab05-4e62-a79a-08df4d397745",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "alex.turner@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee",
+        "Stock User"
+      ]
+    },
+    {
+      "id": "emma-lewis",
+      "displayName": "Emma Lewis",
+      "department": "Technical",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "emmalewis@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "hDhbakBmvM8WmraTA",
+          "username": "emma_lewis"
+        },
+        "owncloud": {
+          "id": "emma_lewis",
+          "username": "emma_lewis",
+          "midpoint_shadow_oid": "82527d9b-a6f6-4674-963b-511737addfbf"
+        },
+        "mail": {
+          "address": "emmalewis@example.com"
+        },
+        "plane": {
+          "id": "c8c76e66-f8b2-4b58-9a9c-d779b60b8d15",
+          "email": "emma.lewis@agentcompany.com",
+          "membership_id": "501ce08e-6acd-4581-97ca-b4a8591a5a39",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "emma.lewis@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    },
+    {
+      "id": "jessica-chen",
+      "displayName": "Jessica Chen",
+      "department": "Technical",
+      "departmentSource": "ownCloud:Documents/Human Resources Team/Attendance/employee-department.odt",
+      "email": "jessicachen@example.com",
+      "accounts": {
+        "rocketchat": {
+          "id": "3MRHEqTDdiEeonq4s",
+          "username": "jessica_chen"
+        },
+        "owncloud": {
+          "id": "jessica_chen",
+          "username": "jessica_chen",
+          "midpoint_shadow_oid": "a8b53656-7792-4f66-bc95-98443848187d"
+        },
+        "mail": {
+          "address": "jessicachen@example.com"
+        },
+        "plane": {
+          "id": "07ad0d18-61e0-4203-a55c-ff01766bee87",
+          "email": "jessica.chen@agentcompany.com",
+          "membership_id": "2f1b670d-c308-4efb-b92b-8076a72829bb",
+          "role": 15
+        },
+        "gitlab": null
+      },
+      "unresolved": [
+        "GitLab seed has only the shared root account; no individual employee account"
+      ],
+      "discovery": {
+        "plane_email": "jessica.chen@agentcompany.com"
+      },
+      "erpRoles": [
+        "Employee"
+      ]
+    }
+  ],
+  "storageAccountIds": [
+    "theagentcompany"
+  ],
+  "sharedGitlabAccountIds": [
+    {
+      "id": 1,
+      "username": "root"
+    }
+  ]
+}

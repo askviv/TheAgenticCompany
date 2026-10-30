@@ -1,0 +1,19 @@
+[Unit]
+Description=Reconcile company evidence, native benchmark feedback and unread issue handoffs
+After=network-online.target docker.service tac-enterprise-simulation.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+WorkingDirectory=/data/theagentcompany/enterprise/source
+ExecStart=/data/theagentcompany/enterprise/venv/bin/python -m servers.simulation.issue_handoff_runtime --config /data/theagentcompany/enterprise/config/runtime.json --maintenance
+Environment=PYTHONDONTWRITEBYTECODE=1
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/data/theagentcompany/enterprise/state /data/theagentcompany/enterprise/erpnext/runtime
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+TimeoutStartSec=900

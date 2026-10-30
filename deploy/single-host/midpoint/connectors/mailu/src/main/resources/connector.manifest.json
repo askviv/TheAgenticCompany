@@ -1,0 +1,8 @@
+{
+  "application": {"name":"Mailu","description":"Mailu mailbox discovery, creation, and centrally managed display names."},
+  "connector": {
+    "schema":[{"script":"/User.native.schema.groovy"},{"script":"/User.connid.schema.groovy"}],
+    "authorization":[{"script":"/authorization.op.groovy"}],
+    "operation":[{"script":"/User.search.groovy"},{"script":"/User.create.op.groovy"},{"script":"/User.update.op.groovy"}]
+  }
+}

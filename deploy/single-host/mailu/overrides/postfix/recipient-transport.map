@@ -1,0 +1,3 @@
+# Exact Viv address from the linked Rocket.Chat account. All other external
+# recipients remain rejected. The destination is the private SSH smtp4dev bridge.
+agent@agent.example.test smtp:[172.22.0.1]:19126

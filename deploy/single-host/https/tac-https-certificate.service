@@ -1,0 +1,10 @@
+[Unit]
+Description=Renew existing Mini certificate for TAC HTTPS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/data/theagentcompany/source/deploy/single-host/https/renew-certificate.sh
+UMask=0027
+TimeoutStartSec=30min

@@ -1,0 +1,1565 @@
+{
+  "schema_version": 1,
+  "upstream": {
+    "project": "sierra-research/tau2-bench",
+    "commit": "7aad81c37a3a78b4ed3e4866769f851400c64415",
+    "domain": "banking_knowledge",
+    "task_source_file": "data/tau2/domains/banking_knowledge/tasks.json",
+    "task_source_sha256": "213c7f3e6dc0420b1184ee271e39e38c6ece3c43edfa362db49a560828ebd543",
+    "task_count": 97
+  },
+  "review_rows": [
+    {
+      "task_id": "task_001",
+      "title": "Everyday card with high cash back",
+      "summary": "The customer wants a personal credit card for everyday spending. Work travel is paid by a separate corporate card, and annual fees are a concern.",
+      "requested_outcome": "Compare personal everyday-spend cards by cash-back return and annual fee, then recommend the best fit.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 352,
+        "end_char": 509,
+        "source_task_sha256": "9a797288dd215e89c0fab9d0063581a3a64d433f06af6179eaad795521b23ef0",
+        "excerpt": "You're looking for a credit card to use for your everyday purchases. You want the card that gives you the highest cash back available in the company profile."
+      }
+    },
+    {
+      "task_id": "task_002",
+      "title": "High-spend cash-back card",
+      "summary": "The customer is choosing an everyday card for unusually high monthly spending and is open to a modest annual fee when the rewards justify it.",
+      "requested_outcome": "Compare net rewards at the stated spending pattern and recommend the strongest eligible option.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 377,
+        "end_char": 564,
+        "source_task_sha256": "81a1aae95b6bb4d61991d0b9cef836b302b675685309174a53d878693cbd94c5",
+        "excerpt": "You're looking for a credit card to use for your everyday purchases. You want the card that gives you the highest cash back available in the Rho-Bank profile: make this extremely upfront."
+      }
+    },
+    {
+      "task_id": "task_003",
+      "title": "Travel-spend card with purchase protection",
+      "summary": "The customer wants an everyday card suited to travel spending, with no foreign transaction fees, purchase protection, and a high available limit.",
+      "requested_outcome": "Check card features and eligibility against the stated travel and protection requirements.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 308,
+        "end_char": 567,
+        "source_task_sha256": "431591345634499dc8aed39de54e5b3304ca8500a927dff91d6919053a80ac73",
+        "excerpt": "You're looking for a credit card to use for your everyday purchases. Your hard requirements are that you want a card with NO foreign transaction fees, has purchase protection, as well as at least a 100,000 dollar credit limit available to her as a possiblity."
+      }
+    },
+    {
+      "task_id": "task_004",
+      "title": "Update account email",
+      "summary": "The customer recently changed email and wants the address on their bank account updated.",
+      "requested_outcome": "Complete the contact-email change using the bank’s normal verification process.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 125,
+        "end_char": 179,
+        "source_task_sha256": "4b7a6a37833ea59d03f224a0387d4f71a996d85accf2267c428d80caa7f90b25",
+        "excerpt": "customer who wants to change the email on his account."
+      }
+    },
+    {
+      "task_id": "task_005",
+      "title": "Gold Rewards balance inquiry",
+      "summary": "The customer wants to check the current balance on their Gold Rewards Card.",
+      "requested_outcome": "Retrieve and explain the linked card balance.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 125,
+        "end_char": 187,
+        "source_task_sha256": "0df2ce53122f398a64458678ba65514bc49c419c58aab97c3128a2c54923a56f",
+        "excerpt": "customer who initially comes in to check his account balances."
+      }
+    },
+    {
+      "task_id": "task_006",
+      "title": "Card with low foreign fees and virtual controls",
+      "summary": "The customer is comparing everyday cards and needs low foreign transaction costs, a manageable minimum payment, and virtual-card controls.",
+      "requested_outcome": "Find whether an available card meets the requested fee, payment, and virtual-card features.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 351,
+        "end_char": 698,
+        "source_task_sha256": "396d3d3e9ad6e28e0442e2e22de121cd9d9d6ff1d65c78ebc18616e063c0a73c",
+        "excerpt": "You're looking for a credit card to use for your everyday purchases. Your hard requirements are that you want a card with 1.5% foreign transaction fee or lower, a minimum payment percentage of 1.5% or lower of your statement balance so you don't have to pay back your full statement at once, and you must have the virtual card management feature. "
+      }
+    },
+    {
+      "task_id": "task_007",
+      "title": "Card sign-up bonus comparison",
+      "summary": "The customer is shopping for a card mainly for its introductory points or cash-back offer and prefers lower annual fees when offers are comparable.",
+      "requested_outcome": "Compare current sign-up offers and fees, then recommend an option aligned with the customer’s priorities.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 363,
+        "end_char": 615,
+        "source_task_sha256": "d30123e879e031d9fe7cc2a9c99ee04165f1bac8322a0cac8cda9937ee89f1fb",
+        "excerpt": "with the best promotional offer that gives you points or cash back as a sign-up bonus. You are very upfront about this being your primary interest. If there are multiple cards with such promotional offers, you prefer the one with the lowest annual fee."
+      }
+    },
+    {
+      "task_id": "task_008",
+      "title": "Question about mailed card promotions",
+      "summary": "The customer received mailers advertising several card promotions and wants to discuss redeeming an advertised offer.",
+      "requested_outcome": "Review the advertised promotion terms and explain which offer, if any, can be applied.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 270,
+        "end_char": 401,
+        "source_task_sha256": "ded79cab7f856e5b343574204d5758a61dba30efe7b66a46a8dfd5f4464b96d5",
+        "excerpt": "You received multiple flyers in the mail advertising credit card promotional offers. You are calling to redeem one of these offers:"
+      }
+    },
+    {
+      "task_id": "task_010",
+      "title": "Missing referral bonuses",
+      "summary": "The customer referred four friends who opened cards but received bonuses for only two.",
+      "requested_outcome": "Review the referral records and explain the missing bonus payments.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 163,
+        "end_char": 359,
+        "source_task_sha256": "1b7e99916f35584033555ed92f19dd20b8870ef4c56032a5006ecdc75fa80d43",
+        "excerpt": "You signed up four of your friends for Rho-Bank credit cards. All four actually signed up. But you only got bonus money for two of them. You want to know why you didn't get the bonus for all four."
+      }
+    },
+    {
+      "task_id": "task_012",
+      "title": "Travel notification for an upcoming trip",
+      "summary": "The customer is traveling to Japan and wants a travel notice on their card to reduce the chance of a legitimate purchase being declined.",
+      "requested_outcome": "Explain and submit the appropriate travel-notification request.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 179,
+        "end_char": 429,
+        "source_task_sha256": "189c6cf33f2326898120d60a669423f395f9ba9dcc14ed62fc37a4eddb1a7fd9",
+        "excerpt": "You have a credt card with Rho-Bank. You're planning a two-week trip to Japan next month for a mix of business and vacation. You want to set up a travel notification on your card so it doesn't get declined for suspicious activity while you're abroad."
+      }
+    },
+    {
+      "task_id": "task_014",
+      "title": "Referral link for a card-specific offer",
+      "summary": "The customer received a letter describing a referral offer tied to the Crypto-Cash Back Card and wants a link to share.",
+      "requested_outcome": "Confirm the card’s referral offer and provide the correct referral link.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 210,
+        "end_char": 631,
+        "source_task_sha256": "1119c5894c8529233167338f4d377dfc645b86cf9ef21486f5b809a7794253f1",
+        "excerpt": "You received an official communication in the mail from Rho-Bank about a referral program specifically for the Crypto-Cash Back card. According to the letter, for every person you refer who spends a minimum of $500 within their first 2 months of opening their account, you receive a $100 referral bonus. You're excited about this and want to get your referral link to share with some friends who are interested in crypto."
+      }
+    },
+    {
+      "task_id": "task_015",
+      "title": "Compare several card referral offers",
+      "summary": "The customer has received referral information for several cards and wants to refer friends and family.",
+      "requested_outcome": "Review each requested card’s referral terms and provide the applicable links.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 195,
+        "end_char": 488,
+        "source_task_sha256": "c7636e644ff2569078a61a3b2f338ecec8a90c2d182122aba477c71c09002411",
+        "excerpt": "You've been receiving various communications from Rho-Bank about referral programs for different credit cards. You have friends and family interested in opening credit cards and you want to earn referral bonuses. You've seen information about several different cards and their referral offers."
+      }
+    },
+    {
+      "task_id": "task_016",
+      "title": "Referral bonus not received after friend activity",
+      "summary": "The customer referred a friend who was approved and has used the card, but the expected referral bonus has not arrived.",
+      "requested_outcome": "Check the referral record and explain the bonus status.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 217,
+        "end_char": 468,
+        "source_task_sha256": "4dfd79048329d154ff6aa04f2393dc6d314be00e029b20f2f4ea27a2e6144ef4",
+        "excerpt": "You referred a friend to sign up for a Rho-Bank credit card. Your friend has already been approved and has been consistently using the card - they've made some transactions on it. But you haven't received your referral bonus yet. You want to know why."
+      }
+    },
+    {
+      "task_id": "task_017",
+      "title": "Unexpected Silver Card cash-back points",
+      "summary": "The customer sees possible cash-back errors on several Silver Rewards Card transactions but cannot identify the exact transactions.",
+      "requested_outcome": "Review the card’s rewards activity, identify any incorrect credits, and explain or correct them.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 199,
+        "end_char": 506,
+        "source_task_sha256": "70f7fcc30a9c63147384652596ee2eb639a26819938cdc5dfbf260936e13cba0",
+        "excerpt": "You've been reviewing your Silver Rewards Card transaction history and the cash back points don't seem quite right on a few transactions. You're not sure which ones are wrong or by how much, but you want the agent to investigate and help you fix any errors, including taking action by yourself if necessary."
+      }
+    },
+    {
+      "task_id": "task_018",
+      "title": "Cash-back total differs from expectation",
+      "summary": "The customer’s overall cash-back total seems wrong, and they cannot retrieve detailed transaction records themselves.",
+      "requested_outcome": "Review linked rewards activity and explain any discrepancy, taking appropriate corrective action.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 225,
+        "end_char": 578,
+        "source_task_sha256": "762b8aa240a4d4a3e6267c20d3b751514f16718371200a9aea175d2d0f3693a0",
+        "excerpt": "The total amount of cash back rewards you have received is not what you expected. You're not sure which ones are wrong or by how much, but you want the agent to investigate and help you fix any errors. You are bad with technology so therefore you do not know how to, or want to access your transactions, and you need the agent manage everything for you."
+      }
+    },
+    {
+      "task_id": "task_019",
+      "title": "Rewards mismatch across Gold and Eco cards",
+      "summary": "The customer suspects cash-back calculations are wrong across a Gold Rewards Card and an EcoCard, without transaction details at hand.",
+      "requested_outcome": "Compare rewards across both cards’ transaction histories and address supported discrepancies.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 190,
+        "end_char": 599,
+        "source_task_sha256": "cb3e3cf3abae2ba24ff716ca7d3edc622b4987a8299f7847da3242d13f917231",
+        "excerpt": "You've noticed that your recent cash back rewards don't seem to add up correctly. You have both a Gold Rewards Card and an EcoCard, and you suspect some of your rewards calculations might be off. You're not sure exactly which transactions are wrong, neither are you sure about the specific cash back percentages offered by the cards, but you want the agent to look into it and help resolve any discrepancies. "
+      }
+    },
+    {
+      "task_id": "task_020",
+      "title": "Rewards review across business and personal cards",
+      "summary": "The customer sees possible cash-back errors on a Business Silver Rewards Card and a Silver Rewards Card.",
+      "requested_outcome": "Review both card histories and separate valid category rates from actual reward errors.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 211,
+        "end_char": 642,
+        "source_task_sha256": "bd343bc7ae8f93c8afa3727655d1c4d70cd432a46f8603d57746c9f83fbe24d0",
+        "excerpt": "You've noticed that your recent cash back rewards don't seem to add up correctly. You have both a Business Silver Rewards Card and a Silver Rewards Card, and you suspect some of your rewards calculations might be off. You're not sure exactly which transactions are wrong, neither are you sure about the specific cash back percentages offered by the cards, but you want the agent to look into it and help resolve any discrepancies. "
+      }
+    },
+    {
+      "task_id": "task_021",
+      "title": "Check rewards across Business Bronze and Eco cards",
+      "summary": "The customer sees inconsistent rewards on a Business Bronze Rewards Card and an EcoCard and wants errors distinguished from policy differences.",
+      "requested_outcome": "Audit both card histories and correct only confirmed calculation errors.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 206,
+        "end_char": 458,
+        "source_task_sha256": "083e3bfb6860a8ba25fde6bae719badb00c6ba74747f69130d37cf130d73734c",
+        "excerpt": "You've been reviewing your recent credit card statements and noticed that your cash back rewards seem inconsistent. You have both a Business Bronze Rewards Card and an EcoCard, and some transactions don't appear to be earning the rewards you expected. "
+      }
+    },
+    {
+      "task_id": "task_022",
+      "title": "Audit rewards across four cards",
+      "summary": "The customer found both over-credited and under-credited cash-back transactions across four personal and business cards.",
+      "requested_outcome": "Review the four card histories, identify each reward discrepancy, and correct confirmed errors in either direction.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 285,
+        "end_char": 735,
+        "source_task_sha256": "7b9a27ed8afaba7a434a565613850742a4057addc02c4074abc109b5f1f30a1a",
+        "excerpt": "While auditing your own credit card transactions across your Diamond Elite Card, Business Platinum Rewards Card, Business Silver Rewards Card, and EcoCard, you've noticed discrepancies in your cash back rewards. Some transactions appear to have received too many points (possibly due to incorrect category assignments or promos applied incorrectly), while others received too few points (possibly missing bonus rates they should have qualified for). "
+      }
+    },
+    {
+      "task_id": "task_023",
+      "title": "Check Platinum annual-fee rebate eligibility",
+      "summary": "The customer has used a Platinum Rewards Card for a year and wants to know whether their spending qualifies for its annual-fee rebate.",
+      "requested_outcome": "Check the account’s recorded spending and explain rebate eligibility.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 286,
+        "end_char": 689,
+        "source_task_sha256": "49b2e04e89628bd56d6dc3b789477e0f89bda0d836d7d6f3a48a15593e755fc8",
+        "excerpt": "You remember reading somewhere that the Platinum Rewards Card has some kind of annual fee rebate if you spend enough each month. You've been using the card for a full year now (you opened it in November 2024) and want to know if you qualify for the rebate. You don't remember the exact amount of the rebate or the spending threshold - you just want to know if you qualify based on your spending history."
+      }
+    },
+    {
+      "task_id": "task_024",
+      "title": "Business card for a work-truck purchase",
+      "summary": "A landscaping business is planning a large vehicle purchase and wants a business card that returns the most value on that purchase.",
+      "requested_outcome": "Compare business-card rewards and terms for the planned purchase and support the customer’s application choice.",
+      "role_fit": "business_customer",
+      "role_fit_note": "This request explicitly concerns a business account, business card, or business referral.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 206,
+        "end_char": 552,
+        "source_task_sha256": "864843028c613f39624182a6ee27ce23eba5b127dceada37c057396af0ffcbf3",
+        "excerpt": "You're planning to purchase a new work truck for your landscaping business. The total cost will be around $40,000. You don't currently have any Rho-Bank credit cards, but you've heard they have good business credit card options. You want to apply for whichever business credit card will give you the most money back on this single large purchase."
+      }
+    },
+    {
+      "task_id": "task_025",
+      "title": "Business card for an enterprise subscription",
+      "summary": "A software company wants to pay for a company-wide music subscription and is seeking the best business-card return on the one-time expense.",
+      "requested_outcome": "Compare business-card rewards for the stated enterprise purchase and explain the best available fit.",
+      "role_fit": "business_customer",
+      "role_fit_note": "This request explicitly concerns a business account, business card, or business referral.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 213,
+        "end_char": 635,
+        "source_task_sha256": "57a1e55183c2d3aeb1d9d82a8902d56a91d58e44a4d6fbafe4141675734a5ba6",
+        "excerpt": "You're planning to purchase a company-wide Apple Music subscription for your entire business. The total cost will be $100,000 as a single upfront payment for a multi-year enterprise license. You don't currently have any Rho-Bank credit cards, but you've heard they have good business credit card options. You want to apply for whichever business credit card will give you the most money back on this single large purchase."
+      }
+    },
+    {
+      "task_id": "task_026",
+      "title": "Cash-back review across Business Silver and Silver cards",
+      "summary": "The customer sees unexplained cash-back differences across a Business Silver Rewards Card and a Silver Rewards Card and wants both investigated.",
+      "requested_outcome": "Review both card histories and explain or correct confirmed reward discrepancies.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 211,
+        "end_char": 642,
+        "source_task_sha256": "6f310fcb0530526be26bdc80f250f001dc7ad5576e7e48486999ae2c33633e79",
+        "excerpt": "You've noticed that your recent cash back rewards don't seem to add up correctly. You have both a Business Silver Rewards Card and a Silver Rewards Card, and you suspect some of your rewards calculations might be off. You're not sure exactly which transactions are wrong, neither are you sure about the specific cash back percentages offered by the cards, but you want the agent to look into it and help resolve any discrepancies. "
+      }
+    },
+    {
+      "task_id": "task_027",
+      "title": "Cash-back review across Business Silver and Silver cards",
+      "summary": "The customer sees unexplained cash-back differences across a Business Silver Rewards Card and a Silver Rewards Card and wants both investigated.",
+      "requested_outcome": "Review both card histories and explain or correct confirmed reward discrepancies.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 211,
+        "end_char": 642,
+        "source_task_sha256": "cd9b6569029e2052d920826ae406761e47ab7c3433b00543ac62ad305eed06b2",
+        "excerpt": "You've noticed that your recent cash back rewards don't seem to add up correctly. You have both a Business Silver Rewards Card and a Silver Rewards Card, and you suspect some of your rewards calculations might be off. You're not sure exactly which transactions are wrong, neither are you sure about the specific cash back percentages offered by the cards, but you want the agent to look into it and help resolve any discrepancies. "
+      }
+    },
+    {
+      "task_id": "task_028",
+      "title": "Investigate unexplained cash-back total",
+      "summary": "The customer’s total cash-back amount is unexpected and they want the bank to investigate and correct any errors.",
+      "requested_outcome": "Reconcile the linked rewards with transaction activity and address confirmed errors.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 225,
+        "end_char": 578,
+        "source_task_sha256": "6fbbad88ffc5b78d5be89a1db8a3c9ff2bd29b5d83bb2cffe468e33ae546b133",
+        "excerpt": "The total amount of cash back rewards you have received is not what you expected. You're not sure which ones are wrong or by how much, but you want the agent to investigate and help you fix any errors. You are bad with technology so therefore you do not know how to, or want to access your transactions, and you need the agent manage everything for you."
+      }
+    },
+    {
+      "task_id": "task_029",
+      "title": "Investigate unexplained cash-back total",
+      "summary": "The customer’s total cash-back amount is unexpected and they want the bank to investigate and correct any errors.",
+      "requested_outcome": "Reconcile the linked rewards with transaction activity and address confirmed errors.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 225,
+        "end_char": 578,
+        "source_task_sha256": "aafb6891222a22af6c3293c9cb7536cb5c7b2318448f4fa680992b15585414d4",
+        "excerpt": "The total amount of cash back rewards you have received is not what you expected. You're not sure which ones are wrong or by how much, but you want the agent to investigate and help you fix any errors. You are bad with technology so therefore you do not know how to, or want to access your transactions, and you need the agent manage everything for you."
+      }
+    },
+    {
+      "task_id": "task_031",
+      "title": "Dispute a hotel room downgrade",
+      "summary": "The customer paid for a hotel suite but received a lower room category, and the hotel has refused to resolve the price difference.",
+      "requested_outcome": "Review the hotel purchase dispute and explain the available resolution.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 166,
+        "end_char": 416,
+        "source_task_sha256": "0702d1e320193224d8632b1682129a9f858a513cb6489c1230a5c5ecb9e346b1",
+        "excerpt": "About two weeks ago, you booked a hotel room at Marriott Hotels using your Silver Rewards Card. You specifically booked and paid for a king suite, but when you arrived at the hotel, they gave you a standard double room and said they were overbooked. "
+      }
+    },
+    {
+      "task_id": "task_032",
+      "title": "Card purchases declined despite available credit",
+      "summary": "The customer’s credit card is declining even though their account shows available credit; they are asking for urgent human assistance.",
+      "requested_outcome": "Investigate the decline and connect the customer with a human representative as requested.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 162,
+        "end_char": 391,
+        "source_task_sha256": "00fa017c0c76601d13bbce7780ec755275561011099e2f2560c250c8eb585b85",
+        "excerpt": "Your credit card has been declining purchases all day even though you KNOW you haven't reached your credit limit. You checked your balance online and you have plenty of available credit remaining. You need this resolved urgently."
+      }
+    },
+    {
+      "task_id": "task_033",
+      "title": "Payment deducted but card still shows balance due",
+      "summary": "A recent statement payment left the customer’s checking account, but the card still shows the amount due shortly before the cycle ends.",
+      "requested_outcome": "Trace the payment posting and clarify the statement balance and interest implications.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 201,
+        "end_char": 637,
+        "source_task_sha256": "43a20801a9d967dad13e5b4177865f6d095629421f6c6a10399474352518cc3e",
+        "excerpt": "You paid your Bronze Rewards Card statement balance of $2,847.53 three days ago. The payment was successfully deducted from your Rho-Bank checking account, but when you log into your credit card account, it still shows the full statement balance as unpaid. Your statement cycle ends in 2 days and you're worried you'll be charged interest on a balance you've already paid. You've already verified the payment left your checking account."
+      }
+    },
+    {
+      "task_id": "task_034",
+      "title": "Expected direct deposit is missing",
+      "summary": "The customer’s regular payday deposit has not appeared, and rent and other bills are due soon.",
+      "requested_outcome": "Check the deposit status and explain the next step to locate the missing funds.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 262,
+        "end_char": 623,
+        "source_task_sha256": "364587224e8e88709a65db5415ec5ba874b1dd5a581d7ab70048dcd110fe3970",
+        "excerpt": "It's Friday morning and your direct deposit from your employer should be in your account. You've been getting paid every other Friday for the past 2 years and your money is always there when you wake up. But this morning it's not there. You checked at 7 AM and again at 8 AM and still nothing. You're worried because you have rent due tomorrow and bills to pay."
+      }
+    },
+    {
+      "task_id": "task_035",
+      "title": "Correct a reported delinquency",
+      "summary": "The customer’s credit-monitoring alert shows a reported late payment despite on-time autopay and bank payment history, with a mortgage application approaching.",
+      "requested_outcome": "Investigate the reported delinquency and correct or escalate any verified reporting error.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 259,
+        "end_char": 507,
+        "source_task_sha256": "f6ec3468d927ac12f86b94596a9e2097cb3337f027b975c05211b04bc2653b1f",
+        "excerpt": "You just received an urgent alert from your credit monitoring service (Credit Karma) saying your credit score dropped 127 points overnight. When you looked at the details, it says Rho-Bank reported a 60-day delinquency on your credit card account. "
+      }
+    },
+    {
+      "task_id": "task_036",
+      "title": "Review unexpected card transactions",
+      "summary": "The customer’s card balance is higher than expected and they want to inspect recent transactions before deciding whether action is needed.",
+      "requested_outcome": "Review recent activity and help secure the card if the customer identifies unauthorized transactions.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 166,
+        "end_char": 427,
+        "source_task_sha256": "8fb16abe143533e4a4a907dea9da3cfb02c05440b311182c90d249ac734f67b5",
+        "excerpt": "You just checked your credit card statement and something feels off - your balance is higher than you expected. You want to see your recent transactions to figure out what's going on. You're calling Rho-Bank to get an overview of your last several transactions."
+      }
+    },
+    {
+      "task_id": "task_037",
+      "title": "Review transactions and dispute suspected fraud",
+      "summary": "The customer’s card balance is unexpectedly high and they want recent activity reviewed, with disputes and replacement if fraud is found.",
+      "requested_outcome": "Review the transactions, file appropriate disputes for confirmed unauthorized charges, and secure the card.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 166,
+        "end_char": 427,
+        "source_task_sha256": "7f6ef9e6516e1f535a37deedca53b6d4291301dad24a63b1acd15023ff38df3e",
+        "excerpt": "You just checked your credit card statement and something feels off - your balance is higher than you expected. You want to see your recent transactions to figure out what's going on. You're calling Rho-Bank to get an overview of your last several transactions."
+      }
+    },
+    {
+      "task_id": "task_038",
+      "title": "Dispute Amazon charges and replace card",
+      "summary": "The customer has concerning Amazon charges and wants to dispute three purchases and replace the affected card because of suspected fraud.",
+      "requested_outcome": "Review the specified purchases, process eligible disputes, and arrange card replacement.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 166,
+        "end_char": 313,
+        "source_task_sha256": "3c45198cdf680609e5756d701c17e9f31c29e334847e01ffc9556090b972c713",
+        "excerpt": "You've been having a series of problems with some of your Amazon orders and you just noticed some concerning charges on your credit card statement."
+      }
+    },
+    {
+      "task_id": "task_039",
+      "title": "Dispute mixed Costco and Amazon charges",
+      "summary": "The customer found several problematic Costco and Amazon purchases, including suspected fraud, duplicate billing, and fulfillment issues.",
+      "requested_outcome": "Review each reported transaction, file appropriate disputes, and replace the affected card.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 163,
+        "end_char": 425,
+        "source_task_sha256": "20de451f4ce02615370d8820e93661d9a18420eb81423f5497cd8abeb7462bcb",
+        "excerpt": "You've been reviewing your credit card statement and noticed several problems with your Costco and Amazon purchases today. Some charges are fraudulent, some are duplicates, some are for items you received but weren't what you ordered, and some have other issues."
+      }
+    },
+    {
+      "task_id": "task_040",
+      "title": "Disputes across personal and business cards",
+      "summary": "The customer found fraud, duplicate charges, and other issues across a personal Gold card and a Business Gold card.",
+      "requested_outcome": "Review all reported transactions across both cards and process eligible disputes and provisional credits.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 256,
+        "end_char": 538,
+        "source_task_sha256": "55e1c2dbc6fa192f62e0890c0b5431479d80bb501c6a83455c686477fd8e8b21",
+        "excerpt": "You've been reviewing statements for both your credit cards and found problems on each. Your personal Gold card has some issues with subscriptions and utilities, plus some fraud. Your Business Gold card has problems with vendors and suppliers, including fraud and duplicate charges."
+      }
+    },
+    {
+      "task_id": "task_041",
+      "title": "Multi-card transaction dispute review",
+      "summary": "The customer found a mix of fraud, duplicates, and missing deliveries across four cards and wants the transactions investigated.",
+      "requested_outcome": "Review the reported transactions across all four cards and process eligible disputes and provisional credits.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 348,
+        "end_char": 533,
+        "source_task_sha256": "439c74bfb42b35ede9f5b59fa71e4cf37edd661139ee86ee662a4beb24e7cdff",
+        "excerpt": "You've been reviewing statements for all your credit cards and found problems on each. There's been fraud, duplicate charges, missing deliveries, and other issues across all four cards."
+      }
+    },
+    {
+      "task_id": "task_043",
+      "title": "Close a Platinum card over its annual fee",
+      "summary": "The customer is considering closing a Platinum Rewards Card because its annual fee no longer feels worthwhile.",
+      "requested_outcome": "Review the closure request and explain the account’s current balance and available retention options.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 197,
+        "end_char": 344,
+        "source_task_sha256": "90bb6c90d99e5d5f472f1576f7c23559e18f501299c37ecb9bc7a6d8396432d3",
+        "excerpt": "You've been thinking about closing your Platinum Rewards Card because the annual fee feels too high for how much you've been using the card lately."
+      }
+    },
+    {
+      "task_id": "task_044",
+      "title": "Close a Gold card after finding a travel alternative",
+      "summary": "The customer wants to close a Gold Rewards Card after finding another card with travel-related benefits that better match their needs.",
+      "requested_outcome": "Review the closure request and explain relevant account implications.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 161,
+        "end_char": 592,
+        "source_task_sha256": "a4dd48f6f6317b795b47629a719989bdf1f16ebcb4805a87bfe4ec9421505bd4",
+        "excerpt": "You've been considering closing your Gold Rewards Card because you found a card at a competitor bank (Capital Two Venture X) that seems to offer much better rewards - 8% cash back on all purchases, no foreign transaction fees, and they're offering a sign-up bonus. The annual fee is $195 which seems reasonable for the rewards. You travel to Greece regularly to visit family and the no foreign transaction fees is important to you."
+      }
+    },
+    {
+      "task_id": "task_045",
+      "title": "Close an underused business card",
+      "summary": "The customer wants to simplify business finances and close an underused Business Silver Rewards Card after finding an alternative.",
+      "requested_outcome": "Review the business card closure request and explain its account implications.",
+      "role_fit": "business_customer",
+      "role_fit_note": "This request explicitly concerns a business account, business card, or business referral.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 277,
+        "end_char": 688,
+        "source_task_sha256": "36151b1772b9bca91cdffb6bee781d7abf4bef8247dece337363ad2876e6ae8e",
+        "excerpt": "You've been looking at other credit card options and found the Pursuit Ink Business Preferred card, which offers 3x points on travel, shipping, and advertising purchases, plus no foreign transaction fees. It seems similar to your Business Silver Rewards Card but with slightly better perks for your consulting work. You don't use your Rho-Bank business card that much anymore and want to simplify your finances."
+      }
+    },
+    {
+      "task_id": "task_046",
+      "title": "Close an underused business card",
+      "summary": "The customer wants to simplify business finances and close an underused Business Silver Rewards Card after finding an alternative.",
+      "requested_outcome": "Review the business card closure request and explain its account implications.",
+      "role_fit": "business_customer",
+      "role_fit_note": "This request explicitly concerns a business account, business card, or business referral.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 277,
+        "end_char": 688,
+        "source_task_sha256": "f73ac3d21cc8597473d3fcfbf66a0b2b6e174cf98e8b33fd1f9f9d9d4f6a0e0a",
+        "excerpt": "You've been looking at other credit card options and found the Pursuit Ink Business Preferred card, which offers 3x points on travel, shipping, and advertising purchases, plus no foreign transaction fees. It seems similar to your Business Silver Rewards Card but with slightly better perks for your consulting work. You don't use your Rho-Bank business card that much anymore and want to simplify your finances."
+      }
+    },
+    {
+      "task_id": "task_047",
+      "title": "Review two card closure requests",
+      "summary": "The customer wants to close a business travel card after comparing another offer and is also unhappy with a personal card’s annual fee.",
+      "requested_outcome": "Review both closure requests and explain the account-specific next steps.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 221,
+        "end_char": 720,
+        "source_task_sha256": "39058a8e368a65608e5eca61665c7d7110b30e6aac404d20b634aed73210ac37",
+        "excerpt": "You've been looking at other credit card options for your business. You found the Global Business Travel Plus card from a competitor bank, which offers 3.5% rewards on travel and advertising purchases, no foreign transaction fees, and a $275 annual fee. You want to close your Silver Zoom Card because this competitor card seems better for your business travel needs. You're also frustrated with the annual fee on your personal Platinum Rewards Card - it feels too expensive for what you're getting."
+      }
+    },
+    {
+      "task_id": "task_048",
+      "title": "Close several cards in one call",
+      "summary": "The customer has decided to close four credit cards for different reasons and wants to handle the requests together.",
+      "requested_outcome": "Review each card’s closure eligibility and complete the requested closures where possible.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 249,
+        "end_char": 435,
+        "source_task_sha256": "1c9dd8e2c4c3883516f9ae1b697cddf03cdd2084a575d85d741381b1a8083863",
+        "excerpt": "You've been reviewing your credit cards and decided you have too many. You want to close all four of them for various reasons. You're organized and want to handle everything in one call."
+      }
+    },
+    {
+      "task_id": "task_049",
+      "title": "Close multiple credit cards",
+      "summary": "The customer wants to close all of their credit cards with the bank.",
+      "requested_outcome": "Review each requested closure using the normal account process.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 325,
+        "end_char": 460,
+        "source_task_sha256": "7410929906ac165ff07c155e0c1ac23a8eb1237316a0632661941b9ed95b100a",
+        "excerpt": "You've decided to close all your credit cards with Rho-Bank. You're willing to bend the truth if it helps you get what you want faster."
+      }
+    },
+    {
+      "task_id": "task_050",
+      "title": "Increase a Gold card limit for renovation purchases",
+      "summary": "The customer regularly pays a Gold Rewards Card on time and expects large home-renovation purchases.",
+      "requested_outcome": "Review the credit-limit increase request and explain the decision or next steps.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 189,
+        "end_char": 392,
+        "source_task_sha256": "36e366f8b2fa4402dfa1c35debb1bc03a6be6ed7c8f7e9848d0cf646e385db80",
+        "excerpt": "You've been using your Gold Rewards Card regularly and always pay on time. You have an upcoming renovation project and will need to make some large purchases, so you'd like to increase your credit limit."
+      }
+    },
+    {
+      "task_id": "task_051",
+      "title": "Increase a Bronze card limit for freelance equipment",
+      "summary": "The customer wants more credit capacity for design equipment and software for freelance work.",
+      "requested_outcome": "Review the Bronze Rewards Card limit-increase request using the account’s current standing.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 201,
+        "end_char": 462,
+        "source_task_sha256": "8903e0c276a0c5fe57a72d94f7375eb868740bfa93fff0d8f590280808d29335",
+        "excerpt": "You've been using your Bronze Rewards Card regularly and always pay on time. You're planning to purchase new design equipment and software for your freelance business and would like to increase your credit limit. You currently have a $3,000 balance on the card."
+      }
+    },
+    {
+      "task_id": "task_052",
+      "title": "Repeat credit-limit increase request",
+      "summary": "The customer is requesting another Bronze Rewards Card limit increase soon after receiving a prior increase.",
+      "requested_outcome": "Check the account’s eligibility and explain the applicable timing and decision.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 158,
+        "end_char": 395,
+        "source_task_sha256": "595624073ae3c1d42567da1948b5ec7da40835a0dff59bcb9b6b7870afb453ae",
+        "excerpt": "You got a credit limit increase about 2 months ago, but you want another one now. You've done some research on Rho-Bank policies and plan to cite real policies - but twist them to make it seem like you should be eligible when you're not."
+      }
+    },
+    {
+      "task_id": "task_053",
+      "title": "Missing laptop dispute and limit increase",
+      "summary": "The customer never received a laptop purchase and also wants a higher card limit for planned spending.",
+      "requested_outcome": "Review the undelivered-purchase dispute and the separate limit-increase request.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 171,
+        "end_char": 607,
+        "source_task_sha256": "3abd0036c8fefbfb5ae1094f2fdbc6ff023e0442cd08b9b56e62b97ef6714b98",
+        "excerpt": "You have two issues to deal with today:\n1. You ordered a laptop from \"TechDirect Online\" for $1,247.99 exactly 5 weeks ago (on 10/10/2025) and never received it. The merchant isn't responding to your emails. You want to dispute this charge.\n2. You've also been meaning to request a credit limit increase. You've had the card for about a year, always pay on time, and want to increase your limit from $15,000 to $22,500 (a 50% increase)."
+      }
+    },
+    {
+      "task_id": "task_054",
+      "title": "Dispute suspected fraud, replace card, and review limit",
+      "summary": "The customer found a charge for a service they do not use, fears card compromise, and also wants more headroom for renovation spending.",
+      "requested_outcome": "Address the disputed charge and card security, then review the credit-limit request.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 154,
+        "end_char": 572,
+        "source_task_sha256": "3edf9f95e151607ba4c5cd3e6d1794917f3df7f30262e498a2c9a69110cd3495",
+        "excerpt": "You noticed a fraudulent charge on your Gold Rewards Card from \"CloudSync Storage\" for $487.50 - a service you've never used. You're worried your card information was compromised, so you want to dispute the charge AND get a replacement card to be safe. Additionally, you've been meaning to request a credit limit increase because you have a home renovation project coming up and need more headroom for large purchases."
+      }
+    },
+    {
+      "task_id": "task_055",
+      "title": "Choose travel checking and emergency savings",
+      "summary": "The customer wants a second checking account for travel and a savings account for an emergency fund, with a check to deposit after opening.",
+      "requested_outcome": "Recommend suitable accounts, open the selected accounts, and deposit the customer’s check as requested.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 767,
+        "end_char": 985,
+        "source_task_sha256": "33f97ab93530ef52ae6c335e54f31839b77713c2ede6706148db40a3f1761b6e",
+        "excerpt": "1. **Opening - Make clear you want ONE recommendation for each:** \"Hi! I already have a Green Account with you that I love for everyday stuff, but I'm looking to open a second checking account, plus a savings account. "
+      }
+    },
+    {
+      "task_id": "task_056",
+      "title": "Replace business checking and open business savings",
+      "summary": "A landscaping business wants better business checking than its current account and its first business savings account, funded from existing business checking.",
+      "requested_outcome": "Compare and open the requested business accounts, then transfer the planned opening funds.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 377,
+        "end_char": 459,
+        "source_task_sha256": "de7f742c5351d499b615718337379daa2cd528bea62a359f26c22e5acce0fba4",
+        "excerpt": "You're unhappy with the Navy Blue account because it doesn't have enough features."
+      }
+    },
+    {
+      "task_id": "task_057",
+      "title": "Open checking and savings accounts",
+      "summary": "The customer wants a new checking account and a savings account, plus an initial check deposit.",
+      "requested_outcome": "Recommend suitable accounts, complete the requested openings, and deposit the check.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 671,
+        "end_char": 942,
+        "source_task_sha256": "ccf75d889dc62de80c0eaeb4e502a79b24ccadc9d236e685a12d5d1787015964",
+        "excerpt": "1. **Opening - State your goal clearly:** \"Hi, I'm looking to open a new checking account in addition to my old one year old checking account. If the agent ever asks if you want to be transferred to a human, say no and say that you would rather have the agent help you. \""
+      }
+    },
+    {
+      "task_id": "task_058",
+      "title": "Compare a savings-and-card return plan",
+      "summary": "The customer wants to place saved funds in savings for a year and compare that interest with the cost of opening a credit card.",
+      "requested_outcome": "Compare net annual return across suitable savings and card combinations, then support the requested account actions.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 174,
+        "end_char": 459,
+        "source_task_sha256": "a725b5fe20f6631ff7f72261fec9da46c4cc39c485977b6fd18e4285a8ed6006",
+        "excerpt": "You already have a Light Blue checking account with Rho-Bank, (opened about a year ago). You've saved up $20,000 and want to:\n1. Open a credit card with Rho-Bank\n2. Open a savings account with Rho-Bank\n3. Deposit the $20,000 into the savings account and leave it untouched for one year"
+      }
+    },
+    {
+      "task_id": "task_059",
+      "title": "Compare savings interest with card fees",
+      "summary": "The customer wants to deposit savings for a year and weigh interest earned against a new card’s annual fee.",
+      "requested_outcome": "Compare net return for the stated savings and card plan and explain the best available option.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 162,
+        "end_char": 451,
+        "source_task_sha256": "4d115aec66de71e9d03cf4f1f63933844b8f3feb97fef54963ee8fc824b5e9e4",
+        "excerpt": "You already have a Light Blue checking account with Rho-Bank (opened about a year ago). You've managed to save $5,000 and want to:\n1. Open a credit card with Rho-Bank\n2. Open a savings account with Rho-Bank\n3. Deposit the $5,000 into the savings account and leave it untouched for one year"
+      }
+    },
+    {
+      "task_id": "task_060",
+      "title": "Close one checking account and open emergency savings",
+      "summary": "The customer wants to close an empty Green checking account, keep the Blue account, and open savings for an emergency fund.",
+      "requested_outcome": "Complete the requested closure and recommend and open a suitable savings account.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 225,
+        "end_char": 601,
+        "source_task_sha256": "bcedd99c906c7b7fcd9e1c27947b581df60db5ca40c830a721057fd5bd725613",
+        "excerpt": "You have a Green (Checking) Account and a Blue (Checking) Account. You want to simplify your finances by closing the Green Account (you prefer to keep the Blue Account) and you also want to open a savings account to start building an emergency fund. The Green Account has no money in it - you already moved the funds out. You have very specific needs for your savings account."
+      }
+    },
+    {
+      "task_id": "task_061",
+      "title": "Close checking, open savings, and deposit a check",
+      "summary": "The customer wants to close an empty Green checking account, retain Silver checking, open emergency savings, and deposit a small check.",
+      "requested_outcome": "Complete the account reorganization and deposit the check into the selected account.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 218,
+        "end_char": 670,
+        "source_task_sha256": "7c8bd8e4957aaf59640438c9c176b2d809fba847df45b4e1a34a2d61a0580aa4",
+        "excerpt": "You have a Green (Checking) Account and a Silver (Checking) Account. You want to simplify your finances by closing the Green Account (you prefer to keep the Silver Account) and you also want to open a savings account to start building an emergency fund. The Green Account has no money in it - you already moved the funds out. You have very specific needs for your savings account. You also have a $25 check from a friend that you haven't deposited yet."
+      }
+    },
+    {
+      "task_id": "task_062",
+      "title": "Reorganize personal and new-business banking",
+      "summary": "The customer recently formed an LLC and wants to close an existing savings account, open business checking, and move to a better savings account.",
+      "requested_outcome": "Review the requested closures and recommend and open the appropriate business and savings accounts.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 214,
+        "end_char": 252,
+        "source_task_sha256": "a56aed67f2f6af89eaf6c6e6848dc4626e6cb43c4d0f1866c8ef651ebcbbd481",
+        "excerpt": "You have three accounts with Rho-Bank."
+      }
+    },
+    {
+      "task_id": "task_063",
+      "title": "Savings-and-card plan with paper statements",
+      "summary": "The customer wants to compare a savings deposit and new credit card for annual return, while requiring mailed paper statements.",
+      "requested_outcome": "Compare accounts against return and paper-statement needs, then complete the requested account actions.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 279,
+        "end_char": 561,
+        "source_task_sha256": "c32d90c34a9b32166a132ac4c31ab1849a1c9c6da8128e6a88951dcd07ce6925",
+        "excerpt": "You already have a Light Blue checking account with Rho-Bank (opened about a year ago). You've saved up $8,000 and want to:\n1. Open a credit card with Rho-Bank\n2. Open a savings account with Rho-Bank\n3. Deposit the $8,000 into the savings account and leave it untouched for one year"
+      }
+    },
+    {
+      "task_id": "task_064",
+      "title": "Savings-and-card plan for a subscribed customer",
+      "summary": "A current subscriber wants to place savings for a year and open a card, balancing interest against card fees.",
+      "requested_outcome": "Compare the net annual return using the customer’s existing subscription benefits and requested account plan.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 218,
+        "end_char": 587,
+        "source_task_sha256": "e876129d7a4d3bbf4f4cb99c65f92afe456847990e42388fb9f84b81b156d0f6",
+        "excerpt": "You already have a Light Blue checking account with Rho-Bank (opened about a year ago). You also have an active Rho-Bank+ subscription that you use for other banking perks. You've saved up $30,000 and want to:\n1. Open a credit card with Rho-Bank\n2. Open a savings account with Rho-Bank\n3. Deposit the $30,000 into the savings account and leave it untouched for one year"
+      }
+    },
+    {
+      "task_id": "task_065",
+      "title": "Replace checking and open savings without a new card",
+      "summary": "The customer wants to move savings, open better checking, and close an empty old checking account; they do not want another card.",
+      "requested_outcome": "Recommend and open suitable checking and savings accounts, fund savings, and close the old account.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 234,
+        "end_char": 464,
+        "source_task_sha256": "a155ec9f735db0fda3d62fd5976cd9a00f6a32314411c81b5aadaf25ea1430a9",
+        "excerpt": "You already have a Light Blue checking account with Rho-Bank. The account is basically empty now - you already moved your money out. You've saved up $6,000 and want to maximize the interest you'll earn on it in a savings account. "
+      }
+    },
+    {
+      "task_id": "task_066",
+      "title": "Reorganize checking and savings, with card as an option",
+      "summary": "The customer wants to move savings, replace checking, and close an empty old account, while considering whether a card improves net return.",
+      "requested_outcome": "Compare the account plan with and without a card and complete the chosen actions.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 234,
+        "end_char": 464,
+        "source_task_sha256": "45a351eae75463b758e147c9d61c6e3dca2b0692ad99940863a809d196cb12de",
+        "excerpt": "You already have a Light Blue checking account with Rho-Bank. The account is basically empty now - you already moved your money out. You've saved up $6,000 and want to maximize the interest you'll earn on it in a savings account. "
+      }
+    },
+    {
+      "task_id": "task_067",
+      "title": "Reorganize accounts around a large savings balance",
+      "summary": "The customer wants to move savings, replace checking, close an empty account, and consider a card only if it improves annual return.",
+      "requested_outcome": "Compare suitable account combinations and complete the customer’s selected reorganization.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 234,
+        "end_char": 466,
+        "source_task_sha256": "94b427382bf31ad131c80f131d750f3da9a7064be86eebbf76e4557cc5daad9f",
+        "excerpt": "You already have a Light Blue checking account with Rho-Bank. The account is basically empty now - you already moved your money out. You've saved up $100,000 and want to maximize the interest you'll earn on it in a savings account. "
+      }
+    },
+    {
+      "task_id": "task_068",
+      "title": "Reorganize savings, checking, and card accounts",
+      "summary": "The customer wants to move savings for a year, replace an existing checking account, close the old account, and consider a card if it improves returns.",
+      "requested_outcome": "Compare annual returns across suitable account combinations and complete the selected openings, funding, and closure.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 231,
+        "end_char": 462,
+        "source_task_sha256": "41483ad35a41f905695bd36db882198c175f9df01569481fa108051c7a7b85af",
+        "excerpt": "You already have a Light Blue checking account with Rho-Bank. The account is basically empty now - you already moved your money out. You've saved up $25,000 and want to maximize the interest you'll earn on it in a savings account. "
+      }
+    },
+    {
+      "task_id": "task_069",
+      "title": "Compare a savings deposit with checking and card changes",
+      "summary": "The customer wants to invest saved cash in a year-long savings account, replace old checking, and consider a card if it boosts the overall return.",
+      "requested_outcome": "Compare net annual returns and complete the selected account changes.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 288,
+        "end_char": 519,
+        "source_task_sha256": "2121a8b16aa5dc70aee819ba6c4dcc060ff325944467370cfe0c3cf1ebfd5d4f",
+        "excerpt": "You already have a Light Blue checking account with Rho-Bank. The account is basically empty now - you already moved your money out. You've saved up $10,000 and want to maximize the interest you'll earn on it in a savings account. "
+      }
+    },
+    {
+      "task_id": "task_070",
+      "title": "Recommend business checking for a growing firm",
+      "summary": "A small marketing business wants to separate personal and business finances and choose a practical business checking account with low fees.",
+      "requested_outcome": "Recommend one business checking account that fits the stated operating needs.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 411,
+        "end_char": 587,
+        "source_task_sha256": "a6fcc1865d84204af8fe90422af4d8854d421d4280e93941f0e0f763e3db7b13",
+        "excerpt": "Get ONE recommendation for a business checking account that meets all your requirements. You want the agent to recommend a single account - not give you options to choose from."
+      }
+    },
+    {
+      "task_id": "task_071",
+      "title": "Upgrade business checking and add business savings",
+      "summary": "A design studio wants better business checking than its current account and a first business savings account.",
+      "requested_outcome": "Recommend one account for each need and support opening both.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 584,
+        "end_char": 807,
+        "source_task_sha256": "7c47d48d9c9d2aaa92ff21ab353c3a3e9da4a09c9ec4909e6575a08a14b754f9",
+        "excerpt": "Get ONE recommendation each for a new business checking account AND a business savings account that meet all your requirements. You want the agent to recommend single accounts for each - not give you options to choose from."
+      }
+    },
+    {
+      "task_id": "task_072",
+      "title": "Review ATM fees on two checking accounts",
+      "summary": "The customer sees ATM fees that do not match expectations across two checking accounts.",
+      "requested_outcome": "Review the November ATM transactions and explain or correct fees inconsistent with the accounts’ terms.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 204,
+        "end_char": 559,
+        "source_task_sha256": "e7ee150ff2993e94c49d6c9345802bcc232fc174f33e6c9e897e689995a0c335",
+        "excerpt": "You have two checking accounts with Rho-Bank - a Bluest Account and a Light Green Account that you've had since you were a teenager. You were looking at your November transaction history and some of the ATM fees don't look right to you. You're not exactly sure what's wrong, but the amounts seem off based on what you remember about your account benefits."
+      }
+    },
+    {
+      "task_id": "task_073",
+      "title": "Review ATM fees across three checking accounts",
+      "summary": "The customer sees unexpected ATM charges across three checking accounts and wants them checked against account benefits.",
+      "requested_outcome": "Compare the relevant ATM activity and fee terms across all three accounts.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 233,
+        "end_char": 564,
+        "source_task_sha256": "0317fc9f694a1af07b4be4892c2679ad7236e599a98f0eaf971fa1672af580f7",
+        "excerpt": "You have three checking accounts with Rho-Bank - a Blue Account, a Green Account, and a Light Green Account. You were looking at your November transaction history and some of the ATM fees don't look right to you. You're not exactly sure what's wrong, but the amounts seem off based on what you remember about your account benefits."
+      }
+    },
+    {
+      "task_id": "task_074",
+      "title": "Review ATM fees across four checking accounts",
+      "summary": "The customer sees possible ATM-fee errors across four checking accounts with different benefits.",
+      "requested_outcome": "Review each account’s ATM charges against its applicable fee terms.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 222,
+        "end_char": 580,
+        "source_task_sha256": "d0d1f2a978556913cf9d8e1c86951ab2a871f7c4ccaed9f67eece8e625fe4d73",
+        "excerpt": "You have four checking accounts with Rho-Bank - a Purple Account, a Light Blue Account, a Dark Green Account, and an Evergreen Account. You were looking at your November transaction history and some of the ATM fees don't look right to you. You're not exactly sure what's wrong, but the amounts seem off based on what you remember about your account benefits."
+      }
+    },
+    {
+      "task_id": "task_075",
+      "title": "Find low-fee checking for overseas cash access",
+      "summary": "A photographer planning an overseas assignment wants personal checking that minimizes fees for regular out-of-network foreign ATM withdrawals.",
+      "requested_outcome": "Compare checking options using the stated travel and withdrawal pattern and recommend the lowest-cost fit.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 209,
+        "end_char": 538,
+        "source_task_sha256": "fe5f745abaf9fc42d323baf361da814db0efe956cf254db4b3d6c6cd1846ac35",
+        "excerpt": "You're planning a 3-month photography assignment across Southeast Asia starting next month. You'll need to withdraw cash regularly from out of network ATMs abroad in a foreign currency. You want to open a new personal checking account specifically for this trip and want to pick whichever one will cost you the least in ATM fees."
+      }
+    },
+    {
+      "task_id": "task_076",
+      "title": "Travel checking with overseas ATM access and early pay",
+      "summary": "The customer needs a personal checking account for a European work trip, with low foreign ATM costs and early direct deposit.",
+      "requested_outcome": "Compare checking accounts against both travel costs and early-pay needs.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 226,
+        "end_char": 595,
+        "source_task_sha256": "419a62ec35b756618da8d0fa85a119a795f2b1c554326af406fd3566031b589d",
+        "excerpt": "You're planning a 2-month work trip across Europe starting next month. You'll need to withdraw cash regularly from out of network ATMs abroad in foreign currency. You want to open a new personal checking account for this trip that minimizes ATM fees. You also need early direct deposit because you'll be getting paid while abroad and need quick access to your paycheck."
+      }
+    },
+    {
+      "task_id": "task_077",
+      "title": "Secure two missing debit cards",
+      "summary": "The customer cannot find debit cards linked to two checking accounts and thinks the wallet may be lost.",
+      "requested_outcome": "Secure both cards and arrange replacements through the normal identity and card process.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 203,
+        "end_char": 418,
+        "source_task_sha256": "d668f1c5833a48a166ed031a0355d2c4e121a6fdc714cbc3506d881ef8474042",
+        "excerpt": "You can't find EITHER of your debit cards - you have two checking accounts (Bluest Account and Light Green Account), each with its own debit card, and both cards are missing. You think you may have lost your wallet."
+      }
+    },
+    {
+      "task_id": "task_078",
+      "title": "Replace three debit cards from a lost wallet",
+      "summary": "The customer lost a wallet containing three bank debit cards and needs the cards frozen and replaced.",
+      "requested_outcome": "Secure all three cards and arrange replacements.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 200,
+        "end_char": 376,
+        "source_task_sha256": "9888864990f709eefabae67568b8c19067cf5165d0dd14d90d7cd1441131ce8e",
+        "excerpt": "You lost your wallet containing three debit cards from three different checking accounts at Rho-Bank. You have a Light Blue Account, a Green Account, and a Light Green Account."
+      }
+    },
+    {
+      "task_id": "task_079",
+      "title": "Secure cards after a wallet theft",
+      "summary": "The customer’s wallet was stolen with three debit cards inside and wants them frozen immediately.",
+      "requested_outcome": "Block the affected cards and arrange replacements.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 228,
+        "end_char": 411,
+        "source_task_sha256": "5b829435561eda3f59f26ef89fa1e0d9bfc243de9292cfe5850129e31697cf46",
+        "excerpt": "Your wallet was stolen with all three of your debit cards from three different checking accounts at Rho-Bank. You have an Evergreen Account, a Light Blue Account, and a Green Account."
+      }
+    },
+    {
+      "task_id": "task_080",
+      "title": "Replace five cards after wallet theft",
+      "summary": "The customer’s wallet was stolen with three debit cards and two credit cards inside, and they want all five secured and replaced.",
+      "requested_outcome": "Secure and replace the five affected cards.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 205,
+        "end_char": 458,
+        "source_task_sha256": "8d3c1badb258d872c0ec33c6946d9ef0325b44c04249cbfe546a2845b46557c7",
+        "excerpt": "Your wallet was stolen and it contained FIVE cards from Rho-Bank: three debit cards (Blue Account, Green Fee-Free Account, and Green Account) plus two credit cards (Gold Rewards Card and EcoCard). You need to freeze/cancel them all and get replacements."
+      }
+    },
+    {
+      "task_id": "task_081",
+      "title": "Replace five cards after wallet theft",
+      "summary": "The customer’s wallet was stolen with three debit cards and two credit cards inside, and they want all five secured and replaced.",
+      "requested_outcome": "Secure and replace the five affected cards.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 205,
+        "end_char": 458,
+        "source_task_sha256": "bd5e147f5c3acf9c1196698de1283cae0c2f5a9e7e08744199ef15932d070289",
+        "excerpt": "Your wallet was stolen and it contained FIVE cards from Rho-Bank: three debit cards (Blue Account, Green Fee-Free Account, and Green Account) plus two credit cards (Gold Rewards Card and EcoCard). You need to freeze/cancel them all and get replacements."
+      }
+    },
+    {
+      "task_id": "task_082",
+      "title": "Dispute four transactions across two debit cards",
+      "summary": "The customer found four suspicious transactions, split across two debit cards, and one card was recently lost.",
+      "requested_outcome": "Review each transaction and file the appropriate debit-card disputes.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 287,
+        "end_char": 399,
+        "source_task_sha256": "055ae068b47b48434fbd7077006d434e115eb1966f0886c64c8d02bda4b373e0",
+        "excerpt": "During your weekly statement review, you discovered FOUR suspicious transactions across TWO of your debit cards."
+      }
+    },
+    {
+      "task_id": "task_083",
+      "title": "Dispute four transactions across two debit cards",
+      "summary": "The customer wants four transactions with differing circumstances reviewed across two debit cards.",
+      "requested_outcome": "Assess each reported transaction and submit supported disputes.",
+      "role_fit": "business_customer",
+      "role_fit_note": "This request explicitly concerns a business account, business card, or business referral.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 222,
+        "end_char": 381,
+        "source_task_sha256": "b76f81cae74f14056503d49f198f7f84f654c614243f93dddd14f01e466b0cda",
+        "excerpt": "You've discovered FOUR problematic transactions across TWO of your debit cards this week. Each has different circumstances and you want to dispute all of them."
+      }
+    },
+    {
+      "task_id": "task_084",
+      "title": "Review four disputes across two debit cards",
+      "summary": "The customer needs four problematic transactions on two debit cards disputed.",
+      "requested_outcome": "Review each claim against the relevant account history and file supported disputes.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 174,
+        "end_char": 275,
+        "source_task_sha256": "4b6dae5afd9fbb493c79fc7d77096e3479459502e12600a29d89537dca4ee162",
+        "excerpt": "You've discovered FOUR problematic transactions across your TWO debit cards that you need to dispute."
+      }
+    },
+    {
+      "task_id": "task_085",
+      "title": "Work through several debit-card disputes",
+      "summary": "The customer found multiple statement issues and wants to address disputes one at a time.",
+      "requested_outcome": "Review each issue in sequence and file appropriate transaction disputes.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 502,
+        "end_char": 653,
+        "source_task_sha256": "257de2cee301ca53ea36167f650a18adfc6b8bb1b670a2ec1089d874e39009ea",
+        "excerpt": "Hi, I need help with some disputes on my debit cards. I have a few issues I noticed when reviewing my statements. Can we go through them one at a time?"
+      }
+    },
+    {
+      "task_id": "task_086",
+      "title": "Review six debit-card issues across two cards",
+      "summary": "The customer reports three transaction issues on each of two debit cards, including cash discrepancies and merchant problems.",
+      "requested_outcome": "Gather the transaction details and file the supported disputes across both cards.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 569,
+        "end_char": 786,
+        "source_task_sha256": "fae8b5543d977ac709825ba9f750f81f02b4bbd2b68dc453d9364c1abfaed0c4",
+        "excerpt": "Hi, I need help with several disputed transactions. I've got problems on two of my debit cards - my Green Fee-Free card ending in 4738 and my Evergreen Account card ending in 9251. There are three issues on each card."
+      }
+    },
+    {
+      "task_id": "task_087",
+      "title": "Investigate three declined debit-card purchases",
+      "summary": "Three debit cards were declined on the same day at a restaurant, gas station, and grocery store, showing a common decline message.",
+      "requested_outcome": "Investigate each decline and restore legitimate card access where possible.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 464,
+        "end_char": 751,
+        "source_task_sha256": "a0bcc70259e17de90a6b4e2d8edc01ce9f8ca9b00a972640c81dc3b6ca12f134",
+        "excerpt": "Hi, I'm having the worst day. I've had THREE different debit cards decline on me today! The first was at a restaurant, the second at a gas station, and the third at a grocery store. They all showed 'CODE 05' or 'Do Not Honor'. Can you help me figure out what's going on with all of them?"
+      }
+    },
+    {
+      "task_id": "task_088",
+      "title": "Investigate a declined work-equipment purchase",
+      "summary": "The customer’s debit card was declined while buying a drawing tablet for work and wants to understand why.",
+      "requested_outcome": "Check the card decline and explain the steps to complete a legitimate purchase.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 505,
+        "end_char": 736,
+        "source_task_sha256": "37c1295bdf1a576c8f78758513d11ee5075f9b224e1d96e83dc22d4624df10b8",
+        "excerpt": "Hi, I need help. My debit card just got declined at an electronics store and I'm really confused. I was trying to buy a new drawing tablet for my work. The cashier just said 'declined' and mumbled something I couldn't quite hear..."
+      }
+    },
+    {
+      "task_id": "task_089",
+      "title": "Restore access to three debit cards at an ATM",
+      "summary": "Three family debit cards were declined while the customer urgently needed cash after a vehicle breakdown.",
+      "requested_outcome": "Investigate the declines across the linked accounts and help restore access or explain alternatives.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 638,
+        "end_char": 915,
+        "source_task_sha256": "6071bfc38167f3ad4bdf90371e91602ea52104fcbe24ab2ace6334c6c5e69a97",
+        "excerpt": "Hi, I need help. I'm at an ATM right now and I've had THREE different debit cards decline on me. My Green Account card, my Blue Account card, and my daughter's teen account card. I really need cash - my car broke down and I need to pay the tow truck driver who only takes cash!"
+      }
+    },
+    {
+      "task_id": "task_090",
+      "title": "Resolve PIN lockouts across three debit cards",
+      "summary": "Three debit cards have been locked after PIN problems at ATMs or stores, leaving the customer unable to access funds.",
+      "requested_outcome": "Review the lockouts and restore access using the proper card-security process.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 511,
+        "end_char": 679,
+        "source_task_sha256": "273fedf3ddc74cb4ec1b03c45a8ab5ee4dc309874e37aa8782f9fc5a2fbc6d38",
+        "excerpt": "Hi, I need help urgently. I've had three different debit cards get locked today - they all say my PIN is wrong or locked or something. I really need access to my money!"
+      }
+    },
+    {
+      "task_id": "task_091",
+      "title": "Unlock four PIN-locked debit cards",
+      "summary": "The customer cannot access money because four debit cards have become PIN-locked.",
+      "requested_outcome": "Investigate and resolve the PIN locks across all four cards.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 486,
+        "end_char": 637,
+        "source_task_sha256": "1ef9994ab614a3e3d739cc0e4d2736069def9506e7be437c1c814472fe5647c0",
+        "excerpt": "Hi, I'm having a terrible day. I've got four debit cards that are all PIN locked and I can't access any of my money. Can you help me get them unlocked?"
+      }
+    },
+    {
+      "task_id": "task_092",
+      "title": "Resolve four debit-card PIN locks",
+      "summary": "Four cards were PIN-locked over the week, including one that appears to have locked without a customer transaction.",
+      "requested_outcome": "Review each lock event and restore access through the account-security process.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 488,
+        "end_char": 651,
+        "source_task_sha256": "3a3bb1cec482598ce505af6f3e8219a206b3049faa43b4204a555840b4883e36",
+        "excerpt": "Hi, I'm having a nightmare week. I've got four debit cards that are all PIN locked and I can't access any of my money. I really need help getting these sorted out."
+      }
+    },
+    {
+      "task_id": "task_093",
+      "title": "Check unexpectedly low Silver savings interest",
+      "summary": "The customer thinks a Silver savings account’s monthly interest is lower than expected but does not know the exact balance or calculation.",
+      "requested_outcome": "Review the linked savings and related account terms and explain the interest calculation.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 512,
+        "end_char": 731,
+        "source_task_sha256": "7e507f9688766cab2ff5f247a549c154f59a5523f2b882056e1ba5666d7bcb80",
+        "excerpt": "Hi, I think there might be something wrong with my interest payments. I have a savings account with you and my monthly interest just seems... low? I'm not sure exactly what I should be getting but it doesn't feel right."
+      }
+    },
+    {
+      "task_id": "task_094",
+      "title": "Investigate a disputed Gold savings interest payment",
+      "summary": "The customer believes the Gold savings interest payment is short and cites a checking-account rate boost in their calculation.",
+      "requested_outcome": "Reconcile the payment against the customer’s accounts, rate terms, and applicable boosts.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 606,
+        "end_char": 970,
+        "source_task_sha256": "1506c44d139cf214b58d71729ddfdaf097d498703ba4d90c9546446dba526747",
+        "excerpt": "Hi, I need to dispute my interest payment. I have a Gold savings account with about $96,000 and I only received $408 in interest this month. The base rate is 5.0% and my checking account gives me a 1% boost, so I should be at 6.0% APY. That's $480 a month - you're shorting me $72! And if there are any other boosts that I'm missing, I want that addressed now too!"
+      }
+    },
+    {
+      "task_id": "task_095",
+      "title": "Review Gold savings rate benefits",
+      "summary": "The customer received less interest than expected on Gold savings and wants to confirm that multiple checking and card benefits are reflected.",
+      "requested_outcome": "Review the linked accounts and explain whether eligible rate benefits were applied.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 611,
+        "end_char": 889,
+        "source_task_sha256": "5d45ac12d5ee411329b4f1c39c7bc7a64c3a24f46e47ee4223fe1821f726d4b3",
+        "excerpt": "Hi, I need help figuring out my savings interest. I have a Gold savings account with about $96,000 and I only got $450 in interest last month. That seems really low. I have multiple checking accounts and credit cards with you, and I want to make sure I'm getting the best rates."
+      }
+    },
+    {
+      "task_id": "task_096",
+      "title": "Review interest on two savings accounts",
+      "summary": "The customer says interest on both Bronze and Gold Plus savings is lower than expected and wants the balances and rates checked.",
+      "requested_outcome": "Reconcile interest on both savings accounts and review linked account benefits.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 645,
+        "end_char": 921,
+        "source_task_sha256": "5524a004c5b1d3835cbce6251b4889accd2eac8a7a8be4e4158e5952992b97c9",
+        "excerpt": "Hi, I need help understanding the interest on my savings accounts. I have a Bronze savings with about $30,000 and a Gold Plus savings with around $60,000. I got $64 on the Bronze and only $328 on the Gold Plus last month. Both seem really low for accounts with these balances."
+      }
+    },
+    {
+      "task_id": "task_097",
+      "title": "Audit interest across four savings accounts",
+      "summary": "The customer’s own calculations show lower-than-expected interest across four savings accounts and they want the differences investigated.",
+      "requested_outcome": "Review the rate and interest calculation for each linked savings account and explain discrepancies.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 690,
+        "end_char": 1196,
+        "source_task_sha256": "1b313370494a51d3e2c3184de3c4dda4db212ee64790d7152168f628d8adad8e",
+        "excerpt": "Hi, I need urgent help with my savings accounts. I have four different savings accounts with your bank - a Silver Account with about $95,000, a Platinum Account with around $75,000, a Diamond Elite Account with approximately $115,000, and a Silver Plus Account with about $20,000. Based on my calculations, I should be getting around $583 on Silver, $554 on Platinum, $1,050 on Diamond Elite, and $112 on Silver Plus. But I only received about $333, $379, $750, and $68. Something is definitely wrong here."
+      }
+    },
+    {
+      "task_id": "task_098",
+      "title": "Choose a referral account for a new worker",
+      "summary": "The customer wants to refer a friend who has just started work and wants an account choice that maximizes the combined referral bonus.",
+      "requested_outcome": "Compare referral-eligible accounts and explain the combined bonus for the friend and referrer.",
+      "role_fit": "personal_customer",
+      "role_fit_note": "This request concerns personal banking, cards, or customer finances.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 1079,
+        "end_char": 1374,
+        "source_task_sha256": "a4703b1cd4c6bbe97d92d8c8e73ed3cfe18026cf3e01c244a25a1d615d6a06cc",
+        "excerpt": "Hey! My roommate just got her first real job and she's going to deposit her first paycheck - around $600 I think. I want to refer her to open one of the accounts you guys offer. Which one should I use to get us the best combined referral bonus - like, the total of what I get plus what she gets?"
+      }
+    },
+    {
+      "task_id": "task_099",
+      "title": "Refer a colleague’s new consulting LLC",
+      "summary": "A former colleague has formed a consulting LLC and plans to open business checking; the customer wants to maximize their own referral reward.",
+      "requested_outcome": "Compare business-account referral options and identify the highest eligible referrer bonus.",
+      "role_fit": "business_customer",
+      "role_fit_note": "This request explicitly concerns a business account, business card, or business referral.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 1328,
+        "end_char": 1668,
+        "source_task_sha256": "e9d0a863de7c060724dc6e47c4153917bf239cbe79056be49c9e5ca574932972",
+        "excerpt": "Hi there! My business partner just formed his new consulting LLC and he's looking to open a business checking account. He'll be depositing around $30,000 to start - he got some seed funding. I want to refer him - which of your business accounts should I use if I want to maximize MY referral bonus? Like, the amount that I get specifically."
+      }
+    },
+    {
+      "task_id": "task_100",
+      "title": "Refer a former partner’s new consulting LLC",
+      "summary": "A former business partner has formed a technology consulting LLC and plans to open business checking.",
+      "requested_outcome": "Identify the business-account referral option with the best eligible bonus for the referrer.",
+      "role_fit": "business_customer",
+      "role_fit_note": "This request explicitly concerns a business account, business card, or business referral.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 1253,
+        "end_char": 1541,
+        "source_task_sha256": "ea63d6247c40fd7afad04eef09e8b4a4a822b5c251213863bf958ee9b32d53c6",
+        "excerpt": "Hi! My former business partner just incorporated her new tech consulting LLC and she needs to open a business checking account. She's going to deposit around $31,000 from her startup funding. I want to refer her to get the referral bonus.  I want to get the biggest bonus possible for ME."
+      }
+    },
+    {
+      "task_id": "task_101",
+      "title": "Plan four referrals across personal and startup accounts",
+      "summary": "The customer wants to refer a student, a retired parent, and two startups, and asks how to maximize each combined bonus.",
+      "requested_outcome": "Check referral eligibility for each prospective customer and compare the applicable account choices.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 1105,
+        "end_char": 1367,
+        "source_task_sha256": "77c858307a3dbf6023ceb5e3e941e48c5b452bfe08b07f16db9461e708dd38c2",
+        "excerpt": "Hi! I've got kind of a complicated situation. I want to refer four different people before the year ends, and I want to make sure I'm getting the best possible combined bonus for each one. Can you help me figure out the optimal accounts to use for each referral?"
+      }
+    },
+    {
+      "task_id": "task_102",
+      "title": "Check referral eligibility for four planned referrals",
+      "summary": "The customer plans four referrals across family and startup businesses and wants to account for recent referrals and annual limits.",
+      "requested_outcome": "Review current referral limits and compare eligible account choices for all four referrals.",
+      "role_fit": "mixed_customer",
+      "role_fit_note": "This request spans personal and business accounts, cards, or financial activity.",
+      "financial_context_status": "curated_source_request",
+      "source_request": {
+        "json_pointer": "/user_scenario/instructions",
+        "start_char": 940,
+        "end_char": 1531,
+        "source_task_sha256": "8ddd5510f27c687ec2375ffe1466fde52c1f6137336156432d068633c164f164",
+        "excerpt": "Hi! I have a complicated referral situation - I want to refer four people before year-end. Just to give you context, my last referral was about 3 weeks ago in October. I've got my niece Maya who's a college student, my dad Vikram who's 71 and just retired - I think I've only done about 4 Gold Years referrals this year so there should be room for him there. And two startups: Ember Analytics which has been around about 3 years now, and TechFlow Labs which is about 2 years old. For the startups, I've only done maybe 2 or 3 Sky Blue referrals this year, so that should have plenty of room."
+      }
+    }
+  ]
+}

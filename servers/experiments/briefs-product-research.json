@@ -1,0 +1,138 @@
+{
+  "ml-generate-gradcam": {
+    "summary": "Generate a visual explanation for the model’s prediction on the research image and describe the regions that influenced it.",
+    "description": "Use the pretrained ResNet-18 model and research image test_image.jpg to produce a Grad-CAM visualization for the last convolutional layer. Save the overlay as gradcam_output.jpg, the raw gradients and activations as raw_gradients.pt and raw_activations.pt, and a one-sentence interpretation of the attended image regions as gradcam_explanation.txt."
+  },
+  "ml-grade-exam": {
+    "summary": "Locate every saved version of the recruit’s exam, score each, and identify the highest-scoring version for submission.",
+    "description": "Find all PDF versions of “ML BACKGROUND EXAM - AGENT COMPANY” across the available research documents and locations, and copy them into the workspace. Evaluate each version and append its score to the existing filename as _<score>, preserving the original base name. Mark the highest-scoring version with -submit after the score. For the question “Did you use LATEX for the entire written portion of this homework?”, treat the answer as Yes."
+  },
+  "pm-add-new-moderator": {
+    "summary": "Add Liu Qiang to the company help-desk channel and give him moderator responsibility.",
+    "description": "Add Liu Qiang as a member of #help-desk and assign him the moderator role."
+  },
+  "pm-ask-for-issue-and-create-in-gitlab": {
+    "summary": "Coordinate with Li Ming to identify the issue he wants to take on, then create it with the agreed details.",
+    "description": "For the new RisingWave sprint, ask Li Ming which issue he wants to work on. Confirm the issue description, milestone, and due date with the relevant project context, then create the GitLab issue and assign it to Li Ming."
+  },
+  "pm-ask-issue-assignee-for-issue-status-and-update-in-plane": {
+    "summary": "Ask the assignee for the status of RisingWave’s “Evaluate data throughput” issue and reflect completion in Plane.",
+    "description": "Identify the assignee of “Evaluate data throughput” in the RisingWave project and ask them for a progress update. If they confirm the issue is complete, set its Plane status to Done."
+  },
+  "pm-assign-issues": {
+    "summary": "Create the Backend Development project, add its three members, and assign each a defined implementation task.",
+    "description": "Create a Plane project titled “Backend Development” and add emilyzhou, alexturner, and emmalewis as members. Create and assign these issues: Emily Zhou — “Implement new navigation bar for the frontend”; Alex Turner — “Set up backend API for payment processing”; Emma Lewis — “Write unit tests for authentication service”."
+  },
+  "pm-change-channel-ownership": {
+    "summary": "Make theagentcompany the owner of #general.",
+    "description": "Assign the user theagentcompany as the owner of the #general channel."
+  },
+  "pm-check-backlog-update-issues": {
+    "summary": "Review blocked and backlog issues, ask assignees for updates, and align Plane statuses with their responses.",
+    "description": "For every Node-RED issue in Plane marked Blocked or Backlog, record its ID, title, and assignee. Post in #project-lowcode asking whether each issue has been completed, tagging its assignee when present. When someone confirms completion, acknowledge that Plane will be updated, then update the issue to the status supported by the response."
+  },
+  "pm-copy-plane-issues-to-gitlab": {
+    "summary": "Create GitLab issues for all JanusGraph issues currently marked In Progress in Plane.",
+    "description": "Review the JanusGraph project in Plane and add every issue with In Progress status to the corresponding GitLab project, preserving the issue information needed to track the work."
+  },
+  "pm-create-channel-message": {
+    "summary": "Create #finance-talk, invite David Wong, and welcome participants.",
+    "description": "Create the public #finance-talk channel, invite David Wong, and post: “Welcome to the finance-talk channel!”"
+  },
+  "pm-create-channel-message-medium": {
+    "summary": "Set up two public collaboration channels with the specified participants and introductory messages.",
+    "description": "Create public #literaturereview, invite Emma Lewis and Wang Fang, and post: “Welcome to the literature review channel!” Create public #benchmarking, invite Emma Lewis, Alex Turner, and David Wong, and post: “This will be for all our benchmarking projects.”"
+  },
+  "pm-create-channel-new-leader": {
+    "summary": "Create #sales-talk, invite Mark Johnson, and make him its leader.",
+    "description": "Create the public #sales-talk channel, invite Mark Johnson, and assign him the channel leader role."
+  },
+  "pm-create-plane-issue": {
+    "summary": "Create the “Improve Page Loading Speed” issue in the Frontend Development project.",
+    "description": "In the Plane project “Frontend Development”, create an issue titled “Improve Page Loading Speed”."
+  },
+  "pm-create-teammate-channel-from-spreadsheet": {
+    "summary": "Use the task assignment spreadsheet to create a Group2 channel and notify each teammate of their assignment.",
+    "description": "Read Task_assignments.xlsx in Documents/Marketing to identify Group 2 members and their tasks. Create a public Rocket.Chat channel named Group2 with those teammates. Send each person an individual message stating their assigned task and tagging them by username."
+  },
+  "pm-distribute-information": {
+    "summary": "Privately send each database group member the project information for the HyperLogLog algorithm.",
+    "description": "Use the project information for the HyperLogLog algorithm in the Bustub issue as the reference, and send its link privately to every database group member. Do not post it in a group chat."
+  },
+  "pm-monitor-new-bug-issues": {
+    "summary": "Summarize open bug-labeled issues from September 24 through October 24, 2024, including ownership, in #project-ai.",
+    "description": "Review open issues in the OpenHands repository labeled bug and created between 24 September 2024 and 24 October 2024. For each, report the issue number, title, whether it is assigned or unassigned, and its link in the #project-ai channel."
+  },
+  "pm-monthly-attendance-slides": {
+    "summary": "Count each person’s recorded attendance dates and prepare an “April Attendance” slide for the HR manager.",
+    "description": "Review the attendance records in Documents/Human Resources Team/Attendance and count the number of recorded dates for each person. Create a slide titled “April Attendance” with one bullet per person in the format “Name: xxx times”. Save it as April Attendance.pptx and tell Chen Xinyi where it was saved."
+  },
+  "pm-plan-personnel-for-new-project": {
+    "summary": "Build the fastest feasible staffing plan for the JanusGraph web app and report its expected end month and salary-plus-benefits cost.",
+    "description": "Plan the work assuming a start date of January 1, 2025. Required effort: Li Ming 0.5 months; project management 0.5 months; design 0.5 months; frontend 1 month; backend 1.5 months; infrastructure 0.5 months. Use the current plans and consult Xinyi for potential staff effort, competencies, and salary information as needed. Create project-plan.csv with columns month, person, effort percent, role; role must be one of li, pm, design, frontend, backend, infra. Save the plan and tell Sarah the expected ending month and total salary-plus-benefits cost."
+  },
+  "pm-prepare-meeting-with-customers": {
+    "summary": "Survey the current benchmarks OpenHands can solve, group them by task domain, and prepare a customer-facing presentation.",
+    "description": "Identify the current benchmarks OpenHands can solve and categorize them into task domains. Create a presentation with one slide introducing each domain. Save it as openhands_intro.pptx and send the filename to Huang Jie, the project manager coordinating meeting materials."
+  },
+  "pm-present-engineer-group-members": {
+    "summary": "Prepare one slide per employee showing the engineering role and everyone in that role, then notify Chen Xinyi.",
+    "description": "Use Personnell_File.odt in Documents/Human Resources Team to identify engineering employees and their roles. Create one presentation slide per employee; each slide should state the role and the names of all employees who hold that role. Save the deck as engineers.pptx and inform Chen Xinyi, who is coordinating the career fair."
+  },
+  "pm-present-gitlab-info-as-ppt": {
+    "summary": "Create an overview deck listing every GitLab repository, its description, and total issue and merge request counts.",
+    "description": "Prepare a presentation for CTO Sarah Johnson with an opening slide titled “Overview of Our Engineering Progress”. Add one slide for each GitLab repository, in the order shown in GitLab, with its name, description, and total number of issues and merge requests, including open and closed or merged items. Save the deck as Engineering_Progress.pptx."
+  },
+  "pm-projects-analytics": {
+    "summary": "Collect six Plane workload metrics and share the structured summary with the team in #kudos.",
+    "description": "Review all project metrics in Plane Analytics and report: Open Tasks, Backlog Tasks, Unstarted Tasks, Started Tasks, Unassigned Issues, and total Pending Issues. Share the summary using these labels and values with the team in #kudos."
+  },
+  "pm-schedule-meeting-1": {
+    "summary": "Find a mutually convenient workday meeting time during regular business hours and record the outcome.",
+    "description": "Ask Emily Zhou and Liu Qiang for their availability and schedule a mutually convenient time on a Monday through Friday during regular business hours. Create conclusion.txt containing the scheduled day. If no meeting can be scheduled this week, write exactly “No meeting scheduled this week”."
+  },
+  "pm-schedule-meeting-2": {
+    "summary": "Find a mutually convenient workday meeting time during regular business hours and record the outcome.",
+    "description": "Ask Emily Zhou and Liu Qiang for their availability and schedule a mutually convenient time on a Monday through Friday during regular business hours. Create conclusion.txt containing the scheduled day. If no meeting can be scheduled this week, write exactly “No meeting scheduled this week”."
+  },
+  "pm-send-hello-message": {
+    "summary": "Post a greeting that includes “Hi”, the kissing_smiling_eyes emoji, and a notification to active channel users.",
+    "description": "Send a message in #general that includes the word “Hi”, the kissing_smiling_eyes emoji, and notifies the active users in the room."
+  },
+  "pm-send-notification-to-corresponding-user": {
+    "summary": "Contact Jessica Lee and ask what action she would like you to take.",
+    "description": "Ask Jessica Lee what you should do."
+  },
+  "pm-update-gitlab-issue-from-plane-status": {
+    "summary": "Check two named issues in Plane and keep their GitLab open or closed state aligned.",
+    "description": "For OpenHands issues “Model: recall rate is 0” and “Model: security problem”, check the corresponding Plane status. Keep the GitLab issue open if it is open in Plane; close it if it is closed in Plane."
+  },
+  "pm-update-plane-issue-from-gitlab-status": {
+    "summary": "Check two named JanusGraph issues in GitLab and update their Plane status and sprint placement accordingly.",
+    "description": "For the Plane sprint 1 issues “Improve Logging for Bulk Request Failures” and “Optimize Retry Mechanism for Out of Memory Errors”, check each corresponding GitLab issue. If it is open in GitLab, keep it open in Plane and move it to the next sprint. If it is closed in GitLab, close it in Plane."
+  },
+  "pm-update-project-milestones": {
+    "summary": "Close the completed Alpha Release milestone, create Beta Release, and move two issues into it.",
+    "description": "In the RisingWave GitLab project, close the completed “Alpha Release” milestone and create “Beta Release”. Assign “Implement stream processing engine” and “Integrate with Kafka” to Beta Release."
+  },
+  "pm-update-sprint-cycles": {
+    "summary": "Move active-sprint issues that are To Do, In Progress, or Backlog to the upcoming cycle and notify their assignees.",
+    "description": "In the RisingWave project, identify every issue in the active sprint with status To Do, In Progress, or Backlog and move it to the next sprint cycle. In #project-streamdb, notify the relevant assignees with a tagged message for each issue using: “@AssigneeName, your issue [Issue Title/ID] has been moved to the next sprint. Please prioritize it accordingly.”"
+  },
+  "qa-escalate-emergency": {
+    "summary": "Immediately alert responsible developer Zhang Wei and, if there is no response after 10 minutes, notify CTO Sarah Johnson.",
+    "description": "Report the severe vulnerability that could expose customers’ confidential data to Zhang Wei as soon as possible. If Zhang Wei has not responded after 10 minutes, escalate the issue to Sarah Johnson. The escalation is complete once Sarah has been notified, even if she does not reply."
+  },
+  "qa-update-issue-status-according-to-colleagues": {
+    "summary": "Ask Wang Fang and Mike Chen for updates on their respective issues and set each issue to the status they report.",
+    "description": "Ask Wang Fang for the status of the Plane issue with ID 5d1c8695-acfd-44c2-8d2d-e41c67cdd8c0 and update that issue to the status she reports. Ask Mike Chen for the status of issue 8eba9853-4178-42a6-b113-e66002e8e0ab and update it to his reported status."
+  },
+  "research-answer-questions-on-paper": {
+    "summary": "Use the research paper to answer each prompt in the analysis sheet and preserve its line-based format.",
+    "description": "Retrieve noise_simulation_paper.pdf and noise_simulation_analysis_sheet.txt from Documents/Research/Noise Simulation. Place both in the workspace, answer every question using the paper, and replace each <ANSWER HERE> placeholder. Put each answer on the same line as its question without adding a line break."
+  },
+  "research-reproduce-figures": {
+    "summary": "Recreate Figures 2–4 and Tables 1–3 from survey.pdf and prepare the requested team feedback on the figures.",
+    "description": "Use survey.pdf in Documents/Research as the visual reference. Reproduce Figures 2, 3, and 4 without captions, saving them as figure2.pdf, figure3.pdf, and figure4.pdf. Share the figure file paths in #general and ask teammates for feedback. Recreate Tables 1, 2, and 3 as LaTeX using the table class, without references, and include their captions. Save source files table1.tex, table2.tex, table3.tex and compiled PDFs table1.pdf, table2.pdf, table3.pdf. Keep the tables confidential and do not share them with teammates."
+  }
+}

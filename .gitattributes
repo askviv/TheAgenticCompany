@@ -1,0 +1,4 @@
+# Keep newly vendored upstream benchmark assets byte-exact for pinned hashes.
+servers/simulation/tau2_actor_runtime/data/tau2/domains/airline/** -text -whitespace linguist-vendored
+servers/simulation/tau2_actor_runtime/data/tau2/domains/banking_knowledge/** -text -whitespace linguist-vendored
+servers/simulation/tau2_actor_runtime/data/tau2/domains/telecom/** -text -whitespace linguist-vendored

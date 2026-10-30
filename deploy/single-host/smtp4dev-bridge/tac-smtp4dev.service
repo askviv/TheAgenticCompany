@@ -1,0 +1,11 @@
+[Unit]
+Description=Forward Mailu network traffic to the SSH smtp4dev tunnel
+Requires=tac-smtp4dev.socket
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:19125
+DynamicUser=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes

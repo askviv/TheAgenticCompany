@@ -1,0 +1,8 @@
+{
+  "application": {"name":"Rocket.Chat","description":"Discovery and provisioning of Rocket.Chat accounts with name/email identity updates."},
+  "connector": {
+    "schema":[{"script":"/User.native.schema.groovy"},{"script":"/User.connid.schema.groovy"}],
+    "authorization":[{"script":"/authorization.op.groovy"}],
+    "operation":[{"script":"/User.search.groovy"},{"script":"/User.create.op.groovy"},{"script":"/User.update.op.groovy"}]
+  }
+}

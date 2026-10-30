@@ -1,0 +1,18 @@
+# Preserve the existing Compose service definitions; put persistent data on the mini HDD.
+services:
+  midpoint:
+    extra_hosts:
+      - "mail.company.example.test:192.0.2.10"
+volumes:
+  midpoint-home:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/theagentcompany/midpoint/home
+  midpoint-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /data/theagentcompany/midpoint/database

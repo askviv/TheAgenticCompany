@@ -1,0 +1,27 @@
+E-Commerce Bench counterpart negotiation kernel
+
+Upstream: https://github.com/QwenLM/E-CommerceBench
+Reviewed commit: b84678071c424fc94713b0a9e1ae86c519bd74c7
+Source file: tools/opponent/simulator/counterpart.py
+Vendored file: counterpart.py
+SHA-256: 6eead3551b8c94c789d94b6635642ca0ab2d56f487c6119772d5c6e2d4ea93d4
+
+Copyright 2026 Qwen. Licensed under Apache License 2.0. See LICENSE.
+No changes have been made to the vendored source file.
+
+E-Commerce Bench native structured supplier order processor
+
+Upstream: https://github.com/QwenLM/E-CommerceBench
+Reviewed commit: b84678071c424fc94713b0a9e1ae86c519bd74c7
+Source files: tools/opponent/order_processor.py, tools/opponent/scam_handler.py,
+              tools/opponent/supplier_config.py
+Vendored files: upstream/tools/opponent/order_processor.py,
+                upstream/tools/opponent/scam_handler.py,
+                upstream/tools/opponent/supplier_config.py
+SHA-256:
+  order_processor.py: f522d7a87bb4d691a0707a81bd0a1a2517ed5f9d0559ed14409dd903eed69315
+  scam_handler.py:   52190f3450b7ac40e4c03f4d00a1145cc5e996932e283ad65bf517ef496b9290
+  supplier_config.py: 2b5bc0e7bd968b00cc84e64f8477dd3b67b2394885e2b04caf7920d16762ff46
+
+Copyright 2026 Qwen. Licensed under Apache License 2.0. See LICENSE.
+No changes have been made to these vendored source files.
