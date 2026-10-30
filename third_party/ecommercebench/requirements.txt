@@ -1,2 +1,2 @@
 # CounterpartKernel imports NumPy. Aligned with coordinator and Coffee worker locks.
-numpy==2.4.0
+numpy==2.5.4
