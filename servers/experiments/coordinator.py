@@ -143,6 +143,7 @@ class SimulationCoordinatorClient:
 
     def start_provider_experiment(self, provider_id: str, task_id: str, *, idempotency_key: str) -> dict[str, Any]:
         return self._request("POST", "/company/provider-experiments", idempotency_key=idempotency_key,
+                             request_timeout=None, independent_session=True,
                              json={"provider_id": provider_id, "task_id": task_id})
 
     def provider_experiment(self, experiment_id: str) -> dict[str, Any]:
@@ -190,7 +191,7 @@ class SimulationCoordinatorClient:
         payload = {"scenario_id": scenario_id}
         if task_id is not None: payload["task_id"] = task_id
         return self._request("POST", "/company/experiments", idempotency_key=idempotency_key,
-                             json=payload)
+                             request_timeout=None, independent_session=True, json=payload)
 
     def start_evaluation(self, run_id: str, *, idempotency_key: str) -> dict[str, Any]:
         return self._request(

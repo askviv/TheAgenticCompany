@@ -253,9 +253,19 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def all_runs():
         with db() as c: return [dict(r) for r in c.execute('SELECT * FROM runs ORDER BY created_at DESC')]
     def update(run_id, **values):
+        material={key:value for key,value in values.items() if key!='simulated_time'}
         with db() as c:
-            c.execute('UPDATE runs SET '+','.join(k+'=?' for k in values)+',revision=revision+1 WHERE id=?',(*values.values(),run_id))
-        notify()
+            changed_row=0
+            if material:
+                changed_row=c.execute(
+                    'UPDATE runs SET '+','.join(k+'=?' for k in values)+',revision=revision+1 '
+                    +'WHERE id=? AND ('+' OR '.join(k+' IS NOT ?' for k in material)+')',
+                    (*values.values(),run_id,*material.values()),
+                ).rowcount
+            if not changed_row and 'simulated_time' in values:
+                c.execute('UPDATE runs SET simulated_time=? WHERE id=? AND simulated_time IS NOT ?',
+                          (values['simulated_time'],run_id,values['simulated_time']))
+        if changed_row: notify()
     def save_company(state, error=None, *, clear_error=False):
         with db() as c:
             experiments=json.dumps(state.get('experiments',[]),sort_keys=True)
