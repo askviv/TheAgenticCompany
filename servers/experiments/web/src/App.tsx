@@ -757,7 +757,8 @@ function LibraryPage() {
     .filter((experiment) => experiment.provider_id === "tau2-telecom" && experiment.task_id?.startsWith("[mobile_data_issue]"))
     .sort((a, b) => (a.task_id ?? "").localeCompare(b.task_id ?? "")), [experiments])
   const mobileVariantNumbers = useMemo(() => new Map(mobileDataVariants.map((item, index) => [item.id, index + 1])), [mobileDataVariants])
-  const matchingMobileVariants = filtered.filter((item) => mobileVariantNumbers.has(item.id))
+  const matchingIds = new Set(filtered.map((item) => item.id))
+  const matchingMobileVariants = mobileDataVariants.filter((item) => matchingIds.has(item.id))
   const otherExperiments = filtered.filter((item) => !mobileVariantNumbers.has(item.id))
 
   return (
