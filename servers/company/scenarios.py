@@ -876,7 +876,7 @@ class RealChatTransport:
                         state["connected"] = True
 
                 socket.on("framereceived", track_frame)
-                socket.on("framesent", state["sent_frames"].append)
+                socket.on("framesent", lambda frame: state["sent_frames"].append(frame))
 
             page.on("websocket", track_socket)
             headers = self._browser_auth(page, base, credentials, expected_author)
