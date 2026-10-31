@@ -7,7 +7,7 @@ annotated-types==0.8.0
 anyio==4.15.1
     # via starlette
 authres==1.2.0
-    # via -r servers/simulation/requirements.in
+    # via -r requirements.in
 certifi==2026.10.23
     # via requests
 charset-normalizer==3.5.2
@@ -15,7 +15,7 @@ charset-normalizer==3.5.2
 click==8.5.0
     # via uvicorn
 fastapi==0.162.0
-    # via -r servers/simulation/requirements.in
+    # via -r requirements.in
 greenlet==3.2.5
     # via playwright
 h11==0.16.0
@@ -25,38 +25,38 @@ idna==3.20
     #   anyio
     #   requests
 imapclient==4.1.0
-    # via -r servers/simulation/requirements.in
+    # via -r requirements.in
 itsdangerous==2.2.0
-    # via -r servers/simulation/requirements.in
+    # via -r requirements.in
 msgpack==1.1.2
     # via signalrcore
 numpy==2.5.4
-    # via -r servers/simulation/requirements.in
+    # via -r requirements.in
 opentelemetry-api==1.45.2
     # via fastapi
 playwright==1.64.1
-    # via -r servers/simulation/requirements.in
+    # via -r requirements.in
 pydantic==2.14.2
     # via
-    #   -r servers/simulation/requirements.in
+    #   -r requirements.in
     #   fastapi
 pydantic-core==2.50.2
     # via pydantic
-python-dateutil==2.9.0.post0
-    # via -r servers/simulation/requirements.in
 pyee==14.0.0
     # via playwright
+python-dateutil==3.0.0
+    # via -r requirements.in
 requests==2.34.2
-    # via -r servers/simulation/requirements.in
+    # via -r requirements.in
 signalrcore==1.0.2
-    # via -r servers/simulation/requirements.in
+    # via -r requirements.in
 simpy==4.1.2
-    # via -r servers/simulation/requirements.in
+    # via -r requirements.in
 six==1.17.0
     # via python-dateutil
 starlette==1.10.0
     # via
-    #   -r servers/simulation/requirements.in
+    #   -r requirements.in
     #   fastapi
 typing-extensions==4.16.0
     # via
@@ -65,13 +65,15 @@ typing-extensions==4.16.0
     #   opentelemetry-api
     #   pydantic
     #   pydantic-core
-    #   starlette
+    #   pyee
     #   typing-inspection
 typing-inspection==0.4.4
     # via
     #   fastapi
     #   pydantic
+tzdata==2026.6
+    # via python-dateutil
 urllib3==2.8.0
     # via requests
 uvicorn==0.54.0
-    # via -r servers/simulation/requirements.in
+    # via -r requirements.in
