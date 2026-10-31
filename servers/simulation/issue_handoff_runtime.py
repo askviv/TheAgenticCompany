@@ -28,8 +28,15 @@ class CompanyIssueWorkflow:
         if actor is None or actor["email"].casefold() != employee["email"].casefold():
             raise ValueError("Company issue route does not match its authenticated employee mailbox actor")
         if mail is None:
-            from .runtime import private_json
-            mail = MailuGateway(config.mail, private_json(config.mail_credentials_file))
+            from .runtime import employee_desktop_manager, private_json
+            mail = MailuGateway(
+                config.mail,
+                private_json(config.mail_credentials_file),
+                employee_desktops=employee_desktop_manager(config),
+            )
+        elif isinstance(mail, MailuGateway) and mail.employee_desktops is None:
+            from .runtime import employee_desktop_manager
+            mail.set_employee_desktops(employee_desktop_manager(config))
         scheduler = scheduler or SystemdIssueScheduler(
             config.issue_config_path, executable=sys.executable,
             source_root=Path(__file__).resolve().parents[2],

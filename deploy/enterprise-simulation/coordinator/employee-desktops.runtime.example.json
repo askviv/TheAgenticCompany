@@ -1,0 +1,7 @@
+{
+  "company_profile_file": "/data/theagentcompany/enterprise/source/deploy/single-host/company-identities.json",
+  "state_root": "/data/theagentcompany/enterprise/state/employee-desktops",
+  "viewing_origin": "https://desktop.company.example.test",
+  "web_bind_address": "192.0.2.10",
+  "image": "tac-selkies-desktop:2.1.0-ubuntu26.04-socat1"
+}

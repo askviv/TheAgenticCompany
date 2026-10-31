@@ -58,6 +58,11 @@ class BackgroundControlRequest(BaseModel):
     enabled: StrictBool
 
 
+class EmployeeDesktopRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    employee_id: str
+
+
 class CoffeeBackgroundRecoveryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     previous_operation_id: str = Field(min_length=1, max_length=240)
@@ -296,6 +301,73 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
     def get_company(principal: Principal = Depends(authenticate)):
         require_role(principal, "controller")
         return company_payload()
+
+    @app.get("/company/desktops")
+    def list_employee_desktops(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        service = getattr(engine, "employee_desktops", None)
+        if service is None:
+            raise HTTPException(status_code=503, detail="Employee desktops are unavailable")
+        try:
+            employees = service.list_sessions()
+            viewers = service.list_viewers()
+            by_id = {employee["id"]: employee for employee in employees}
+            for viewer in viewers:
+                employee = by_id.get(viewer.get("employee_id"))
+                viewing_url = viewer.get("viewing_url")
+                if employee is None or employee.get("status") != "running" or not isinstance(viewing_url, str):
+                    raise ValueError("employee desktop viewer does not match a running profile employee")
+                employee["viewing_url"] = viewing_url
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Employee not found") from exc
+        except Exception as exc:
+            frames = [(frame.filename, frame.lineno, frame.name)
+                      for frame in traceback.extract_tb(exc.__traceback__)]
+            logger.error("Employee desktop listing failed exception_type=%s stack=%s",
+                         type(exc).__name__, frames)
+            raise HTTPException(status_code=503, detail="Employee desktops could not be listed") from exc
+        return JSONResponse({"employees": employees}, headers={"Cache-Control": "no-store"})
+
+    @app.post("/company/desktops/start")
+    def start_employee_desktop(model: EmployeeDesktopRequest, principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        employee_id = model.employee_id
+        service = getattr(engine, "employee_desktops", None)
+        if service is None:
+            raise HTTPException(status_code=503, detail="Employee desktops are unavailable")
+        try:
+            result = service.ensure_session(employee_id)
+            engine.mail.open_employee_inbox(employee_id, result)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Employee not found") from exc
+        except Exception as exc:
+            frames = [(frame.filename, frame.lineno, frame.name)
+                      for frame in traceback.extract_tb(exc.__traceback__)]
+            logger.error("Employee desktop startup failed exception_type=%s stack=%s",
+                         type(exc).__name__, frames)
+            raise HTTPException(status_code=503, detail="Employee desktop could not be started") from exc
+        return JSONResponse({"employee_id": result["employee_id"], "status": "running",
+                             "viewing_url": result["viewing_url"],
+                             "viewing_credentials": result["viewing_credentials"]},
+                            headers={"Cache-Control": "no-store"})
+
+    @app.post("/company/desktops/stop")
+    def stop_employee_desktop(model: EmployeeDesktopRequest, principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        employee_id = model.employee_id
+        service = getattr(engine, "employee_desktops", None)
+        if service is None:
+            raise HTTPException(status_code=503, detail="Employee desktops are unavailable")
+        try:
+            return service.stop_session(employee_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Employee not found") from exc
+        except Exception as exc:
+            frames = [(frame.filename, frame.lineno, frame.name)
+                      for frame in traceback.extract_tb(exc.__traceback__)]
+            logger.error("Employee desktop stop failed exception_type=%s stack=%s",
+                         type(exc).__name__, frames)
+            raise HTTPException(status_code=503, detail="Employee desktop could not be stopped") from exc
 
     @app.post("/company/background/{provider_id}/control", status_code=202)
     def control_company_background(

@@ -156,6 +156,20 @@ export type Company = {
   error?: string | null
 }
 
+export type CompanyDesktopEmployee = {
+  id: string
+  name: string
+  role: string
+  status: string
+  viewing_url?: string | null
+}
+
+export type CompanyDesktopSession = {
+  employee_id: string
+  status: string
+  viewing_url: string
+}
+
 export type ActivityEntry = {
   id: string
   type: "email" | "message" | "action" | "company" | string
@@ -177,7 +191,16 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   }
 
   if (!response.ok) {
-    throw new Error(`Request failed (${response.status}). Try again or return to the run tracker.`)
+    let code: string | undefined
+    try {
+      const payload = await response.clone().json() as { error?: { code?: unknown } }
+      if (typeof payload.error?.code === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,95}$/.test(payload.error.code)) {
+        code = payload.error.code
+      }
+    } catch {
+      // Some existing endpoints return plain text or an empty error body.
+    }
+    throw new Error(`Request failed (${response.status}${code ? `: ${code}` : ""}). Try again or return to the run tracker.`)
   }
   return (await response.json()) as T
 }
@@ -205,6 +228,38 @@ export async function getRuns(): Promise<ExperimentRun[]> {
 export async function getCompany(): Promise<Company> {
   const result = await requestJson<{ company: Company }>("/api/company")
   return result.company
+}
+
+export async function getCompanyDesktops(): Promise<CompanyDesktopEmployee[]> {
+  const result = await requestJson<{ employees: CompanyDesktopEmployee[] }>('/api/company/desktops')
+  return result.employees
+}
+
+export async function startCompanyDesktop(employeeId: string): Promise<CompanyDesktopSession> {
+  const session = await getSession()
+  const result = await requestJson<CompanyDesktopSession>('/api/company/desktops/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      employee_id: employeeId,
+      csrf_token: session.csrf_token,
+      idempotency_key: session.idempotency_key,
+    }),
+  })
+  return { employee_id: result.employee_id, status: result.status, viewing_url: result.viewing_url }
+}
+
+export async function stopCompanyDesktop(employeeId: string): Promise<{ employee_id: string; status: string }> {
+  const session = await getSession()
+  return requestJson('/api/company/desktops/stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      employee_id: employeeId,
+      csrf_token: session.csrf_token,
+      idempotency_key: session.idempotency_key,
+    }),
+  })
 }
 
 export async function setBackgroundProviderEnabled(providerId: CompanyNativeEvaluation["provider_id"], enabled: boolean): Promise<{ provider_id: CompanyNativeEvaluation["provider_id"]; enabled: boolean; in_flight: boolean; status: "stopped" | "stopping" | "starting" | "active" | "error" }> {

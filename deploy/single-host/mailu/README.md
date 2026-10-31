@@ -18,6 +18,15 @@ Create `/data/theagentcompany/mailu/mailu.env` from `.env.example`, replace `SEC
 
 The webmail and admin UI are served by the front container on `127.0.0.1:8112`. The deployed Caddy site for `mail.company.example.test` proxies HTTPS requests to that loopback endpoint. Employee webmail is available at `/webmail/`; administration and the API are under `/admin/` and `/api/`.
 
+The Roundcube image is derived from the pinned Mailu `2024.06.58` image and adds only the TAC correlation plugin. Its startup wrapper appends that plugin to the existing `ROUNDCUBE_PLUGINS` list; when the setting is empty, it retains Mailu's existing default plugin set. Build and restart only the webmail service when changing this plugin:
+
+```sh
+docker compose build webmail
+docker compose up -d webmail
+```
+
+This retains the existing webmail data volume and `/overrides` mount. Do not replace or clear `/data/theagentcompany/mailu/overrides/roundcube` during deployment.
+
 Local protocols use `mail.company.example.test:2587` for authenticated SMTP submission with TLS, `mail.company.example.test:2993` for IMAP over TLS, and `192.0.2.10:2525` for SMTP ingress. Port 2525 is not public port 25 and must remain LAN/firewall restricted. The server's default Postfix delivery routes are configured to reject external destinations; do not add broad relay networks or a global relay host.
 
 Rspamd's mounted `overrides/rspamd/milter_headers.conf` sets `add_smtp_user = true` for its existing `Authentication-Results` routine. Rspamd removes upstream Authentication-Results headers before adding its own; the simulation accepts an authenticated sender only from one result with the configured Mailu `authserv-id`, `auth=pass`, and an `smtp.auth` username that maps to the configured actor and matches the message's From address. It also checks the exact thread and mailbox recipient. The IMAP observer fetches headers before the body and reads body content only after these checks. This uses Rspamd's standard milter header routine documented at [Rspamd milter headers](https://docs.rspamd.com/modules/milter_headers/). A controlled internal delivery and a spoofed upstream Authentication-Results header were verified against existing employee mailboxes; only exact headers were read back.

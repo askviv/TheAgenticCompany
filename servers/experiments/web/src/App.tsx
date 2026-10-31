@@ -10,6 +10,7 @@ import {
   ExternalLink,
   LoaderCircle,
   Mail,
+  Maximize2,
   MessageCircle,
   RefreshCw,
   Search,
@@ -29,8 +30,8 @@ import {
 import {
   getActivity,
   getCatalog,
-  getCompatibilityCatalogue,
   getCompany,
+  getCompanyDesktops,
   getCompanyEvaluations,
   getEvaluation,
   getEvaluations,
@@ -47,9 +48,9 @@ import {
   type ActivityEntry,
   type ActivityMetrics,
   type Company,
+  type CompanyDesktopEmployee,
   type CompanyNativeEvaluation,
   type CompanyNativeEvaluationProvider,
-  type CompatibilityCatalogue,
   type Experiment,
   type ExperimentRun,
   type ExperimentRunStatus,
@@ -193,11 +194,11 @@ function AppLayout() {
             <NavLink to="/" end className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
               Activity
             </NavLink>
+            <NavLink to="/streams" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
+              Streams
+            </NavLink>
           <NavLink to="/experiments" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
               Experiments
-            </NavLink>
-            <NavLink to="/coverage" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-              Coverage
             </NavLink>
             <NavLink to="/runs" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
               Runs
@@ -245,6 +246,137 @@ function bankingRoleLabel(roleFit?: string) {
   if (roleFit === "mixed_customer") return "Personal + business"
   if (roleFit === "business_customer") return "Business banking"
   return null
+}
+
+function EmployeeStreamsPage() {
+  const refreshKey = useRefreshKey()
+  const [employees, setEmployees] = useState<CompanyDesktopEmployee[]>([])
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [manualRefresh, setManualRefresh] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+  const [focusedId, setFocusedId] = useState<string | null>(null)
+  const [fullscreenError, setFullscreenError] = useState<string | null>(null)
+  const focusedViewer = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    let active = true
+    setRefreshing(true)
+    getCompanyDesktops().then((items) => {
+      if (!active) return
+      setEmployees(items)
+      setError(null)
+    }).catch((reason) => {
+      if (!active) return
+      setError(reason instanceof Error ? reason.message : "Employee desktop streams could not be loaded.")
+    }).finally(() => {
+      if (!active) return
+      setLoading(false)
+      setRefreshing(false)
+    })
+    return () => { active = false }
+  }, [refreshKey, manualRefresh])
+
+  const running = employees.filter((employee) =>
+    ["running", "active", "ready"].includes(employee.status.toLowerCase()),
+  )
+  const focusedEmployee = running.find((employee) => employee.id === focusedId)
+
+  const enterFullscreen = async () => {
+    try {
+      await focusedViewer.current?.requestFullscreen()
+      setFullscreenError(null)
+    } catch {
+      setFullscreenError("Fullscreen mode is unavailable in this browser.")
+    }
+  }
+
+  return (
+    <section className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-sm font-medium text-primary">Live desktop streams</p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Employee streams</h1>
+          <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+            Running employee desktops appear here and update with company status refreshes. A desktop can remain open while idle; this view reports session state, not whether someone is actively working.
+          </p>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setManualRefresh((current) => current + 1)} disabled={refreshing}>
+          <RefreshCw className={refreshing ? "animate-spin" : ""} /> Refresh streams
+        </Button>
+      </div>
+      {error && <ErrorNotice message={error} title="Employee streams unavailable" />}
+      {loading && <p className="text-sm text-muted-foreground">Loading running desktops…</p>}
+      {!loading && !error && running.length === 0 && (
+        <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">No employee desktops are currently running.</CardContent></Card>
+      )}
+      {!loading && running.length > 0 && !focusedEmployee && (
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-label="Running employee desktop streams">
+          {running.map((employee) => (
+            <Card key={employee.id} className="overflow-hidden">
+              <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
+                <div className="min-w-0">
+                  <CardTitle className="truncate text-base">{employee.name}</CardTitle>
+                  <CardDescription>{employee.role} · Running</CardDescription>
+                </div>
+                {employee.viewing_url && <Button size="sm" variant="outline" onClick={() => { setFullscreenError(null); setFocusedId(employee.id) }}>
+                  <Maximize2 className="size-4" /> Focus stream
+                </Button>}
+              </CardHeader>
+              <CardContent className="pt-0">
+                {employee.viewing_url ? (
+                  <div className="relative aspect-video overflow-hidden rounded-md border bg-black">
+                    <iframe
+                      src={employee.viewing_url}
+                      title={`${employee.name} employee desktop`}
+                      allow="fullscreen; autoplay"
+                      referrerPolicy="no-referrer"
+                      className="pointer-events-none size-full border-0"
+                    />
+                    <button
+                      type="button"
+                      aria-label={`Focus ${employee.name} stream`}
+                      className="absolute inset-0 cursor-zoom-in bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+                      onClick={() => { setFullscreenError(null); setFocusedId(employee.id) }}
+                    />
+                  </div>
+                ) : (
+                  <div className="grid aspect-video place-items-center rounded-md border bg-muted/40 px-4 text-center text-sm text-muted-foreground">
+                    The running session has no viewer URL available.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {focusedEmployee?.viewing_url && (
+        <div className="fixed inset-0 z-50 bg-background p-3 sm:p-5" role="dialog" aria-modal="true" aria-label={`${focusedEmployee.name} desktop stream`} onKeyDown={(event) => { if (event.key === "Escape") setFocusedId(null) }}>
+          <div ref={focusedViewer} className="flex h-full flex-col gap-3">
+            <div className="flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <h2 className="truncate text-lg font-semibold">{focusedEmployee.name}</h2>
+                <p className="text-sm text-muted-foreground">{focusedEmployee.role} · Running · May be idle</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => void enterFullscreen()}><Maximize2 className="size-4" /> Full screen</Button>
+                <Button size="sm" variant="outline" onClick={() => setFocusedId(null)}>Back to grid</Button>
+              </div>
+            </div>
+            {fullscreenError && <p className="text-sm text-destructive">{fullscreenError}</p>}
+            <iframe
+              src={focusedEmployee.viewing_url}
+              title={`${focusedEmployee.name} employee desktop focused stream`}
+              allow="fullscreen; autoplay"
+              referrerPolicy="no-referrer"
+              className="min-h-0 flex-1 rounded-md border bg-black"
+            />
+          </div>
+        </div>
+      )}
+    </section>
+  )
 }
 
 function ActivityPage() {
@@ -418,6 +550,7 @@ function ActivityPage() {
 
         </CardContent>
       </Card>
+
 
       {globalBackgroundErrors.length > 0 && <Alert variant="destructive">
         <CircleAlert />
@@ -624,17 +757,6 @@ function LibraryPage() {
       </div>
 
       {providerWarning && <ErrorNotice title="Provider catalogue unavailable" message={providerWarning} />}
-      <Card>
-        <CardContent className="flex flex-col gap-3 pt-6 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="font-medium">Know what fits this company</p>
-            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-              Customer requests and external provider cases run in this company. The coverage guide explains source gaps, business fit and the background economies.
-            </p>
-          </div>
-          <Button variant="outline" render={<Link to="/coverage" />}>View coverage <ArrowRight /></Button>
-        </CardContent>
-      </Card>
 
       <fieldset className="space-y-3">
         <legend className="text-sm font-medium">Benchmark</legend>
@@ -702,107 +824,6 @@ function LibraryPage() {
       {!loading && !error && experiments.length > 0 && (
         <p className="text-xs text-muted-foreground">Showing {filtered.length} of {experiments.length} tasks</p>
       )}
-    </section>
-  )
-}
-
-function CoveragePage() {
-  const [catalogue, setCatalogue] = useState<CompatibilityCatalogue | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  useEffect(() => {
-    let active = true
-    getCompatibilityCatalogue().then((value) => {
-      if (active) { setCatalogue(value); setError(null) }
-    }).catch((reason: unknown) => {
-      if (active) setError(reason instanceof Error ? reason.message : "Compatibility coverage could not be loaded.")
-    })
-    return () => { active = false }
-  }, [])
-
-  if (error) return <ErrorNotice message={error} title="Coverage unavailable" />
-  if (!catalogue) return <PageLoading />
-
-  const fitLabel: Record<string, string> = {
-    direct_company_adapted: "Adapted to this company",
-    provider_persona_for_unchanged_tasks: "Original tasks require the provider role",
-    mixed_provider_and_external_financial_work: "Mixed provider and possible company finance work",
-    potential_external_company_financial_interaction: "Potential company-bank interaction; task-level review needed",
-    potential_external_financial_work_for_bill_affecting_tasks: "Bill-affecting tasks may fit an authorized company carrier account",
-    requires_service_persona: "Requires a service-business persona",
-    internal_test_fixtures: "Internal test fixtures, not assignments",
-  }
-
-  return (
-    <section className="space-y-7">
-      <div className="flex flex-col gap-3 border-b pb-6 sm:flex-row sm:items-end sm:justify-between">
-        <div className="space-y-1.5">
-          <h1 className="text-2xl font-semibold tracking-tight">Company fit and catalogue coverage</h1>
-          <p className="max-w-3xl text-sm text-muted-foreground">{catalogue.company_persona}</p>
-        </div>
-        <Button variant="outline" render={<Link to="/experiments" />}>Browse current library <ArrowRight /></Button>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {catalogue.library_inventory.map((item) => (
-          <Card key={item.name}>
-            <CardHeader>
-              <div className="flex items-baseline justify-between gap-3">
-                <CardTitle className="text-base">{item.name}</CardTitle>
-                <Badge variant="secondary">{item.count.toLocaleString()}</Badge>
-              </div>
-              <CardDescription className="leading-relaxed">{item.summary}</CardDescription>
-            </CardHeader>
-          </Card>
-        ))}
-      </div>
-
-      <div className="space-y-3">
-        <div>
-          <h2 className="text-lg font-semibold">τ-bench domain inventory</h2>
-          <p className="text-sm text-muted-foreground">Counts describe source catalogue rows. They are not run or pass counts.</p>
-        </div>
-        <div className="grid gap-4 lg:grid-cols-2">
-          {catalogue.tau_domains.map((domain) => (
-            <Card key={domain.name}>
-              <CardHeader className="gap-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-3">
-                  <CardTitle className="text-base">{domain.name}</CardTitle>
-                  <div className="flex gap-2 text-xs text-muted-foreground">
-                    <Badge variant="outline">{domain.catalogue_count.toLocaleString()} source rows</Badge>
-                    <Badge variant="outline">{domain.default_base_count.toLocaleString()} default-base rows</Badge>
-                  </div>
-                </div>
-                <Badge variant={domain.fit === "direct_company_adapted" ? "secondary" : "outline"} className="w-fit">
-                  {fitLabel[domain.fit] ?? "Requires review"}
-                </Badge>
-                <CardDescription className="leading-relaxed">{domain.summary}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <p><span className="font-medium">Implementation:</span> {domain.implementation}</p>
-                {domain.source_integrity_issue_count !== undefined && domain.source_integrity_issue_count > 0 && (
-                  <p className="rounded-md bg-muted p-3 text-muted-foreground">
-                    {domain.source_integrity_issue_count} upstream source-reference issues affect some retail task rows. They remain in the library and are not filled with invented records.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Source revisions</CardTitle>
-          <CardDescription>These revisions identify the upstream catalogues summarized here.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2 text-sm">
-          {catalogue.source_revisions.map((source) => (
-            <p key={source.name} className="flex flex-wrap justify-between gap-x-4 gap-y-1">
-              <span>{source.name}</span><code className="text-xs text-muted-foreground">{source.revision}</code>
-            </p>
-          ))}
-        </CardContent>
-      </Card>
     </section>
   )
 }
@@ -1379,9 +1400,9 @@ export default function App() {
       <Routes>
         <Route element={<AppLayout />}>
           <Route index element={<ActivityPage />} />
+          <Route path="streams" element={<EmployeeStreamsPage />} />
           <Route path="experiments" element={<LibraryPage />} />
           <Route path="experiments/:experimentId" element={<ExperimentPage />} />
-          <Route path="coverage" element={<CoveragePage />} />
           <Route path="help" element={<HelpPage />} />
           <Route path="runs" element={<RunsPage />} />
           <Route path="runs/:runId" element={<RunPage />} />

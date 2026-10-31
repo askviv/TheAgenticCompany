@@ -1135,6 +1135,11 @@ class SimulationEngine:
                     actor = (self.store.get_actor(model.run_id, current["generation"], actor_id,
                                                   connection=connection)
                              if actor_id else None)
+                    if actor and event.get("source") == "mail_gateway":
+                        # Inbound employee replies are handled by pump() outside
+                        # the writer transaction, where the exact native message
+                        # can be opened in that employee's browser first.
+                        continue
                     if actor and (actor["kind"] == "approver"
                                   or actor["kind"] in {"customer", "supplier"}):
                         # Manager ERP reads and upstream actor turns occur
@@ -1714,6 +1719,15 @@ class SimulationEngine:
             if actor is not None and actor["kind"] in {"customer", "supplier"}:
                 self._process_upstream_actor_event(current, event, actor)
                 continue
+            if (actor is not None
+                    and event["event_type"] == "EMPLOYEE_RESPONSE_READY"
+                    and event.get("source") == "mail_gateway"):
+                # This event represents a received message being handled, not
+                # background arrival. Let the employee browser display that
+                # exact native message before committing the response.
+                self.mail.open_employee_message_for_response(
+                    self._mail_actor(actor), event["payload"]["message_id"],
+                )
             with self.store.transaction() as connection:
                 current = self.store.get_run(run["run_id"], connection=connection)
                 event = next(item for item in pending if item["event_id"] == event_id)

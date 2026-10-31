@@ -82,7 +82,15 @@ sudo python3.12 /data/theagentcompany/enterprise/source/deploy/enterprise-simula
 ```
 
 The script creates private runtime configuration, an agent-only client file,
-and the venv. It prints file locations and account outcomes, never passwords,
+the venv, and attempts to prepare the pinned local Selkies desktop image. Image
+setup skips when the existing local image carries the current Dockerfile
+digest; a source image change triggers a build. The build only reads the pinned
+official base and tags the local derivative. It does not restart or replace
+any running host service. If Docker cannot build or pull the image, bootstrap
+prints a warning and completes core company setup; desktop start then reports
+that the image is unavailable. Rerun bootstrap after Docker connectivity is
+restored. See `employee-desktop/README.md` for image details. The script prints
+file locations and account outcomes, never passwords,
 principal tokens, API bodies, or message content. It does not start the API or
 install/enable the unit.
 

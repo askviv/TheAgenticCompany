@@ -33,7 +33,7 @@ def create_provider_portal_app(config_path: str | Path):
     )
     if any(key not in portal_config for key in required):
         raise ValueError("Provider portal runtime configuration is incomplete")
-    from servers.simulation.runtime import RuntimeConfig, private_json
+    from servers.simulation.runtime import RuntimeConfig, employee_desktop_manager, private_json
 
     runtime_path = Path(portal_config["runtime_config_file"])
     runtime = RuntimeConfig.model_validate(private_json(runtime_path))
@@ -54,7 +54,11 @@ def create_provider_portal_app(config_path: str | Path):
         session_secret=_read_private_key(Path(portal_config["session_key_file"])),
         integration_secret=_read_private_key(Path(portal_config["integration_key_file"])),
         provider_worker=worker,
-        mail_gateway=MailuGateway(runtime.mail, mail_credentials),
+        mail_gateway=MailuGateway(
+            runtime.mail,
+            mail_credentials,
+            employee_desktops=employee_desktop_manager(runtime),
+        ),
         provider_mail_actors=portal_config["provider_mail_actors"],
         portal_public_url=portal_config["public_url"],
     )

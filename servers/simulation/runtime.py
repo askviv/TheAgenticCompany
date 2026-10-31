@@ -6,6 +6,7 @@ import importlib.metadata
 import json
 import logging
 import os
+import queue
 from pathlib import Path
 import subprocess
 import sqlite3
@@ -90,6 +91,21 @@ def private_secret(path: Path) -> str:
     if not value:
         raise ValueError("Runtime secret file is empty")
     return value
+
+
+def employee_desktop_manager(config: RuntimeConfig | None = None):
+    """Use the coordinator's private settings for host-local employee browsers."""
+    from .employee_desktops import EmployeeDesktopRuntime
+    from .employee_desktop_proxy import CaddyEmployeeDesktopProxy
+
+    if config is None:
+        config_path = os.environ.get(
+            "SIMULATION_CONFIG", str(RuntimeConfig.model_fields["issue_config_path"].default))
+        config = RuntimeConfig.model_validate(private_json(Path(config_path)))
+    return EmployeeDesktopRuntime(
+        config.company_profile_file, config.state_root / "employee-desktops",
+        caddy_proxy=CaddyEmployeeDesktopProxy(),
+    )
 
 
 def _provider_case_employee(profile: dict[str, Any], mail_config: dict[str, Any],
@@ -199,6 +215,9 @@ class MailWorkers:
         self._hub_connected = threading.Event()
         self._viv_activity_condition = threading.Condition()
         self._viv_activity_sequence = 0
+        self._employee_inbox_worker_lock = threading.Lock()
+        self._employee_inbox_queues: dict[str, queue.Queue[dict[str, Any] | None]] = {}
+        self.employee_inbox_coalesced_events: dict[str, int] = {}
 
     def viv_activity_version(self) -> int:
         with self._viv_activity_condition:
@@ -236,8 +255,58 @@ class MailWorkers:
             while not self.stopped.is_set():
                 if self.engine.mail.wait_for_activity(actor, timeout=30):
                     self.changed.set()
+                    if actor.get("kind") == "employee":
+                        self._enqueue_employee_inbox(actor)
         except Exception as error:
             self._failure("mailbox:" + actor["actor_id"], error)
+
+    def _enqueue_employee_inbox(self, actor: dict[str, Any]) -> None:
+        actor_id = actor["actor_id"]
+        with self._employee_inbox_worker_lock:
+            if self.stopped.is_set():
+                return
+            event_queue = self._employee_inbox_queues.get(actor_id)
+            if event_queue is None:
+                event_queue = queue.Queue(maxsize=1)
+                self._employee_inbox_queues[actor_id] = event_queue
+                worker = threading.Thread(
+                    target=self._refresh_employee_inboxes,
+                    args=(actor_id, event_queue),
+                    name="simulation-employee-inbox-" + str(abs(hash(actor_id))),
+                    daemon=True,
+                )
+                self.threads.append(worker)
+                worker.start()
+            try:
+                event_queue.put_nowait(actor)
+            except queue.Full:
+                # One pending refresh observes the latest inbox state; more
+                # IDLE notifications while this employee is busy are coalesced.
+                self.employee_inbox_coalesced_events[actor_id] = (
+                    self.employee_inbox_coalesced_events.get(actor_id, 0) + 1
+                )
+
+    def _refresh_employee_inboxes(
+        self, actor_id: str, event_queue: queue.Queue[dict[str, Any] | None]
+    ) -> None:
+        while True:
+            actor = event_queue.get()
+            if actor is None:
+                event_queue.task_done()
+                return
+            component = "employee_inbox:" + actor_id
+            try:
+                refreshed = self.engine.mail.refresh_employee_inbox_if_running(actor)
+                if refreshed:
+                    self.errors.pop(component, None)
+                else:
+                    self.errors.pop(component, None)
+            except Exception as error:
+                self._failure(component, error)
+            finally:
+                event_queue.task_done()
+            if self.stopped.is_set():
+                return
 
     def _viv_notification(self, arguments: Any) -> None:
         # signalrcore 1.0.2 invokes handlers with HubMessage.arguments (a list),
@@ -334,6 +403,8 @@ class MailWorkers:
         components = {}
         if any(key.startswith("mailbox:") for key in self.errors):
             components["mailu_mailboxes"] = "failed"
+        if any(key.startswith("employee_inbox:") for key in self.errors):
+            components["employee_inboxes"] = "failed"
         if "smtp4dev_notifications" in self.errors:
             components["viv_notifications"] = "failed"
         if any(key.startswith("run:") for key in self.errors):
@@ -360,13 +431,22 @@ class MailWorkers:
         if hasattr(self.engine.mail, "config") and hasattr(self.engine.mail.config, "smtp4dev_api_base_url"):
             self.threads.append(threading.Thread(target=self._watch_viv,
                                                  name="simulation-viv-notifications", daemon=True))
-        for thread in self.threads:
+        startup_threads = tuple(self.threads)
+        for thread in startup_threads:
             thread.start()
         self.changed.set()
 
     def stop(self) -> None:
         self.stopped.set()
         self.changed.set()
+        with self._employee_inbox_worker_lock:
+            inbox_queues = list(self._employee_inbox_queues.values())
+        for event_queue in inbox_queues:
+            try:
+                event_queue.put_nowait(None)
+            except queue.Full:
+                # The worker will exit after finishing its already queued event.
+                pass
         if self._hub_connection is not None:
             try:
                 self._hub_connection.stop()
@@ -462,6 +542,12 @@ def build_app(config_path: str | Path):
     engine = SimulationEngine(store, gateway, erp_factory,
                               ERPNextSiteAdmin(config.erp_compose, config.erp_credentials_root.parent),
                               config.mail["actors"])
+    try:
+        engine.employee_desktops = employee_desktop_manager(config)
+    except ValueError as error:
+        LOG.error("Employee desktop configuration is invalid exception_type=%s", type(error).__name__)
+        engine.employee_desktops = None
+    gateway.set_employee_desktops(engine.employee_desktops)
     engine.company_binding = config.company_binding
     engine.support_actor_id = config.support_actor_id
     engine.support_address = config.support_address

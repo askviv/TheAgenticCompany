@@ -112,7 +112,9 @@ services:
       - default
 
   webmail:
-    image: ghcr.io/mailu/webmail:2024.06.58@sha256:bb438c63dc4e54204e9bd57f139368f98d58f3bc287a75bdb5eb4d18c9bdfc6c
+    image: theagentcompany/mailu-webmail:2024.06.58-tac1
+    build:
+      context: ./webmail
     restart: unless-stopped
     labels:
       tac.environment: single-host

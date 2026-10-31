@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -26,6 +27,10 @@ MAIL_API = "http://127.0.0.1:8112/api/v1"
 MAIL_DOMAIN = "example.com"
 MAIL_HOST = "mail.company.example.test"
 MAIL_SMTP_PORT = 2587
+SELKIES_BASE_IMAGE = "ghcr.io/selkies-project/selkies/desktop:2.1.0-ubuntu26.04"
+EMPLOYEE_DESKTOP_IMAGE = "tac-selkies-desktop:2.1.0-ubuntu26.04-socat1"
+EMPLOYEE_DESKTOP_DOCKERFILE = Path("deploy/enterprise-simulation/coordinator/employee-desktop/Dockerfile")
+EMPLOYEE_DESKTOP_DOCKERFILE_LABEL = "com.theagentcompany.employee-desktop.dockerfile-sha256"
 ACTORS = [
     {"actor_id": "viv", "email": "agent@agent.example.test", "kind": "agent"},
     {"actor_id": "requester", "email": "sarahjohnson@example.com", "kind": "employee"},
@@ -450,6 +455,71 @@ def verify_source(source: Path) -> None:
         raise FileNotFoundError("Enterprise source checkout lacks simulation runtime files")
 
 
+def ensure_employee_desktop_image(source: Path) -> str:
+    """Build the pinned local Selkies derivative once per Dockerfile revision.
+
+    This only inspects/builds an image; it does not restart or replace running
+    containers or touch any other Docker services.
+    """
+    dockerfile = source / EMPLOYEE_DESKTOP_DOCKERFILE
+    dockerfile_digest = hashlib.sha256(dockerfile.read_bytes()).hexdigest()
+    inspect_command = [
+        "docker", "image", "inspect", EMPLOYEE_DESKTOP_IMAGE,
+        "--format", "{{json .Config.Labels}}",
+    ]
+
+    def matching_revision() -> bool:
+        result = subprocess.run(inspect_command, check=False, capture_output=True, text=True)
+        if result.returncode != 0:
+            return False
+        try:
+            labels = json.loads(result.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("Docker returned invalid employee desktop image labels") from error
+        return (isinstance(labels, dict)
+                and labels.get(EMPLOYEE_DESKTOP_DOCKERFILE_LABEL) == dockerfile_digest
+                and labels.get("org.opencontainers.image.base.name") == SELKIES_BASE_IMAGE)
+
+    if matching_revision():
+        return EMPLOYEE_DESKTOP_IMAGE
+    try:
+        subprocess.run(["docker", "info"], check=True, capture_output=True, text=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError("Docker daemon is unavailable; the employee desktop image is required") from error
+
+    build_command = [
+        "docker", "build", "--pull",
+        "--build-arg", f"SELKIES_BASE_IMAGE={SELKIES_BASE_IMAGE}",
+        "--build-arg", f"EMPLOYEE_DESKTOP_DOCKERFILE_SHA256={dockerfile_digest}",
+        "--file", str(dockerfile),
+        "--tag", EMPLOYEE_DESKTOP_IMAGE,
+        str(dockerfile.parent),
+    ]
+    try:
+        # Leave build progress/errors visible to the operator; the context has
+        # only the Dockerfile and the build args contain no credentials.
+        subprocess.run(build_command, check=True)
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError("Could not build the pinned Selkies employee desktop image") from error
+    if not matching_revision():
+        raise RuntimeError("Docker build completed without the expected employee desktop image labels")
+    return EMPLOYEE_DESKTOP_IMAGE
+
+
+def prepare_optional_employee_desktop_image(source: Path) -> str | None:
+    """Report image provisioning failure while allowing core company setup through."""
+    try:
+        return ensure_employee_desktop_image(source)
+    except Exception as error:
+        print(
+            "WARNING: employee desktop image provisioning failed "
+            f"({type(error).__name__}: {error}); desktop sessions will be unavailable "
+            "until coordinator bootstrap succeeds.",
+            file=sys.stderr,
+        )
+        return None
+
+
 def private_erp_compose(source: Path, destination: Path) -> Path:
     template = source / "deploy/enterprise-simulation/erpnext/compose.yml"
     if destination.exists():
@@ -573,6 +643,9 @@ def main() -> int:
     python_info = subprocess.run([args.python, "--version"], check=True, capture_output=True, text=True)
     if "3.12" not in python_info.stdout + python_info.stderr:
         raise RuntimeError("Coordinator runtime requires the workplace's Python 3.12 environment")
+    employee_desktop_image = prepare_optional_employee_desktop_image(source)
+    if employee_desktop_image is not None:
+        print(f"Employee desktop image ready: {employee_desktop_image}")
 
     mail_env = mail_root / "mailu.env"
     client = MailuClient(args.mail_api, env_value(mail_env, "API_TOKEN"))

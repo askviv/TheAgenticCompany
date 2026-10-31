@@ -1362,12 +1362,14 @@ class CompanyFeedbackRuntime:
 
     def _deliver_coffee_native_message(self, event: CompanySourceEvent | None, plan: dict) -> None:
         from .mail import MailDeliveryUnconfirmed, MailuGateway
-        from .runtime import private_json
+        from .runtime import employee_desktop_manager, private_json
         from .company_feedback import encoded, identity
 
         if self._mail_gateway is None:
             self._mail_gateway = MailuGateway(
-                self.config.mail, private_json(self.config.mail_credentials_file)
+                self.config.mail,
+                private_json(self.config.mail_credentials_file),
+                employee_desktops=employee_desktop_manager(self.config),
             )
         payload = {
             "sender": plan["sender"],
@@ -1676,10 +1678,12 @@ class CompanyFeedbackRuntime:
     def _get_mail_gateway(self):
         if self._mail_gateway is None:
             from .mail import MailuGateway
-            from .runtime import private_json
+            from .runtime import employee_desktop_manager, private_json
 
             self._mail_gateway = MailuGateway(
-                self.config.mail, private_json(self.config.mail_credentials_file)
+                self.config.mail,
+                private_json(self.config.mail_credentials_file),
+                employee_desktops=employee_desktop_manager(self.config),
             )
         return self._mail_gateway
 

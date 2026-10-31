@@ -11,6 +11,8 @@ from urllib.parse import quote, urljoin
 
 import requests
 
+_DEFAULT_TIMEOUT = object()
+
 
 class CoordinatorError(RuntimeError):
     """A coordinator operation failed without exposing response payloads."""
@@ -26,13 +28,15 @@ class CoordinatorError(RuntimeError):
 
 class SimulationCoordinatorClient:
     def __init__(self, base_url: str, token: str, *, timeout: float = 15.0,
-                 session: requests.Session | None = None):
+                 session: requests.Session | None = None,
+                 session_factory: Any = requests.Session):
         if not base_url or not token:
             raise ValueError("coordinator URL and controller token are required")
         self.base_url = base_url.rstrip("/") + "/"
         self.token = token
         self.timeout = timeout
         self.session = session or requests.Session()
+        self.session_factory = session_factory
         self._lock=threading.RLock()
 
     @classmethod
@@ -48,16 +52,26 @@ class SimulationCoordinatorClient:
                    token=token)
 
     def _request(self, method: str, endpoint: str, *, idempotency_key: str | None = None,
+                 request_timeout: float | None | object = _DEFAULT_TIMEOUT,
+                 independent_session: bool = False,
                  **kwargs: Any) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {self.token}"}
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
+        request_session = self.session_factory() if independent_session else self.session
+        timeout = self.timeout if request_timeout is _DEFAULT_TIMEOUT else request_timeout
         try:
-            with self._lock:
-                response = self.session.request(
+            if independent_session:
+                response = request_session.request(
                     method, urljoin(self.base_url, endpoint.lstrip("/")), headers=headers,
-                    timeout=self.timeout, **kwargs,
+                    timeout=timeout, **kwargs,
                 )
+            else:
+                with self._lock:
+                    response = request_session.request(
+                        method, urljoin(self.base_url, endpoint.lstrip("/")), headers=headers,
+                        timeout=timeout, **kwargs,
+                    )
             response.raise_for_status()
             payload = response.json()
         except requests.Timeout as error:
@@ -78,12 +92,32 @@ class SimulationCoordinatorClient:
             raise CoordinatorError(endpoint, "transport_error") from error
         except ValueError as error:
             raise CoordinatorError(endpoint, "invalid_response") from error
+        finally:
+            if independent_session:
+                request_session.close()
         if not isinstance(payload, dict):
             raise CoordinatorError(endpoint, "invalid_response")
         return payload
 
     def company(self) -> dict[str, Any]:
         return self._request("GET", "/company")
+
+    def company_desktops(self) -> dict[str, Any]:
+        return self._request("GET", "/company/desktops")
+
+    def start_company_desktop(self, employee_id: str, *, idempotency_key: str) -> dict[str, Any]:
+        return self._request(
+            "POST", "/company/desktops/start",
+            idempotency_key=idempotency_key, request_timeout=None,
+            independent_session=True, json={"employee_id": employee_id},
+        )
+
+    def stop_company_desktop(self, employee_id: str, *, idempotency_key: str) -> dict[str, Any]:
+        return self._request(
+            "POST", "/company/desktops/stop",
+            idempotency_key=idempotency_key, request_timeout=None,
+            independent_session=True, json={"employee_id": employee_id},
+        )
 
     def provider_catalog(self) -> dict[str, Any]:
         return self._request("GET", "/company/provider-experiments/catalog")

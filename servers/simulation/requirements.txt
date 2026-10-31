@@ -16,6 +16,8 @@ click==8.5.0
     # via uvicorn
 fastapi==0.162.0
     # via -r servers/simulation/requirements.in
+greenlet==3.2.5
+    # via playwright
 h11==0.16.0
     # via uvicorn
 idna==3.20
@@ -32,6 +34,8 @@ numpy==2.5.4
     # via -r servers/simulation/requirements.in
 opentelemetry-api==1.45.2
     # via fastapi
+playwright==1.64.1
+    # via -r servers/simulation/requirements.in
 pydantic==2.14.2
     # via
     #   -r servers/simulation/requirements.in
@@ -40,6 +44,8 @@ pydantic-core==2.50.2
     # via pydantic
 python-dateutil==2.9.0.post0
     # via -r servers/simulation/requirements.in
+pyee==14.0.0
+    # via playwright
 requests==2.34.2
     # via -r servers/simulation/requirements.in
 signalrcore==1.0.2

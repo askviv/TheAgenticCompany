@@ -10,6 +10,8 @@ from __future__ import annotations
 import email
 import email.policy
 from email.header import decode_header, make_header
+import json
+from pathlib import Path
 import re
 import smtplib
 import time
@@ -148,6 +150,10 @@ class MailReceiptMismatch(RuntimeError):
     """A message ID exists, but its run correlation or subject does not match."""
 
 
+class MailReplySourceUnavailable(RuntimeError):
+    """An employee reply has no unique exact source message in its inbox."""
+
+
 class SMTP4DevAPIError(RuntimeError):
     """smtp4dev API request or response failed without exposing its body."""
 
@@ -158,6 +164,10 @@ class SMTP4DevAPIError(RuntimeError):
         if status is not None:
             detail += f" (HTTP {status})"
         super().__init__(detail)
+
+
+class EmployeeBrowserUnavailable(RuntimeError):
+    """An employee-authored message cannot use the managed native browser."""
 
 
 def _single_header(headers: dict[str, list[Any]], name: str) -> str:
@@ -230,7 +240,8 @@ class MailuGateway:
     stay in memory and are never included in receipts or errors.
     """
 
-    def __init__(self, config: dict[str, Any], credentials: dict[str, dict[str, str]]):
+    def __init__(self, config: dict[str, Any], credentials: dict[str, dict[str, str]],
+                 *, employee_desktops: Any | None = None, webmail_sender: Any | None = None):
         self.config = _GatewayConfig.model_validate(config)
         self._actors = {actor.actor_id: actor for actor in self.config.actors}
         self._credentials = {
@@ -238,6 +249,13 @@ class MailuGateway:
             for address, value in credentials.items()
         }
         self._transport = RealMailTransport()
+        self.employee_desktops = employee_desktops
+        self._webmail_sender = webmail_sender
+
+    def set_employee_desktops(self, manager: Any | None) -> None:
+        """Attach the coordinator-owned employee browser runtime after engine setup."""
+        self.employee_desktops = manager
+        self._webmail_sender = None
 
     def _actor(self, value: dict[str, Any], role: str) -> _ActorRecord:
         actor_ref = _ActorRef.model_validate(value)
@@ -254,6 +272,189 @@ class MailuGateway:
 
     def _is_viv(self, actor: _ActorRecord) -> bool:
         return actor.actor_id == SPECIAL_VIV_ID and actor.email.casefold() == SPECIAL_VIV_EMAIL
+
+    def _employee_id(self, actor: _ActorRecord) -> str | None:
+        if self._is_viv(actor):
+            return None
+        if self.employee_desktops is None:
+            if actor.kind == "employee":
+                raise EmployeeBrowserUnavailable(
+                    "employee browser runtime is not configured for this native send"
+                )
+            return None
+        profile_path = getattr(self.employee_desktops, "company_profile_path", None)
+        if not isinstance(profile_path, (str, Path)):
+            raise EmployeeBrowserUnavailable("employee browser runtime has no company identity profile")
+        try:
+            profile = json.loads(Path(profile_path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise EmployeeBrowserUnavailable("company identity profile is unavailable for native send") from error
+        employees = profile.get("employees") if isinstance(profile, dict) else None
+        if not isinstance(employees, list):
+            raise EmployeeBrowserUnavailable("company identity profile has no employee directory")
+        matches = [item for item in employees if isinstance(item, dict)
+                   and isinstance(item.get("email"), str)
+                   and item["email"].casefold() == actor.email.casefold()]
+        if not matches:
+            if actor.kind == "employee":
+                raise EmployeeBrowserUnavailable(
+                    "employee actor email does not map to one company profile identity"
+                )
+            return None
+        employee_ids = [item.get("id") for item in matches]
+        if len(matches) != 1 or not isinstance(employee_ids[0], str) or not employee_ids[0]:
+            raise EmployeeBrowserUnavailable("company profile email does not resolve to one employee identity")
+        return employee_ids[0]
+
+    def _employee_webmail(self):
+        if self.employee_desktops is None:
+            raise EmployeeBrowserUnavailable("employee browser runtime is not configured for this native send")
+        if self._webmail_sender is None:
+            from .employee_webmail import EmployeeWebmailSender
+
+            self._webmail_sender = EmployeeWebmailSender(
+                self.employee_desktops, self.config.webmail_url,
+            )
+        return self._webmail_sender
+
+    def open_employee_inbox(self, employee_id: str, session: dict[str, Any] | None = None) -> None:
+        """Open one profile-matched employee inbox in an already requested desktop."""
+        if self.employee_desktops is None:
+            raise EmployeeBrowserUnavailable("employee browser runtime is not configured")
+        profile_path = getattr(self.employee_desktops, "company_profile_path", None)
+        if not isinstance(profile_path, (str, Path)):
+            raise EmployeeBrowserUnavailable("employee browser runtime has no company identity profile")
+        try:
+            profile = json.loads(Path(profile_path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise EmployeeBrowserUnavailable("company identity profile is unavailable for native inbox") from error
+        employees = profile.get("employees") if isinstance(profile, dict) else None
+        if not isinstance(employees, list):
+            raise EmployeeBrowserUnavailable("company identity profile has no employee directory")
+        matches = [item for item in employees if isinstance(item, dict) and item.get("id") == employee_id]
+        if len(matches) != 1 or not isinstance(matches[0].get("email"), str):
+            raise EmployeeBrowserUnavailable("employee ID does not resolve to one configured mailbox")
+        email_address = matches[0]["email"]
+        actors = [actor for actor in self._actors.values()
+                  if actor.email.casefold() == email_address.casefold()]
+        if len(actors) != 1 or self._is_viv(actors[0]):
+            raise EmployeeBrowserUnavailable("employee profile mailbox does not resolve to one mail actor")
+        credentials = self._credentials_for(actors[0])
+        self._employee_webmail().open_inbox(
+            employee_id,
+            email_address,
+            credentials.username,
+            credentials.password,
+            session=session,
+        )
+
+    def refresh_employee_inbox_if_running(self, actor: dict[str, Any]) -> bool:
+        """Refresh a mapped employee's inbox only when its desktop is already running."""
+        sender_actor = self._actor(actor, "mailbox")
+        if sender_actor.kind != "employee":
+            return False
+        employee_id = self._employee_id(sender_actor)
+        if employee_id is None:
+            return False
+        if self.employee_desktops is None:
+            raise EmployeeBrowserUnavailable("employee browser runtime is not configured")
+        session = self.employee_desktops.existing_session(employee_id)
+        if session is None:
+            return False
+        credentials = self._credentials_for(sender_actor)
+        self._employee_webmail().refresh_inbox(
+            employee_id,
+            sender_actor.email,
+            credentials.username,
+            credentials.password,
+            session=session,
+        )
+        return True
+
+    def _reply_source(self, actor: _ActorRecord, message_id: str) -> dict[str, str]:
+        """Resolve one exact employee INBOX message without changing its flags."""
+        if self._is_viv(actor):
+            raise MailReceiptMismatch("a Viv capture message cannot be an employee inbox reply source")
+        context = _IssueNotificationContext(message_id=message_id)
+        credentials = self._credentials_for(actor)
+        matches: list[dict[str, str]] = []
+        with IMAPClient(
+            self.config.mailu_imap_host,
+            port=self.config.mailu_imap_port,
+            ssl=True,
+            ssl_context=_ssl_context(self.config.tls_ca_file),
+            timeout=self.config.smtp_timeout_seconds,
+        ) as client:
+            client.login(credentials.username, credentials.password)
+            selected = client.select_folder("INBOX", readonly=True)
+            uidvalidity = self._uidvalidity(selected)
+            for uid_value in client.search(["HEADER", "Message-ID", context.message_id]):
+                uid = int(uid_value)
+                fetched = client.fetch(
+                    [uid], [b"BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]"]
+                ).get(uid)
+                if not isinstance(fetched, dict):
+                    raise MailReceiptMismatch("Mailu reply-source search returned incomplete metadata")
+                raw = fetched.get(
+                    b"BODY[HEADER.FIELDS (MESSAGE-ID)]",
+                    fetched.get(b"BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]", b""),
+                )
+                parsed = email.message_from_bytes(raw or b"", policy=email.policy.default)
+                actual_id = _single_header(
+                    {"message-id": parsed.get_all("Message-ID", [])}, "message-id"
+                )
+                if actual_id != context.message_id:
+                    continue
+                # The exact Message-ID was found in this employee's authenticated INBOX.
+                # To/Cc may contain aliases, and Bcc is intentionally absent from headers.
+                matches.append({
+                    "message_id": context.message_id,
+                    "mailbox_uid": str(uid),
+                    "uidvalidity": uidvalidity,
+                    "webmail_url": _roundcube_message_url(self.config.webmail_url, str(uid)),
+                })
+        if len(matches) > 1:
+            raise MailReceiptMismatch("Mailu employee inbox has duplicate exact reply-source messages")
+        return matches[0] if matches else {}
+
+    def open_employee_message_for_response(
+        self, actor: dict[str, Any], message_id: str,
+    ) -> bool:
+        """Show the exact received message when a mapped employee handles it.
+
+        This is called at the committed response decision boundary, never for
+        generic IMAP arrival. Exact Message-ID lookup is read-only; navigating
+        to its native Roundcube view is the employee's actual read action.
+        """
+        sender_actor = self._actor(actor, "mailbox")
+        if self._is_viv(sender_actor):
+            return False
+        employee_id = self._employee_id(sender_actor)
+        if employee_id is None:
+            return False
+        if self.employee_desktops is None:
+            raise EmployeeBrowserUnavailable("employee browser runtime is not configured")
+        source = self._reply_source(sender_actor, message_id)
+        if not source:
+            raise MailReplySourceUnavailable(
+                "employee response has no exact source message in the configured inbox"
+            )
+        credentials = self._credentials_for(sender_actor)
+        self._employee_webmail().open_message(
+            employee_id,
+            sender_actor.email,
+            credentials.username,
+            credentials.password,
+            source["webmail_url"],
+        )
+        return True
+
+    def verify_reply_source(self, actor: dict[str, Any], source: dict[str, str]) -> None:
+        """Revalidate an exact source UID before the browser opens its Reply UI."""
+        current = self._reply_source(self._actor(actor, "sender"), source["message_id"])
+        if not current or any(current.get(key) != source.get(key)
+                              for key in ("mailbox_uid", "uidvalidity", "webmail_url")):
+            raise MailReceiptMismatch("Mailu reply-source UID changed before the browser opened it")
 
     def _smtp_send(
         self,
@@ -330,8 +531,9 @@ class MailuGateway:
             in_reply_to=in_reply_to,
             automated=automated,
         )
+        sender_credentials = None
         if not self._is_viv(sender_actor):
-            self._credentials_for(sender_actor)
+            sender_credentials = self._credentials_for(sender_actor)
         if not self._is_viv(recipient_actor):
             self._credentials_for(recipient_actor)
         if not isinstance(body, str):
@@ -355,7 +557,42 @@ class MailuGateway:
             message["References"] = context.in_reply_to
         message.set_content(body)
 
-        if delivery_address is None:
+        employee_id = self._employee_id(sender_actor)
+        if employee_id is not None:
+            webmail = self._employee_webmail()
+            if sender_credentials is None:
+                raise EmployeeBrowserUnavailable("employee webmail credentials are unavailable")
+            reply_source = None
+            source_verifier = None
+            if context.in_reply_to is not None:
+                reply_source = self._reply_source(sender_actor, context.in_reply_to)
+                if not reply_source:
+                    raise MailReplySourceUnavailable(
+                        "employee reply has no exact source message in the configured inbox"
+                    )
+                source_verifier = lambda: self.verify_reply_source(
+                    {"actor_id": sender_actor.actor_id, "email": sender_actor.email},
+                    reply_source,
+                )
+            webmail.send(
+                employee_id,
+                sender_actor.email,
+                sender_credentials.username,
+                sender_credentials.password,
+                delivery_address or recipient_actor.email,
+                context.subject,
+                body,
+                context.message_id,
+                context.run_id,
+                context.generation,
+                in_reply_to=context.in_reply_to,
+                reply_message_url=(reply_source["webmail_url"] if reply_source else None),
+                verify_reply_source=source_verifier,
+                reply_to=reply_to_actor.email if reply_to_actor is not None else None,
+                automated=context.automated,
+                on_submission_started=on_submission_started,
+            )
+        elif delivery_address is None:
             self._smtp_send(sender_actor, recipient_actor, message, on_submission_started)
         else:
             self._smtp_send(sender_actor, recipient_actor, message, on_submission_started,

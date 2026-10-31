@@ -12,7 +12,7 @@ from contextlib import contextmanager, closing
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import shorten
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qsl, quote, urlsplit
 
 import yaml
 from flask import Flask, Response, abort, jsonify, redirect, request, session, url_for, send_file
@@ -523,7 +523,9 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def request_csrf():
         if 'csrf_token' not in session: session['csrf_token']=secrets.token_urlsafe(32)
         if request.method=='POST' and request.endpoint!='chat_events':
+            json_body=request.get_json(silent=True) if request.is_json else None
             token=request.form.get('csrf_token','')
+            if isinstance(json_body,dict): token=json_body.get('csrf_token',token)
             if not secrets.compare_digest(token,session['csrf_token']): abort(400)
     def frontend():
         return app.send_static_file('app/index.html')
@@ -533,9 +535,9 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             return jsonify(run_id=run_id,url=location)
         return redirect(location,code=303)
     @app.get('/')
+    @app.get('/streams')
     @app.get('/help')
     @app.get('/experiments')
-    @app.get('/coverage')
     def index(): return frontend()
     @app.get('/api/session')
     def api_session(): return jsonify(csrf_token=session['csrf_token'],idempotency_key=str(uuid.uuid4()))
@@ -563,6 +565,148 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         with db() as c: stored_error=c.execute('SELECT error FROM company_state WHERE singleton=1').fetchone()['error']
         state['error']=stored_error
         return jsonify(company=api_company_shape(state))
+
+    def company_employee_roster():
+        path=Path(app.config['REPO'])/'deploy/single-host/company-identities.json'
+        try:
+            document=json.loads(path.read_text(encoding='utf-8'))
+            employees=document['employees']
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise CoordinatorError('company/desktops','employee_roster_unavailable') from error
+        if not isinstance(employees,list):
+            raise CoordinatorError('company/desktops','invalid_employee_roster')
+        roster={}
+        for employee in employees:
+            if (not isinstance(employee,dict) or not isinstance(employee.get('id'),str)
+                    or not employee['id']
+                    or not isinstance(employee.get('displayName'),str) or not employee['displayName'].strip()
+                    or not isinstance(employee.get('department'),str) or not employee['department'].strip()
+                    or employee['id'] in roster):
+                raise CoordinatorError('company/desktops','invalid_employee_roster')
+            roster[employee['id']]={
+                'id':employee['id'], 'name':employee['displayName'].strip(),
+                'role':employee['department'].strip(),
+            }
+        return roster
+
+    def safe_desktop_status(value, *, id_field='employee_id'):
+        if not isinstance(value,dict):
+            raise CoordinatorError('company/desktops','invalid_response')
+        employee_id=value.get(id_field)
+        status=value.get('status')
+        if not isinstance(employee_id,str) or not employee_id or not isinstance(status,str) or not status:
+            raise CoordinatorError('company/desktops','invalid_response')
+        return employee_id,status
+
+    def safe_desktop_viewing_url(value, operation='company/desktops/start'):
+        if not isinstance(value,str):
+            raise CoordinatorError(operation,'invalid_viewing_url')
+        try:
+            parsed=urlsplit(value)
+            # Access URLs are user-facing links; reject embedded credentials and
+            # query parameters that commonly carry bearer/session secrets.
+            if (parsed.scheme.lower() not in {'http','https'} or not parsed.hostname
+                    or parsed.username is not None or parsed.password is not None):
+                raise ValueError('unsafe URL')
+            parsed.port
+            if any(re.search(r'(token|secret|password|credential|authorization|api.?key)',key,re.I)
+                   for key,_ in parse_qsl(parsed.query,keep_blank_values=True)):
+                raise ValueError('secret-bearing query')
+            if re.search(r'(token|secret|password|credential|authorization|api.?key)\s*[=:]',parsed.fragment,re.I):
+                raise ValueError('secret-bearing fragment')
+        except ValueError as error:
+            raise CoordinatorError(operation,'invalid_viewing_url') from error
+        return value
+
+    @app.get('/api/company/desktops')
+    def api_company_desktops():
+        try:
+            roster=company_employee_roster()
+            payload=coordinator().company_desktops()
+            entries=payload.get('employees')
+            if not isinstance(entries,list):
+                raise CoordinatorError('company/desktops','invalid_response')
+            states={}
+            for entry in entries:
+                employee_id,status=safe_desktop_status(entry,id_field='id')
+                if employee_id not in roster or employee_id in states:
+                    raise CoordinatorError('company/desktops','invalid_employee_status')
+                state={'status':status}
+                viewing_url=entry.get('viewing_url')
+                if viewing_url is not None:
+                    if status.lower() not in {'running','active','ready'}:
+                        raise CoordinatorError('company/desktops','unexpected_viewing_url')
+                    state['viewing_url']=safe_desktop_viewing_url(
+                        viewing_url,operation='company/desktops')
+                states[employee_id]=state
+            response=jsonify(employees=[{**employee,**states.get(employee_id,{'status':'unknown'})}
+                                        for employee_id,employee in roster.items()])
+            response.headers['Cache-Control']='no-store'
+            return response
+        except CoordinatorError as error:
+            logging.exception('Company desktop list failed code=%s',error.code)
+            status=503 if error.code in {'employee_roster_unavailable','http_503','timeout','transport_error'} else 502
+            return jsonify(error={'code':error.code,'correlation_id':error.correlation_id}),status
+        except Exception as error:
+            logging.exception('Company desktop list failed')
+            return jsonify(error={'code':'desktop_service_unavailable'}),503
+
+    @app.post('/api/company/desktops/start')
+    def api_start_company_desktop():
+        data=request.get_json(silent=True)
+        if not isinstance(data,dict): abort(400)
+        employee_id=data.get('employee_id')
+        key=data.get('idempotency_key')
+        if not isinstance(employee_id,str) or not employee_id or not isinstance(key,str) or not key: abort(400)
+        try:
+            roster=company_employee_roster()
+            employee=roster.get(employee_id)
+            if employee is None:
+                return jsonify(error={'code':'unknown_employee'}),404
+            result=coordinator().start_company_desktop(employee_id,idempotency_key=key)
+            if set(result)!={'employee_id','status','viewing_url','viewing_credentials'}:
+                raise CoordinatorError('company/desktops/start','invalid_response')
+            returned_id,status=safe_desktop_status(result)
+            if returned_id!=employee_id:
+                raise CoordinatorError('company/desktops/start','employee_mismatch')
+            viewing_url=safe_desktop_viewing_url(result.get('viewing_url'))
+            response=jsonify(employee_id=employee_id,status=status,viewing_url=viewing_url)
+            response.headers['Cache-Control']='no-store'
+            notify()
+            return response
+        except CoordinatorError as error:
+            logging.exception('Company desktop start failed employee_id=%s code=%s',employee_id,error.code)
+            status=404 if error.code=='http_404' else 409 if error.code in {'http_409','http_422'} else 503 if error.code in {'http_503','timeout','transport_error'} else 502
+            return jsonify(error={'code':error.code,'correlation_id':error.correlation_id}),status
+        except Exception as error:
+            logging.exception('Company desktop start failed employee_id=%s',employee_id)
+            return jsonify(error={'code':'desktop_start_unavailable'}),503
+
+    @app.post('/api/company/desktops/stop')
+    def api_stop_company_desktop():
+        data=request.get_json(silent=True)
+        if not isinstance(data,dict): abort(400)
+        employee_id=data.get('employee_id')
+        key=data.get('idempotency_key')
+        if not isinstance(employee_id,str) or not employee_id or not isinstance(key,str) or not key: abort(400)
+        try:
+            if employee_id not in company_employee_roster():
+                return jsonify(error={'code':'unknown_employee'}),404
+            result=coordinator().stop_company_desktop(employee_id,idempotency_key=key)
+            if set(result)!={'employee_id','status'}:
+                raise CoordinatorError('company/desktops/stop','invalid_response')
+            returned_id,status=safe_desktop_status(result)
+            if returned_id!=employee_id:
+                raise CoordinatorError('company/desktops/stop','employee_mismatch')
+            notify()
+            return jsonify(employee_id=employee_id,status=status)
+        except CoordinatorError as error:
+            logging.exception('Company desktop stop failed employee_id=%s code=%s',employee_id,error.code)
+            status=404 if error.code=='http_404' else 409 if error.code in {'http_409','http_422'} else 503 if error.code in {'http_503','timeout','transport_error'} else 502
+            return jsonify(error={'code':error.code,'correlation_id':error.correlation_id}),status
+        except Exception as error:
+            logging.exception('Company desktop stop failed employee_id=%s',employee_id)
+            return jsonify(error={'code':'desktop_stop_unavailable'}),503
 
     def safe_company_evaluation(value, provider_id):
         """Allowlist company-global native result fields without exposing run internals."""

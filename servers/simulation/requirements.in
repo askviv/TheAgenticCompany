@@ -10,3 +10,4 @@ signalrcore==1.0.2
 numpy>=2.4.1
 simpy==4.1.2
 python-dateutil==2.9.0.post0
+playwright==1.64.1

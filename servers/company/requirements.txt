@@ -4,11 +4,19 @@ certifi==2026.10.23
     # via requests
 charset-normalizer==3.5.2
     # via requests
+greenlet==3.5.6
+    # via playwright
 idna==3.20
     # via requests
 imapclient==4.1.0
     # via -r servers/company/requirements.in
+playwright==1.64.1
+    # via -r servers/company/requirements.in
+pyee==14.0.0
+    # via playwright
 requests==2.34.2
     # via -r servers/company/requirements.in
+typing-extensions==4.16.0
+    # via pyee
 urllib3==2.8.0
     # via requests
