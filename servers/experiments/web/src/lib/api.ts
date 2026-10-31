@@ -139,7 +139,6 @@ export type CompanyNativeEvaluationProvider = {
 }
 
 export type Session = { csrf_token: string; idempotency_key: string }
-export type OperatorStatus = { authenticated: boolean }
 type RunResponse = { run_id: string; url: string }
 
 export type Company = {
@@ -196,28 +195,6 @@ export async function getCompatibilityCatalogue(): Promise<CompatibilityCatalogu
 
 export async function getSession(): Promise<Session> {
   return requestJson<Session>("/api/session")
-}
-
-export async function getOperatorStatus(): Promise<OperatorStatus> {
-  return requestJson<OperatorStatus>("/api/operator/status")
-}
-
-export async function loginOperator(key: string): Promise<void> {
-  const session = await getSession()
-  await requestJson<{ authenticated: true }>("/api/operator/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-    body: new URLSearchParams({ csrf_token: session.csrf_token, key }),
-  })
-}
-
-export async function logoutOperator(): Promise<void> {
-  const session = await getSession()
-  await requestJson<{ authenticated: false }>("/api/operator/logout", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
-    body: new URLSearchParams({ csrf_token: session.csrf_token }),
-  })
 }
 
 export async function getRuns(): Promise<ExperimentRun[]> {

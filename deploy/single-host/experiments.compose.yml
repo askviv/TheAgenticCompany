@@ -22,12 +22,6 @@ services:
         read_only: true
         bind:
           create_host_path: false
-      - type: bind
-        source: ${TAC_ROOT}/enterprise/secrets/experiments-operator-key
-        target: /run/secrets/experiments-operator-key
-        read_only: true
-        bind:
-          create_host_path: false
     environment:
       SIMULATION_COORDINATOR_URL: ${SIMULATION_COORDINATOR_URL:-http://192.0.2.10:8131}
       SIMULATION_CONTROLLER_TOKEN_FILE: /run/secrets/simulation-controller-token

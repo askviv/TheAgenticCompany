@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   ArrowLeft,
   ArrowRight,
@@ -9,7 +9,6 @@ import {
   Clock3,
   ExternalLink,
   LoaderCircle,
-  LogOut,
   Mail,
   MessageCircle,
   RefreshCw,
@@ -38,10 +37,7 @@ import {
   getLatestEvaluation,
   getRun,
   getRuns,
-  getOperatorStatus,
   getSession,
-  loginOperator,
-  logoutOperator,
   refreshRun,
   retryRun,
   startRun,
@@ -156,17 +152,7 @@ function LoadingCards() {
 function AppLayout() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [liveError, setLiveError] = useState<string | null>(null)
-  const [logoutError, setLogoutError] = useState<string | null>(null)
   const snapshot = useRef<Map<string, string> | undefined>(undefined)
-
-  const signOut = async () => {
-    try {
-      await logoutOperator()
-      window.location.assign("/")
-    } catch {
-      setLogoutError("Sign out could not be completed. Try again.")
-    }
-  }
 
   useEffect(() => {
     const source = new EventSource("/api/events")
@@ -220,13 +206,9 @@ function AppLayout() {
               Help
             </NavLink>
           </nav>
-          <Button variant="ghost" size="sm" onClick={() => void signOut()} aria-label="Sign out">
-            <LogOut className="mr-2 size-4" /> Sign out
-          </Button>
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
-        {logoutError && <ErrorNotice message={logoutError} title="Sign out failed" />}
         {liveError && (
           <Alert className="mb-6">
             <CircleAlert />
@@ -1391,105 +1373,21 @@ function formatDate(value: string): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date)
 }
 
-function OperatorGate({ children }: { children: ReactNode }) {
-  const [status, setStatus] = useState<"checking" | "signed_out" | "signed_in" | "unavailable">("checking")
-  const [key, setKey] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
-  const [retry, setRetry] = useState(0)
-
-  useEffect(() => {
-    let active = true
-    getOperatorStatus()
-      .then((result) => {
-        if (active) setStatus(result.authenticated ? "signed_in" : "signed_out")
-      })
-      .catch(() => {
-        if (active) {
-          setError("Operator access could not be confirmed. Retry the connection.")
-          setStatus("unavailable")
-        }
-      })
-    return () => { active = false }
-  }, [retry])
-
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    setSubmitting(true)
-    setError(null)
-    const submittedKey = key
-    setKey("")
-    try {
-      await loginOperator(submittedKey)
-      setStatus("signed_in")
-    } catch (reason) {
-      const message = reason instanceof Error && reason.message.includes("(503)")
-        ? "Operator access is not configured on this server. Contact the system administrator."
-        : reason instanceof Error && reason.message.includes("(401)")
-          ? "The access key was not accepted. Try again."
-          : "Operator sign in could not be completed. Retry the connection."
-      setError(message)
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
-  if (status === "signed_in") return <>{children}</>
-  if (status === "checking") {
-    return <div className="grid min-h-svh place-items-center text-sm text-muted-foreground">Checking operator access…</div>
-  }
-  return (
-    <div className="grid min-h-svh place-items-center bg-background px-4 text-foreground">
-      <Card className="w-full max-w-sm">
-        <CardHeader>
-          <CardTitle>Operator sign in</CardTitle>
-          <CardDescription>Enter the private Experiments operator access key.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={(event) => void submit(event)} className="space-y-4">
-            {error && <ErrorNotice message={error} title="Access unavailable" />}
-            <Input
-              type="password"
-              autoComplete="current-password"
-              aria-label="Operator access key"
-              value={key}
-              onChange={(event) => setKey(event.target.value)}
-              disabled={submitting || status === "unavailable"}
-              required
-            />
-            {status === "unavailable" ? (
-              <Button type="button" className="w-full" onClick={() => { setError(null); setStatus("checking"); setRetry((value) => value + 1) }}>
-                Retry
-              </Button>
-            ) : (
-              <Button type="submit" className="w-full" disabled={submitting || !key}>
-                {submitting ? <><LoaderCircle className="mr-2 size-4 animate-spin" /> Signing in…</> : "Sign in"}
-              </Button>
-            )}
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  )
-}
-
 export default function App() {
   return (
     <BrowserRouter>
-      <OperatorGate>
-        <Routes>
-          <Route element={<AppLayout />}>
-            <Route index element={<ActivityPage />} />
-            <Route path="experiments" element={<LibraryPage />} />
-            <Route path="experiments/:experimentId" element={<ExperimentPage />} />
-            <Route path="coverage" element={<CoveragePage />} />
-            <Route path="help" element={<HelpPage />} />
-            <Route path="runs" element={<RunsPage />} />
-            <Route path="runs/:runId" element={<RunPage />} />
-            <Route path="*" element={<NotFound />} />
-          </Route>
-        </Routes>
-      </OperatorGate>
+      <Routes>
+        <Route element={<AppLayout />}>
+          <Route index element={<ActivityPage />} />
+          <Route path="experiments" element={<LibraryPage />} />
+          <Route path="experiments/:experimentId" element={<ExperimentPage />} />
+          <Route path="coverage" element={<CoveragePage />} />
+          <Route path="help" element={<HelpPage />} />
+          <Route path="runs" element={<RunsPage />} />
+          <Route path="runs/:runId" element={<RunPage />} />
+          <Route path="*" element={<NotFound />} />
+        </Route>
+      </Routes>
     </BrowserRouter>
   )
 }

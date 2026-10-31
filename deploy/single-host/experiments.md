@@ -12,12 +12,11 @@ The multi-stage Docker build compiles the React application with Node 24 and ser
 
 The Run Results view is included in this same image. Building `servers/experiments` runs the web build stage and copies its output to `/opt/experiments/static/app`; there is no separate frontend container or mini-side Node process. For the Results API and score visibility contract, see [`docs/experiments-results.md`](../../docs/experiments-results.md).
 
-Image: `tac-experiments:local`, container: `tac-experiments`, port 8110. The dashboard requires a private operator access key and uses a signed, HTTP-only Flask session with CSRF checks. The application follows the existing Flask runtime and uses one process with four dispatch workers, SQLite WAL, and threaded HTTP/SSE. It has no Docker socket or judge credentials. Public author-file downloads and the authenticated Rocket.Chat event hook remain available without an operator browser session.
+Image: `tac-experiments:local`, container: `tac-experiments`, port 8110. The dashboard is intentionally available without an operator sign-in. Flask sessions retain CSRF tokens for state-changing browser requests; the internal coordinator API still uses its separate controller bearer token. The application follows the existing Flask runtime and uses one process with four dispatch workers, SQLite WAL, and threaded HTTP/SSE. It has no Docker socket or judge credentials. The Rocket.Chat event hook uses its independent webhook token.
 
 Persistent data: `/data/theagentcompany/experiments-data/experiments.sqlite` (and SQLite WAL/SHM while running). For a consistent backup, stop this container then copy the directory. Configuration/secrets: `/data/theagentcompany/experiments.env`, mode 0600, deliberately outside Git. Required variables:
 
 - `EXPERIMENTS_SECRET_KEY`: stable random Flask session secret.
-- Operator access key: read-only bind-mounted from `/data/theagentcompany/enterprise/secrets/experiments-operator-key` at `/run/secrets/experiments-operator-key`; create it before Compose with host UID/GID 1000:1000 and mode 0400 or 0600. It is separate from the coordinator token and must not be placed in `experiments.env` or browser storage.
 - `EXPERIMENTS_WEBHOOK_TOKEN`: nonempty random outgoing webhook secret.
 - `TAC_REPO=/repo`, `EXPERIMENTS_DB=/data/experiments.sqlite`.
 - `ROCKETCHAT_BASE_URL=http://127.0.0.1:3000`.

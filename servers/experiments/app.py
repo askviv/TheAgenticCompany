@@ -19,10 +19,6 @@ from flask import Flask, Response, abort, jsonify, redirect, request, session, u
 
 from .runner import RocketChatClient
 from .coordinator import CoordinatorError, SimulationCoordinatorClient
-from .operator_auth import (
-    PUBLIC_ENDPOINTS, OperatorKeyUnavailable, clear_operator_authenticated, is_operator_authenticated,
-    mark_operator_authenticated, verify_operator_key,
-)
 
 ROLES = {'admin':'Administration','hr':'People','finance':'Finance','ds':'Data','pm':'Product','research':'Research','bm':'Business','ml':'Machine learning'}
 COMPANY_EVALUATION_PROVIDERS = ('coffeebench', 'ecommercebench')
@@ -163,8 +159,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         CHAT_PUBLIC_URL=os.environ.get('ROCKETCHAT_PUBLIC_URL','https://chat.company.example.test'),
         EXPERIMENTS_PUBLIC_URL=os.environ.get('EXPERIMENTS_PUBLIC_URL','http://192.0.2.10:8110'),
         SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', MAX_CONTENT_LENGTH=65536,
-        SESSION_COOKIE_SECURE=False, EVENTS_WAIT_SECONDS=20,
-        OPERATOR_KEY_FILE=os.environ.get('EXPERIMENTS_OPERATOR_KEY_FILE', '/run/secrets/experiments-operator-key'))
+        SESSION_COOKIE_SECURE=False, EVENTS_WAIT_SECONDS=20)
     if config: app.config.update(config)
     if not config or 'SESSION_COOKIE_SECURE' not in config:
         app.config['SESSION_COOKIE_SECURE'] = urlsplit(app.config['EXPERIMENTS_PUBLIC_URL']).scheme.lower() == 'https'
@@ -525,10 +520,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                         logging.exception('Thread refresh failed run=%s',item['id'])
                         update(item['id'],error='Chat updates could not be retrieved. Refresh to retry.')
     @app.before_request
-    def operator_and_csrf():
-        if request.endpoint not in PUBLIC_ENDPOINTS:
-            if not is_operator_authenticated():
-                return Response(status=401)
+    def request_csrf():
         if 'csrf_token' not in session: session['csrf_token']=secrets.token_urlsafe(32)
         if request.method=='POST' and request.endpoint!='chat_events':
             token=request.form.get('csrf_token','')
@@ -547,26 +539,6 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def index(): return frontend()
     @app.get('/api/session')
     def api_session(): return jsonify(csrf_token=session['csrf_token'],idempotency_key=str(uuid.uuid4()))
-    @app.get('/api/operator/status')
-    def api_operator_status(): return jsonify(authenticated=is_operator_authenticated())
-    @app.post('/api/operator/login')
-    def operator_login():
-        candidate=request.form.get('key','')
-        try:
-            accepted=verify_operator_key(candidate)
-        except OperatorKeyUnavailable as error:
-            logging.error('Experiments operator key is unavailable (%s)',type(error.__cause__ or error).__name__)
-            return jsonify(error='operator_access_unavailable'),503
-        if not accepted:
-            return jsonify(error='operator_key_invalid'),401
-        mark_operator_authenticated()
-        session['csrf_token']=secrets.token_urlsafe(32)
-        return jsonify(authenticated=True)
-    @app.post('/api/operator/logout')
-    def operator_logout():
-        clear_operator_authenticated()
-        session['csrf_token']=secrets.token_urlsafe(32)
-        return jsonify(authenticated=False)
     @app.get('/api/catalog')
     def api_catalog():
         error=None
