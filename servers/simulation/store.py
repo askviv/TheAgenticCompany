@@ -216,6 +216,7 @@ class SQLiteStore:
                     status TEXT NOT NULL CHECK(status IN ('running','paused')),
                     simulated_time TEXT NOT NULL,
                     wall_anchor TEXT NOT NULL,
+                    clock_rate INTEGER NOT NULL DEFAULT 1 CHECK(clock_rate > 0),
                     paused INTEGER NOT NULL CHECK(paused IN (0,1)),
                     erp_binding_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -445,6 +446,11 @@ class SQLiteStore:
                 );
                 """
             )
+            company_columns = {row["name"] for row in connection.execute("PRAGMA table_info(company_runtime)")}
+            if "clock_rate" not in company_columns:
+                connection.execute(
+                    "ALTER TABLE company_runtime ADD COLUMN clock_rate INTEGER NOT NULL DEFAULT 1 CHECK(clock_rate > 0)"
+                )
             self._migrate_existing_schema(connection)
             outbox_columns = {row["name"] for row in connection.execute("PRAGMA table_info(outbox)")}
             if "completed_at" not in outbox_columns:
@@ -613,6 +619,7 @@ class SQLiteStore:
                 return None
             return {"company_id": row["company_id"], "status": row["status"],
                     "simulated_time": row["simulated_time"], "wall_anchor": row["wall_anchor"],
+                    "clock_rate": row["clock_rate"],
                     "paused": bool(row["paused"]), "erp_binding": _decode(row["erp_binding_json"]),
                     "updated_at": row["updated_at"]}
 
@@ -621,16 +628,37 @@ class SQLiteStore:
         simulated_value = simulated_time.isoformat() if isinstance(simulated_time, datetime) else simulated_time
         anchor_value = wall_anchor.isoformat() if isinstance(wall_anchor, datetime) else wall_anchor
         with self._write(connection) as conn:
-            conn.execute("""INSERT INTO company_runtime(company_id,status,simulated_time,wall_anchor,paused,erp_binding_json,updated_at)
-                VALUES(?,'running',?,?,0,?,?) ON CONFLICT(company_id) DO NOTHING""",
+            conn.execute("""INSERT INTO company_runtime(company_id,status,simulated_time,wall_anchor,clock_rate,paused,erp_binding_json,updated_at)
+                VALUES(?,'running',?,?,1,0,?,?) ON CONFLICT(company_id) DO NOTHING""",
                 (company_id, simulated_value, anchor_value, _json(erp_binding), _now()))
+            return self.get_company(company_id, connection=conn)
+
+    def set_company_clock_rate(self, company_id: str, clock_rate: int, wall_anchor: datetime,
+                               *, connection: sqlite3.Connection | None = None) -> dict[str, Any]:
+        """Accrue elapsed time at the old rate and atomically change the rate."""
+        if clock_rate <= 0:
+            raise ValueError("company clock rate must be positive")
+        with self._write(connection) as conn:
+            row = conn.execute("SELECT clock_rate,simulated_time,wall_anchor,paused FROM company_runtime WHERE company_id=?", (company_id,)).fetchone()
+            if row is None:
+                raise StoreNotFound("company not found")
+            if row["clock_rate"] != clock_rate:
+                old_anchor = datetime.fromisoformat(row["wall_anchor"])
+                effective_anchor = max(wall_anchor, old_anchor)
+                simulated = datetime.fromisoformat(row["simulated_time"])
+                if not row["paused"]:
+                    simulated += (effective_anchor - old_anchor) * row["clock_rate"]
+                conn.execute("UPDATE company_runtime SET clock_rate=?,simulated_time=?,wall_anchor=?,updated_at=? WHERE company_id=?",
+                             (clock_rate, simulated.isoformat(), effective_anchor.isoformat(), _now(), company_id))
             return self.get_company(company_id, connection=conn)
 
     def update_company(self, company_id: str, *, status: str | None = None,
                        simulated_time: datetime | str | None = None,
-                       wall_anchor: datetime | str | None = None, paused: bool | None = None,
+                       wall_anchor: datetime | str | None = None, clock_rate: int | None = None,
+                       paused: bool | None = None,
                        connection: sqlite3.Connection | None = None) -> dict[str, Any]:
         updates = {"status": status, "simulated_time": simulated_time, "wall_anchor": wall_anchor,
+                   "clock_rate": clock_rate,
                    "paused": int(paused) if paused is not None else None}
         values = {key: value for key, value in updates.items() if value is not None}
         if not values:
@@ -1550,6 +1578,19 @@ class SQLiteStore:
                 (company_id, provider_id),
             ).fetchone()
         return None if row is None else self._background_provider_result_receipt_dict(row)
+
+    def list_acknowledged_native_background_provider_result_receipts(
+        self, company_id: str = "company",
+    ) -> list[dict[str, Any]]:
+        """Return confirmed coordinator receipts, excluding derived legacy evidence."""
+        with self._connection(None) as connection:
+            rows = connection.execute(
+                "SELECT r.*,a.acknowledged_at FROM background_provider_result_receipts r "
+                "JOIN background_provider_result_acknowledgements a USING(company_id,provider_id,operation_id) "
+                "WHERE r.company_id=? AND r.evidence_origin='coordinator_result' "
+                "ORDER BY a.acknowledged_at,r.provider_id,r.operation_id", (company_id,),
+            ).fetchall()
+        return [self._background_provider_result_receipt_dict(row) for row in rows]
 
     def is_company_experiment(self, run_id: UUID | str, *, connection: sqlite3.Connection | None = None) -> bool:
         with self._connection(connection) as conn:

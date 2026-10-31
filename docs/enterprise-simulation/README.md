@@ -61,9 +61,12 @@ transaction/version, and be checked when a consequential action is attempted.
 - `erpnext-adapter`: native document/workflow operations under dedicated ERP roles;
   ERPNext remains authoritative. Draft review requests do not imply submission or
   payment. Financial posting requires authorization as the specification states.
-- `simulation-clock`: case SimPy ordering is controller-driven; the company
-  background service follows the shared real-time company clock. Persist event
-  definitions/receipts and native Coffee checkpoints, not wall-clock sleeps.
+- `simulation-clock`: case SimPy ordering is controller-driven; the shared
+  company clock follows the host clock by default (`company_clock_rate: 1`).
+  Changing this coordinator-only rate does not change the system time seen by
+  ERPNext, email, chat, or browsers. External wall-time deadlines remain tied
+  to real time. Persist event definitions,
+  receipts and native Coffee checkpoints, not wall-clock sleeps.
 - External actors: the company background executes the pinned CoffeeBench native
   economy and selectively uses E-CommerceBench's dated external supplier-market
   signals. Supplier dispatch beliefs and buyer receipts remain separate records;

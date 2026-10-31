@@ -49,7 +49,7 @@ VIV_RELAY_ACCOUNT_KEY = "viv_reply_relay"
 VIV_RELAY_ACCOUNT_EMAIL = "viv_reply_relay@example.com"
 VIV_PUBLIC_EMAIL = "agent@agent.example.test"
 PRESERVED_RUNTIME_SETTINGS = frozenset({
-    "actor_workers", "background_model_id", "company_background_enabled",
+    "actor_workers", "background_model_id", "company_clock_rate", "company_background_enabled",
     "company_issues_enabled", "erp_base_url", "erp_public_url", "issue_config_path",
     "employee_chat_credentials_file", "rocketchat_base_url",
     "retail_operator_users", "workers_enabled",

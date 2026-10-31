@@ -143,6 +143,10 @@ Create a `simulation-clock` service exposing operations including `schedule_even
 
 Only the simulation controller can advance time. The tested agent interacts through normal business channels.
 
+The desired accelerated company clock should be shared across company applications.
+The coordinator-only rate does not change application system clocks. External
+wall-time deadlines continue to use real time.
+
 Use explicit event types such as `SHIPMENT_DELAYED`, `DELIVERY_ARRIVED`, `EMPLOYEE_RESPONSE_READY` and `PAYMENT_POSTED`.
 
 Test B1 — Delayed shipment

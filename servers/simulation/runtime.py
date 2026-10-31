@@ -13,6 +13,7 @@ import sqlite3
 import threading
 import traceback
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -27,7 +28,7 @@ from .background_evaluation import (
 )
 from .background_runtime import BackgroundWorkerClient
 from .company_background import CompanyBackgroundService
-from .engine import SimulationEngine
+from .engine import COMPANY_CLOCK_RATE, SimulationEngine
 from .evaluation_runtime import build_evaluation_service
 from .erpnext import ERPNextAdapter, ERPNextSiteAdmin
 from .erpnext import ERPNextRetailAdmin
@@ -50,6 +51,7 @@ class RuntimeConfig(BaseModel):
     employee_chat_credentials_file: Path | None = None
     rocketchat_base_url: str = "https://chat.company.example.test"
     background_model_id: str = "gpt-6-luna"
+    company_clock_rate: int = Field(default=COMPANY_CLOCK_RATE, ge=1)
     company_background_enabled: bool = True
     company_issues_enabled: bool = True
     issue_config_path: Path = Path("/data/theagentcompany/enterprise/config/runtime.json")
@@ -140,11 +142,13 @@ def _erp_service_credentials(path: Path) -> ERPServiceCredentials:
         ) from error
 
 
-def initialize_company_runtime(engine: SimulationEngine, binding: dict[str, Any] | None) -> dict[str, Any] | None:
+def initialize_company_runtime(engine: SimulationEngine, binding: dict[str, Any] | None,
+                               clock_rate: int = COMPANY_CLOCK_RATE) -> dict[str, Any] | None:
     """Ensure the configured company metadata exists without provisioning ERP or experiments."""
     if binding is None:
         return None
-    return engine.start_company(binding, "configured-company-v1")
+    company = engine.start_company(binding, "configured-company-v1")
+    return engine.configure_company_clock_rate(clock_rate, now=datetime.now(timezone.utc)) or company
 
 
 def environment_manifest() -> dict:
@@ -470,9 +474,12 @@ class CompanyClockWorker:
     def __init__(self, engine: SimulationEngine):
         self.engine = engine
         self.wake_event = threading.Event()
+        self.dispatch_event = threading.Event()
         self.stopped = threading.Event()
         self.error: str | None = None
+        self.dispatch_error: str | None = None
         self.thread: threading.Thread | None = None
+        self.dispatch_thread: threading.Thread | None = None
         self.on_company_time = None
 
     def wake(self) -> None:
@@ -487,11 +494,16 @@ class CompanyClockWorker:
             try:
                 company = self.engine.company_state()
                 if company is None or company["paused"]:
+                    if company is not None:
+                        # A pause can follow a durable time reservation whose
+                        # due events still need ordered processing.
+                        self.dispatch_event.set()
                     if self.on_company_time is not None:
                         self.on_company_time()
                     continue
                 self.engine.tick_company_clock()
                 self.error = None
+                self.dispatch_event.set()
                 if self.on_company_time is not None:
                     self.on_company_time()
             except Exception as error:
@@ -500,8 +512,28 @@ class CompanyClockWorker:
                           for frame in traceback.extract_tb(error.__traceback__)]
                 LOG.error("company clock worker failed exception_type=%s stack=%s", type(error).__name__, frames)
 
+    def _dispatch(self) -> None:
+        while not self.stopped.is_set():
+            self.dispatch_event.wait(timeout=1.0)
+            self.dispatch_event.clear()
+            if self.stopped.is_set():
+                return
+            try:
+                self.engine.dispatch_company_events()
+                self.dispatch_error = None
+            except Exception as error:
+                self.dispatch_error = type(error).__name__
+                frames = [(frame.filename, frame.lineno, frame.name)
+                          for frame in traceback.extract_tb(error.__traceback__)]
+                LOG.error("company event dispatcher failed exception_type=%s stack=%s",
+                          type(error).__name__, frames)
+
     def start(self) -> None:
         if self.thread is None:
+            self.dispatch_thread = threading.Thread(
+                target=self._dispatch, name="simulation-company-dispatcher", daemon=True,
+            )
+            self.dispatch_thread.start()
             self.thread = threading.Thread(target=self._run, name="simulation-company-clock", daemon=True)
             self.thread.start()
             self.wake()
@@ -509,8 +541,11 @@ class CompanyClockWorker:
     def stop(self) -> None:
         self.stopped.set()
         self.wake_event.set()
+        self.dispatch_event.set()
         if self.thread is not None:
             self.thread.join(timeout=2)
+        if self.dispatch_thread is not None:
+            self.dispatch_thread.join(timeout=2)
 
 
 def build_app(config_path: str | Path):
@@ -754,7 +789,7 @@ def build_app(config_path: str | Path):
 
     @asynccontextmanager
     async def lifespan(_app):
-        initialize_company_runtime(engine, config.company_binding)
+        initialize_company_runtime(engine, config.company_binding, config.company_clock_rate)
         if config.workers_enabled:
             workers.start()
             company_clock.start()
@@ -815,6 +850,8 @@ def build_app(config_path: str | Path):
             components["company_binding"] = "NotConfigured"
         if company_clock.error:
             components["company_clock"] = company_clock.error
+        if company_clock.dispatch_error:
+            components["company_event_dispatch"] = company_clock.dispatch_error
         if company_background is not None:
             background_status = company_background.status()
             if background_status["errors"] or background_status["obligations_error"]:

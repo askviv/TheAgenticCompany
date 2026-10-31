@@ -45,6 +45,8 @@ from servers.simulation.models import (
 )
 from servers.simulation.store import SQLiteStore, StoreConflict, StoreNotFound
 
+COMPANY_CLOCK_RATE = 1
+
 
 class EngineConflict(StoreConflict):
     """A requested workflow transition conflicts with simulation state."""
@@ -620,12 +622,24 @@ class SimulationEngine:
             wake()
         return self.store.get_company("company") or result
 
+    def configure_company_clock_rate(self, rate: int = COMPANY_CLOCK_RATE,
+                                     *, now: datetime | None = None) -> dict[str, Any] | None:
+        """Apply a clock-rate transition at the current wall instant."""
+        wall_now = self._time(now or datetime.now(timezone.utc))
+        with self._operation_guard("company-time"):
+            company = self.store.get_company("company")
+            if company is None:
+                return None
+            return self.store.set_company_clock_rate("company", rate, wall_now)
+
     def pause_company(self, paused: bool, key: str, *, now: datetime | None = None) -> dict[str, Any]:
         key = self._key(key)
-        with self._operation_guard("company-clock"):
-            wall_now = self._time(now or datetime.now(timezone.utc))
-            if paused:
-                self.tick_company_clock(wall_now)
+        wall_now = self._time(now or datetime.now(timezone.utc))
+        if paused:
+            # Reserve elapsed time and dispatch outside the short clock-state
+            # lock. A slow mailbox/provider call must not hold the clock.
+            self.tick_company_clock(wall_now)
+        with self._operation_guard("company-time"):
             request = {"paused": bool(paused)}
             def operation(connection):
                 company = self.store.get_company("company", connection=connection)
@@ -643,18 +657,39 @@ class SimulationEngine:
     def tick_company_clock(self, now: datetime | None = None) -> dict[str, Any] | None:
         """Advance every company experiment to the common wall-clock instant.
 
-        The persisted wall anchor is advanced only after all run processors
-        succeed. A partial retry therefore reuses each child's same SimPy
-        target and engine idempotency receipt.
+        Time reservation is durable and independent of event dispatch. Pending
+        events are the durable dispatch queue; a separate cross-process lock
+        serializes their processing in scheduled order. If processing fails,
+        the advanced clock remains committed and the pending event is retried
+        on the next tick or after restart.
         """
         now = self._time(now or datetime.now(timezone.utc))
-        with self._operation_guard("company-clock"):
+        with self._operation_guard("company-time"):
             company = self.store.get_company("company")
             if company is None or company["paused"]:
                 return company
             before = self._time(company["simulated_time"])
             anchor = self._time(company["wall_anchor"])
-            target = before + max(now - anchor, timedelta(0))
+            effective_now = max(now, anchor)
+            target = before + (effective_now - anchor) * company["clock_rate"]
+            # Commit first so another tick can advance the shared clock even
+            # while the ordered dispatcher waits on external I/O.
+            reserved = self.store.update_company("company", simulated_time=target, wall_anchor=effective_now)
+
+        return reserved
+
+    def dispatch_company_events(self) -> None:
+        """Process the durable company event queue in global scheduled order.
+
+        This runs separately from the ticker. The OS lock serializes dispatch
+        across threads and coordinator processes, while the ticker only takes
+        the independent short-lived company-time lock.
+        """
+        with self._operation_guard("company-dispatch"), self._operation_guard("company-clock"):
+            company = self.store.get_company("company")
+            if company is None:
+                return
+            target = self._time(company["simulated_time"])
             experiments = [item for item in self.store.company_experiments("company")
                            if item["status"] == "running"]
             runs = {item["experiment_id"]: self.store.get_run(item["experiment_id"]) for item in experiments}
@@ -677,19 +712,17 @@ class SimulationEngine:
                     if other_id != experiment_id and self._time(run["simulated_time"]) < due_time:
                         self.store.update_run(other_id, run["generation"], simulated_time=due_time)
                         runs[other_id] = self.store.get_run(other_id)
-                event_key = f"company-clock:{target.isoformat()}:{experiment_id}:{event_id}"
+                event_key = f"company-clock:{experiment_id}:{event_id}"
                 self.advance(AdvanceClock(run_id=UUID(experiment_id), until=due_time), event_key,
                              company_tick=True, company_event_id=event_id)
                 runs[experiment_id] = self.store.get_run(experiment_id)
-            return self.store.update_company("company", simulated_time=target, wall_anchor=now)
 
     def start_company_experiment(self, model: StartScenario, key: str, principal_actor_id: str) -> dict[str, Any]:
         self.tick_company_clock()
-        with self._operation_guard("company-clock"):
-            company = self.store.get_company("company")
-            if company is None:
-                raise EngineConflict("company has not been started")
-            return self.start(model, key, principal_actor_id, shared_company_id="company")
+        company = self.store.get_company("company")
+        if company is None:
+            raise EngineConflict("company has not been started")
+        return self.start(model, key, principal_actor_id, shared_company_id="company")
 
     @_serialize_run
     def start(self, model: StartScenario, key: str, principal_actor_id: str,
@@ -1108,7 +1141,8 @@ class SimulationEngine:
             company = self.store.get_company("company")
             if not company_tick:
                 raise EngineConflict("company experiments advance on the shared company clock")
-            if company is None or company["paused"]:
+            if company is None or (company["paused"] and
+                                   self._time(model.until) > self._time(company["simulated_time"])):
                 raise EngineConflict("company clock is paused")
         self._schedule_policy_responses(run)
         def advance_tx(connection):
@@ -1661,7 +1695,7 @@ class SimulationEngine:
         run = self._run(run_id)
         if self.store.is_company_experiment(run_id):
             company = self.store.get_company("company")
-            if company is None or company["paused"]:
+            if company is None or (company["paused"] and not company_tick):
                 return {"delivered": [], "uncertain": [], "inbound_messages": 0}
         self._schedule_policy_responses(run)
         delivered, uncertain = [], []

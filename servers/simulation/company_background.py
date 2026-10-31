@@ -534,8 +534,22 @@ class CompanyBackgroundService:
         for event in store.list_company_source_events():
             payload = {key: value for key, value in event["payload"].items()
                        if key in cls._PUBLIC_EVENT_PAYLOAD_KEYS}
+            provider = {
+                "sakanaai-coffeebench-native-economy": "CoffeeBench",
+                "qwenlm-ecommercebench-calendar": "E-CommerceBench",
+                "qwenlm-ecommercebench-native-economy": "E-CommerceBench",
+            }.get(event["source"], "Company provider")
+            details = [str(value) for key in (
+                "upstream_event_name", "market_date", "upstream_calendar_start_date",
+                "upstream_calendar_duration_days", "store_type",
+            ) if (value := payload.get(key)) is not None]
+            summary = event["event_type"].replace("_", " ").title()
+            if details:
+                summary += " · " + " · ".join(details)
             activity.append({"id": event["event_id"], "timestamp": event["simulated_time"],
-                             "event": event["event_type"], "description": f"{event['event_type'].replace('_', ' ').title()}.",
+                             "event": event["event_type"], "type": "action",
+                             "title": f"{provider} update", "summary": summary,
+                             "description": summary,
                              "source": event["source"], "upstream_commit": event["upstream_commit"],
                              "entity_type": event["entity_type"], "entity_id": event["entity_id"],
                              "payload": payload})
@@ -544,6 +558,18 @@ class CompanyBackgroundService:
                              "event": "FINANCE_SOURCE_RECONCILED", "description": f"{receipt['doctype']} {receipt['name']} linked to background activity.",
                              "native_document": {"doctype": receipt["doctype"], "name": receipt["name"]},
                              "source_id": receipt["source_id"], "created": receipt["created"]})
+        for receipt in store.list_acknowledged_native_background_provider_result_receipts():
+            provider = {"coffeebench": "CoffeeBench", "ecommercebench": "E-CommerceBench"}.get(
+                receipt["provider_id"]
+            )
+            if provider is None:
+                continue
+            summary = f"Provider update acknowledged through {receipt['cursor']}"
+            activity.append({"id": f"provider-receipt:{receipt['provider_id']}:{receipt['operation_id']}",
+                             "timestamp": receipt["acknowledged_at"],
+                             "event": "BACKGROUND_PROVIDER_UPDATE_COMPLETED", "type": "action",
+                             "title": f"{provider} update completed", "summary": summary,
+                             "description": summary})
         for observation in store.list_company_due_obligation_observations():
             activity.append({"id": "obligation:" + observation["observation_id"],
                              "timestamp": observation["observed_at"],
