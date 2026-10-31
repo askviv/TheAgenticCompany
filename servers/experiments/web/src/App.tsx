@@ -751,6 +751,15 @@ function LibraryPage() {
     )
   }, [experiments, search, selectedTypes, selectedBenchmarks])
 
+  // These τ-bench cases share the same customer request but have different
+  // underlying conditions. Keep each original case selectable.
+  const mobileDataVariants = useMemo(() => experiments
+    .filter((experiment) => experiment.provider_id === "tau2-telecom" && experiment.task_id?.startsWith("[mobile_data_issue]"))
+    .sort((a, b) => (a.task_id ?? "").localeCompare(b.task_id ?? "")), [experiments])
+  const mobileVariantNumbers = useMemo(() => new Map(mobileDataVariants.map((item, index) => [item.id, index + 1])), [mobileDataVariants])
+  const matchingMobileVariants = filtered.filter((item) => mobileVariantNumbers.has(item.id))
+  const otherExperiments = filtered.filter((item) => !mobileVariantNumbers.has(item.id))
+
   return (
     <section className="space-y-7">
       <div className="flex flex-col gap-5 border-b pb-6 sm:flex-row sm:items-end sm:justify-between">
@@ -801,7 +810,28 @@ function LibraryPage() {
       {error && <ErrorNotice message={error} title="Library unavailable" />}
       {loading ? <LoadingCards /> : !error && filtered.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filtered.map((experiment) => (
+          {matchingMobileVariants.length > 0 && (
+            <Card className="h-fit">
+              <details>
+                <summary className="cursor-pointer list-none p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <Badge variant="secondary" className="mb-3">Telecom</Badge>
+                  <CardTitle className="text-base leading-snug">Mobile data problem</CardTitle>
+                  <CardDescription className="mt-3 leading-relaxed">Help a customer whose mobile data is slow or unavailable.</CardDescription>
+                  <p className="mt-4 text-xs text-muted-foreground">{matchingMobileVariants.length} {matchingMobileVariants.length === 1 ? "variant" : "variants"} · Choose a variant</p>
+                </summary>
+                <div className="max-h-96 space-y-1 overflow-y-auto border-t p-3">
+                  {matchingMobileVariants.map((experiment) => (
+                    <Link key={experiment.id} to={`/experiments/${encodeURIComponent(experiment.id)}`}
+                      className="flex items-center justify-between gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                      <span>Variant {mobileVariantNumbers.get(experiment.id)} <span className="text-muted-foreground">· {experiment.role}</span></span>
+                      <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
+                    </Link>
+                  ))}
+                </div>
+              </details>
+            </Card>
+          )}
+          {otherExperiments.map((experiment) => (
             <Link key={experiment.id} to={`/experiments/${encodeURIComponent(experiment.id)}`} className="group rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <Card className="h-full min-h-52 transition-colors group-hover:ring-primary/30 group-focus-visible:ring-primary">
                 <CardHeader className="gap-3">
@@ -810,7 +840,6 @@ function LibraryPage() {
                       <Badge variant="secondary" className="font-medium">{experiment.role}</Badge>
                       {experiment.provider_id === "tau2-banking" && bankingRoleLabel(experiment.role_fit) &&
                         <Badge variant="outline" title={experiment.role_fit_note}>{bankingRoleLabel(experiment.role_fit)}</Badge>}
-                      {experiment.task_id && <Badge variant="outline">τ-bench #{experiment.task_id}</Badge>}
                     </div>
                     <ArrowUpRight className="size-4 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden="true" />
                   </div>
