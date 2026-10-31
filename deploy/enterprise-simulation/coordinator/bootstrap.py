@@ -51,6 +51,7 @@ VIV_PUBLIC_EMAIL = "agent@agent.example.test"
 PRESERVED_RUNTIME_SETTINGS = frozenset({
     "actor_workers", "background_model_id", "company_background_enabled",
     "company_issues_enabled", "erp_base_url", "erp_public_url", "issue_config_path",
+    "employee_chat_credentials_file", "rocketchat_base_url",
     "retail_operator_users", "workers_enabled",
 })
 
@@ -742,6 +743,8 @@ def main() -> int:
             "smtp4dev_mailbox_name": "Default",
         },
         "mail_credentials_file": str(credentials_path),
+        "employee_chat_credentials_file": str(secrets_root / "employee-chat-credentials.json"),
+        "rocketchat_base_url": "https://chat.company.example.test",
         "principals_file": str(principals_path),
         "workers_enabled": True,
         "host": args.host,

@@ -223,6 +223,16 @@ def _ensure_users(site: str, credentials_dir: Path) -> None:
 
     _ensure_company_employees()
 
+    # Directory-only users can read search fields. Include account status so
+    # Frappe's User list does not mistake an omitted value for "Disabled".
+    from frappe.custom.doctype.property_setter.property_setter import make_property_setter
+
+    user_meta = frappe.get_meta("User")
+    search_fields = [field.strip() for field in (user_meta.search_fields or "").split(",") if field.strip()]
+    if "enabled" not in search_fields:
+        search_fields.append("enabled")
+        make_property_setter("User", None, "search_fields", ", ".join(search_fields), "Data", for_doctype=True)
+
     adapter_email = "erpnext-adapter@example.com"
     if not frappe.db.exists("User", adapter_email):
         adapter = frappe.get_doc({
@@ -542,7 +552,19 @@ def seed(site: str, runtime_dir: str) -> dict[str, str]:
 
         _ensure_outgoing_email()
         _ensure_users(site, Path(runtime_dir) / "api-credentials")
+        # The ERPNext setup hook creates the company and accounts, but current
+        # Frappe also tracks setup separately for each installed application.
+        # Mark those native flags only after the company seed has completed.
+        from frappe.desk.page.setup_wizard.setup_wizard import enable_setup_wizard_complete
+
+        installed = set(frappe.get_all("Installed Application", pluck="app_name"))
+        if not {"frappe", "erpnext"}.issubset(installed):
+            raise RuntimeError("Required ERPNext applications are not installed")
+        for app_name in ("frappe", "erpnext"):
+            enable_setup_wizard_complete(app_name)
+        frappe.db.set_single_value("System Settings", "setup_complete", 1)
         frappe.db.commit()
+        frappe.clear_cache()
         return {
             "site_name": site,
             "company_id": COMPANY,

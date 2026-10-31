@@ -159,65 +159,52 @@ class RocketChatClient:
             )
         return self._room_id
 
-    def dispatch(self, run_id: int | str, title: str, description: str, inputs=()) -> dict[str, str]:
-        """Post one experiment as a root message that Viv can answer in-thread."""
+    def dispatch_employee_browser(
+        self, run_id: int | str, title: str, description: str, inputs=(), *,
+        role: str, employee_id: str, employee_user_id: str, coordinator: Any,
+    ) -> dict[str, Any]:
+        """Prepare channel membership, then send the initial message in employee Chrome."""
         with self._lock:
             room_id = self._ensure_channel()
-            message_id = f"exp-{run_id}"
-            try:
-                existing = self._get_message(message_id)
-            except RocketChatError as error:
-                if error.code != "error-invalid-message":
-                    raise
-                existing = None
-            if existing is not None:
-                return {"room_id": room_id, "message_id": message_id}
-            text = (
+            legacy_message_id = f"exp-{run_id}"
+            legacy_text = (
                 f"@{self.viv_username} **Experiment {run_id}: {title}**\n\n"
+                f"{description}\n\nPlease reply in this thread with your response."
+            )
+            if inputs:
+                legacy_text += "\n\nSource files:\n" + "\n".join(
+                    f"- [{item['name']}]({item['url']})" for item in inputs
+                )
+                legacy_text += "\nUse these source files for the assignment and share your deliverables in this thread."
+            existing = self._get_message(legacy_message_id)
+            if existing is not None:
+                author = existing.get("u") or {}
+                if (existing.get("rid") != room_id or not isinstance(author, dict)
+                        or author.get("_id") != self._user_id or existing.get("msg") != legacy_text):
+                    raise RocketChatError("chat.getMessage", "legacy_message_mismatch")
+                return {
+                    "status": "sent", "room_id": room_id,
+                    "message_id": legacy_message_id, "legacy_api": True,
+                }
+            self._ensure_channel_member(room_id, employee_user_id)
+            text = (
+                f"**Experiment {run_id}: {title}**\n\n"
                 f"{description}\n\nPlease reply in this thread with your response."
             )
             if inputs:
                 text += "\n\nSource files:\n" + "\n".join(f"- [{item['name']}]({item['url']})" for item in inputs)
                 text += "\nUse these source files for the assignment and share your deliverables in this thread."
-            try:
-                result = self._request(
-                    "POST",
-                    "chat.sendMessage",
-                    json={"message": {"_id": message_id, "rid": room_id, "msg": text}},
-                )
-            except (requests.RequestException, RocketChatError) as send_error:
-                http_cause = send_error.__cause__ if isinstance(send_error, RocketChatError) else None
-                if isinstance(send_error, RocketChatError) and not (
-                    isinstance(http_cause, requests.HTTPError)
-                    and http_cause.response is not None
-                    and http_cause.response.status_code >= 500
-                ):
-                    # An ordinary API rejection is definitive; only transport or
-                    # server failures can leave acceptance uncertain.
-                    try:
-                        recovered = self._get_message(message_id)
-                    except RocketChatError as lookup_error:
-                        if lookup_error.code == "error-invalid-message":
-                            raise send_error
-                        raise send_error from lookup_error
-                    if recovered is not None:
-                        return {"room_id": room_id, "message_id": message_id}
-                    raise
-                # A timeout may happen after Rocket.Chat accepted the message. A retry
-                # can recover it by its deterministic ID without posting duplicate work.
-                try:
-                    recovered = self._get_message(message_id)
-                except RocketChatError as lookup_error:
-                    if lookup_error.code == "error-invalid-message":
-                        raise send_error
-                    raise send_error from lookup_error
-                if recovered is not None:
-                    return {"room_id": room_id, "message_id": message_id}
-                raise
-            returned_id = (result.get("message") or {}).get("_id")
-            if returned_id != message_id:
-                raise RocketChatError("chat.sendMessage", "unexpected_message_id")
-            return {"room_id": room_id, "message_id": message_id}
+            mention_account_id = self._viv_user_id
+        return coordinator.dispatch_experiment_chat(
+            idempotency_key=str(run_id), role=role, employee_id=employee_id,
+            room_id=room_id, message_text=text, mention_account_id=mention_account_id,
+        )
+
+    def _ensure_channel_member(self, room_id: str, user_id: str) -> None:
+        members = self._request("GET", "channels.members", params={"roomId": room_id})
+        member_ids = {member.get("_id") for member in members.get("members", [])}
+        if user_id not in member_ids:
+            self._request("POST", "channels.invite", json={"roomId": room_id, "userId": user_id})
 
     def _get_message(self, message_id: str) -> dict[str, Any] | None:
         try:

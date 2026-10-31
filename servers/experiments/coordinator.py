@@ -103,7 +103,9 @@ class SimulationCoordinatorClient:
         return self._request("GET", "/company")
 
     def company_desktops(self) -> dict[str, Any]:
-        return self._request("GET", "/company/desktops")
+        return self._request(
+            "GET", "/company/desktops", request_timeout=None, independent_session=True,
+        )
 
     def start_company_desktop(self, employee_id: str, *, idempotency_key: str) -> dict[str, Any]:
         return self._request(
@@ -117,6 +119,23 @@ class SimulationCoordinatorClient:
             "POST", "/company/desktops/stop",
             idempotency_key=idempotency_key, request_timeout=None,
             independent_session=True, json={"employee_id": employee_id},
+        )
+
+    def dispatch_experiment_chat(
+        self, *, idempotency_key: str, role: str, employee_id: str,
+        room_id: str, message_text: str, mention_account_id: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST", "/company/experiment-chat/dispatch",
+            idempotency_key=idempotency_key, request_timeout=None,
+            independent_session=True,
+            json={
+                "role": role,
+                "employee_id": employee_id,
+                "room_id": room_id,
+                "message_text": message_text,
+                "mention_account_id": mention_account_id,
+            },
         )
 
     def provider_catalog(self) -> dict[str, Any]:

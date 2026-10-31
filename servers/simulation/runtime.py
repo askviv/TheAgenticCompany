@@ -47,6 +47,8 @@ class RuntimeConfig(BaseModel):
     retail_operator_users: list[str] = Field(default_factory=list, min_length=0)
     company_binding: dict[str, Any] | None = None
     company_profile_file: Path = Path(__file__).resolve().parents[2] / "deploy/single-host/company-identities.json"
+    employee_chat_credentials_file: Path | None = None
+    rocketchat_base_url: str = "https://chat.company.example.test"
     background_model_id: str = "gpt-6-luna"
     company_background_enabled: bool = True
     company_issues_enabled: bool = True
@@ -102,10 +104,12 @@ def employee_desktop_manager(config: RuntimeConfig | None = None):
         config_path = os.environ.get(
             "SIMULATION_CONFIG", str(RuntimeConfig.model_fields["issue_config_path"].default))
         config = RuntimeConfig.model_validate(private_json(Path(config_path)))
-    return EmployeeDesktopRuntime(
+    manager = EmployeeDesktopRuntime(
         config.company_profile_file, config.state_root / "employee-desktops",
         caddy_proxy=CaddyEmployeeDesktopProxy(),
     )
+    manager.start_idle_shutdown()
+    return manager
 
 
 def _provider_case_employee(profile: dict[str, Any], mail_config: dict[str, Any],
@@ -548,6 +552,19 @@ def build_app(config_path: str | Path):
         LOG.error("Employee desktop configuration is invalid exception_type=%s", type(error).__name__)
         engine.employee_desktops = None
     gateway.set_employee_desktops(engine.employee_desktops)
+    if engine.employee_desktops is not None:
+        from .experiment_chat import ExperimentChatDispatch
+        employee_chat_credentials = config.employee_chat_credentials_file or config.mail_credentials_file.with_name(
+            "employee-chat-credentials.json")
+        engine.experiment_chat_dispatch = ExperimentChatDispatch(
+            config.company_profile_file,
+            employee_chat_credentials,
+            config.state_root,
+            engine.employee_desktops,
+            config.rocketchat_base_url,
+        )
+    else:
+        engine.experiment_chat_dispatch = None
     engine.company_binding = config.company_binding
     engine.support_actor_id = config.support_actor_id
     engine.support_address = config.support_address

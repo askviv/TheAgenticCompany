@@ -63,6 +63,15 @@ class EmployeeDesktopRequest(BaseModel):
     employee_id: str
 
 
+class ExperimentChatDispatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    role: str
+    employee_id: str
+    room_id: str
+    message_text: str
+    mention_account_id: str
+
+
 class CoffeeBackgroundRecoveryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     previous_operation_id: str = Field(min_length=1, max_length=240)
@@ -343,8 +352,13 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         except Exception as exc:
             frames = [(frame.filename, frame.lineno, frame.name)
                       for frame in traceback.extract_tb(exc.__traceback__)]
-            logger.error("Employee desktop startup failed exception_type=%s stack=%s",
-                         type(exc).__name__, frames)
+            causes = []
+            cause = exc.__cause__
+            while cause is not None:
+                causes.append(type(cause).__name__)
+                cause = cause.__cause__
+            logger.error("Employee desktop startup failed exception_type=%s causes=%s stack=%s",
+                         type(exc).__name__, causes, frames)
             raise HTTPException(status_code=503, detail="Employee desktop could not be started") from exc
         return JSONResponse({"employee_id": result["employee_id"], "status": "running",
                              "viewing_url": result["viewing_url"],
@@ -368,6 +382,51 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
             logger.error("Employee desktop stop failed exception_type=%s stack=%s",
                          type(exc).__name__, frames)
             raise HTTPException(status_code=503, detail="Employee desktop could not be stopped") from exc
+
+    @app.post("/company/experiment-chat/dispatch")
+    def dispatch_experiment_chat(
+        model: ExperimentChatDispatchRequest,
+        key: str = Depends(idempotency_key),
+        principal: Principal = Depends(authenticate),
+    ):
+        require_role(principal, "controller")
+        service = getattr(engine, "experiment_chat_dispatch", None)
+        if service is None:
+            raise HTTPException(status_code=503, detail="Employee browser chat is unavailable")
+        try:
+            result = service.dispatch(
+                idempotency_key=key,
+                role=model.role,
+                employee_id=model.employee_id,
+                room_id=model.room_id,
+                message_text=model.message_text,
+                mention_account_id=model.mention_account_id,
+            )
+        except Exception as exc:
+            from servers.simulation.experiment_chat import ExperimentChatError
+            if isinstance(exc, ExperimentChatError):
+                if exc.code == "idempotency_conflict":
+                    raise HTTPException(status_code=409, detail=exc.code) from exc
+                if exc.code in {"sender_department_unmapped", "department_employee_unavailable",
+                                "sender_identity_mismatch", "invalid_request"}:
+                    raise HTTPException(status_code=422, detail=exc.code) from exc
+                frames = [(frame.filename, frame.lineno, frame.name)
+                          for frame in traceback.extract_tb(exc.__traceback__)]
+                causes = []
+                cause = exc.__cause__
+                while cause is not None:
+                    causes.append(type(cause).__name__)
+                    cause = cause.__cause__
+                logger.error("Employee chat dispatch failed code=%s causes=%s stack=%s",
+                             exc.code, causes, frames)
+                raise HTTPException(status_code=503, detail=exc.code) from exc
+            frames = [(frame.filename, frame.lineno, frame.name)
+                      for frame in traceback.extract_tb(exc.__traceback__)]
+            logger.error("Employee chat dispatch failed exception_type=%s stack=%s",
+                         type(exc).__name__, frames)
+            raise HTTPException(status_code=503, detail="Employee browser chat could not be confirmed") from exc
+        status_code = 202 if result.get("status") == "uncertain" else 200
+        return JSONResponse(result, status_code=status_code, headers={"Cache-Control": "no-store"})
 
     @app.post("/company/background/{provider_id}/control", status_code=202)
     def control_company_background(

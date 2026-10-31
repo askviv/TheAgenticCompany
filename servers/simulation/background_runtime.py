@@ -509,18 +509,34 @@ class CompanyBackgroundRuntime:
             verified.append((signature, candidate))
         if not verified:
             raise LegacyEcommerceHandoffIntegrityError("legacy_worker_proof_not_found")
-        if len({item[0] for item in verified}) != 1:
-            raise LegacyEcommerceHandoffIntegrityError("legacy_worker_proof_ambiguous")
 
         expected_conditions = self._coffee_supply_conditions(company_id, coffee_target, [])
         expected_conditions.sort(key=lambda item: str(item["event_id"]))
         if normalized != expected_conditions:
             raise LegacyEcommerceHandoffIntegrityError("legacy_condition_facts_mismatch")
 
-        # Equivalent duplicate operations are retained as separate immutable
-        # references; their byte-identical result hashes make either canonical.
-        verified.sort(key=lambda item: item[1]["operation_id"])
-        for _, candidate in verified:
+        # Several completed operations can prove the same target when their
+        # confirmed cursors differ but each has no intervening native events.
+        # Prefer the most recent confirmed cursor; it gives the narrowest gap
+        # to the Coffee target. Keep ambiguity when distinct proofs tie at the
+        # latest cursor, where neither has stronger evidence.
+        latest_cursor = max(
+            self._utc(datetime.fromisoformat(item[1]["cursor"].replace("Z", "+00:00")))
+            for item in verified
+        )
+        latest = [
+            item for item in verified
+            if self._utc(datetime.fromisoformat(item[1]["cursor"].replace("Z", "+00:00"))) == latest_cursor
+        ]
+        if len({item[0] for item in latest}) != 1:
+            raise LegacyEcommerceHandoffIntegrityError("ecommerce_source_proof_ambiguous")
+
+        # Exact duplicate operations are retained as separate immutable
+        # references; older valid proofs remain untouched and unmaterialized.
+        latest.sort(key=lambda item: item[1]["operation_id"])
+        selected_signature = latest[0][0]
+        equivalent_latest = [item for item in latest if item[0] == selected_signature]
+        for _, candidate in equivalent_latest:
             self.store.record_derived_background_provider_result_receipt(
                 company_id=company_id, provider_id="ecommercebench",
                 operation_id=candidate["operation_id"], upstream_commit=candidate["upstream_commit"],
@@ -531,7 +547,7 @@ class CompanyBackgroundRuntime:
                 source_identity_sha256=candidate["source_identity_sha256"],
                 coverage_gap_event_ids_sha256=candidate["coverage_gap_event_ids_sha256"],
             )
-        canonical = verified[0][1]
+        canonical = latest[0][1]
         return {
             "provider_id": "ecommercebench", "operation_id": canonical["operation_id"],
             "upstream_commit": canonical["upstream_commit"],

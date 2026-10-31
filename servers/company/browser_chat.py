@@ -23,8 +23,7 @@ class PlaywrightEmployeeBrowserSessionProvider:
     def open_for_employee_email(self, email: str) -> Iterator[Any]:
         manager = self.desktop_manager_factory()
         employee_id = employee_id_for_email(manager.company_profile_path, email)
-        with manager.employee_action_lock(employee_id):
-            desktop = manager.ensure_session(employee_id)
+        with manager.employee_activity(employee_id) as desktop:
             endpoint = desktop.get("cdp_endpoint") if isinstance(desktop, dict) else None
             if not isinstance(endpoint, str) or not endpoint.startswith(("ws://", "wss://")):
                 raise RuntimeError("EMPLOYEE_BROWSER_ENDPOINT_UNAVAILABLE")

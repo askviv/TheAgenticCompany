@@ -8,6 +8,19 @@
     "supportEmployeeId": "sarah-johnson",
     "providerCaseResponsibleEmployeeId": "david-wong",
     "assistantEmail": "agent@agent.example.test",
+    "experimentDepartmentMap": {
+      "Administration": "HR",
+      "Business": "Sales/Marketing",
+      "Customer support": "Sales/Marketing",
+      "Data": "Technical",
+      "Finance": "Finance",
+      "Machine learning": "Technical",
+      "Operations": "Sales/Marketing",
+      "People": "HR",
+      "Product": "Product/UX",
+      "Research": "Technical",
+      "Workplace": "Technical"
+    },
     "background": {
       "seed": 17,
       "owncloud": {

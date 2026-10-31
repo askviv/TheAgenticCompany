@@ -179,12 +179,13 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
           revision INTEGER NOT NULL DEFAULT 0, idempotency_key TEXT UNIQUE NOT NULL,
           kind TEXT NOT NULL DEFAULT 'workplace', simulation_run_id TEXT,
           simulated_time TEXT, activity TEXT NOT NULL DEFAULT '[]',
-          company_id TEXT, simulation_experiment_id TEXT)''')
+          company_id TEXT, simulation_experiment_id TEXT, sender_employee_id TEXT)''')
         columns={item['name'] for item in c.execute('PRAGMA table_info(runs)')}
         for name, declaration in (('kind', "TEXT NOT NULL DEFAULT 'workplace'"),
                                   ('simulation_run_id', 'TEXT'), ('simulated_time', 'TEXT'),
                                   ('activity', "TEXT NOT NULL DEFAULT '[]'"), ('company_id','TEXT'),
-                                  ('simulation_experiment_id','TEXT'),('provider_url','TEXT'),('provider_status','TEXT')):
+                                  ('simulation_experiment_id','TEXT'),('provider_url','TEXT'),('provider_status','TEXT'),
+                                  ('sender_employee_id','TEXT')):
             if name not in columns: c.execute(f'ALTER TABLE runs ADD COLUMN {name} {declaration}')
         c.execute("""UPDATE runs SET status='uncertain',
           error=CASE WHEN kind='simulation' THEN 'The server restarted while dispatching. Retry will reconcile the same experiment ID.'
@@ -419,8 +420,33 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             try:
                 update(run_id,status='sending',error=None)
                 files=[{'name':Path(f['source']).name,'url':os.environ.get('EXPERIMENTS_PUBLIC_URL','http://192.0.2.10:8110').rstrip('/')+f"/experiments/{item['experiment_id']}/inputs/{i}"} for i,f in enumerate(inputs.get(item['experiment_id'],[]))]
-                sent=client().dispatch(run_id,item['title'],item['description'],inputs=files)
-                update(run_id,status='awaiting_viv',**sent)
+                definition=definition_for(item['experiment_id'])
+                role=definition.get('role')
+                if not isinstance(role,str) or not role:
+                    raise CoordinatorError('experiment-chat','sender_department_unavailable')
+                employee_id=item.get('sender_employee_id')
+                employee_id,employee_user_id=company_experiment_sender(role,employee_id)
+                if not item.get('sender_employee_id'):
+                    update(run_id,sender_employee_id=employee_id)
+                sent=client().dispatch_employee_browser(
+                    run_id,item['title'],item['description'],inputs=files,
+                    role=role,employee_id=employee_id,employee_user_id=employee_user_id,
+                    coordinator=coordinator(),
+                )
+                if sent.get('legacy_api') is True:
+                    update(run_id,status='awaiting_viv',room_id=sent['room_id'],
+                           message_id=sent['message_id'],sender_employee_id=None)
+                elif sent.get('status')=='uncertain':
+                    update(run_id,status='uncertain',room_id=sent.get('room_id'),
+                           message_id=sent.get('message_id'),
+                           error='Employee browser send is uncertain. Retry reconciles the same native message without resending.')
+                    return
+                else:
+                    if (sent.get('status')!='sent' or sent.get('employee_id')!=employee_id
+                            or not isinstance(sent.get('room_id'),str) or not isinstance(sent.get('message_id'),str)):
+                        raise CoordinatorError('experiment-chat','invalid_response')
+                    update(run_id,status='awaiting_viv',room_id=sent['room_id'],
+                           message_id=sent['message_id'],sender_employee_id=employee_id)
             except Exception as error:
                 logging.exception('Experiment dispatch failed run=%s', run_id)
                 update(run_id,status='uncertain',error=f'Could not confirm delivery ({type(error).__name__}). Retry checks the same request before sending again.')
@@ -588,6 +614,39 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 'role':employee['department'].strip(),
             }
         return roster
+
+    def company_experiment_sender(role, employee_id=None):
+        path=Path(app.config['REPO'])/'deploy/single-host/company-identities.json'
+        try:
+            document=json.loads(path.read_text(encoding='utf-8'))
+            company=document['company']
+            employees=document['employees']
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            raise CoordinatorError('experiment-chat','company_identity_profile_unavailable') from error
+        if not isinstance(company,dict) or not isinstance(employees,list):
+            raise CoordinatorError('experiment-chat','company_identity_profile_invalid')
+        department_map=company.get('experimentDepartmentMap')
+        department=department_map.get(role) if isinstance(department_map,dict) else None
+        if not isinstance(department,str) or not department or not isinstance(employees,list):
+            raise CoordinatorError('experiment-chat','sender_department_unmapped')
+        candidates=[]
+        for employee in employees:
+            if not isinstance(employee,dict) or employee.get('department')!=department:
+                continue
+            account=employee.get('accounts',{}).get('rocketchat') if isinstance(employee.get('accounts'),dict) else None
+            if (isinstance(employee.get('id'),str) and employee['id']
+                    and isinstance(employee.get('email'),str) and employee['email']
+                    and isinstance(account,dict) and isinstance(account.get('id'),str) and account['id']
+                    and isinstance(account.get('username'),str) and account['username']):
+                candidates.append((employee['id'],account['id']))
+        if not candidates:
+            raise CoordinatorError('experiment-chat','department_employee_unavailable')
+        if employee_id is not None:
+            match=next((candidate for candidate in candidates if candidate[0]==employee_id),None)
+            if match is None:
+                raise CoordinatorError('experiment-chat','sender_identity_mismatch')
+            return match
+        return candidates[0]
 
     def safe_desktop_status(value, *, id_field='employee_id'):
         if not isinstance(value,dict):

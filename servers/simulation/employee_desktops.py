@@ -13,12 +13,14 @@ import fcntl
 import hashlib
 import ipaddress
 import json
+import logging
 import os
 from pathlib import Path
 import secrets
 import subprocess
 import tempfile
 import threading
+import time
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
@@ -31,6 +33,11 @@ DEFAULT_SELKIES_IMAGE = "tac-selkies-desktop:2.1.0-ubuntu26.04-socat1"
 MANAGED_LABEL = "tac.employee-desktop.managed"
 EMPLOYEE_LABEL = "tac.employee-desktop.employee-id"
 _CDP_READY = threading.Event()
+_IDLE_SHUTDOWN_SECONDS = 10 * 60
+_IDLE_RECONCILE_SECONDS = 60
+_LOGGER = logging.getLogger(__name__)
+_IDLE_COORDINATORS_LOCK = threading.Lock()
+_IDLE_COORDINATORS: dict[str, "EmployeeDesktopRuntime"] = {}
 
 
 class EmployeeDesktopError(RuntimeError):
@@ -66,6 +73,10 @@ class EmployeeDesktopRuntime:
         self.caddy_proxy = caddy_proxy
         self.docker_binary = docker_binary
         self.image = image
+        self._idle_workers: dict[str, tuple[threading.Thread, threading.Event]] = {}
+        self._idle_workers_lock = threading.Lock()
+        self._idle_reconcile_thread: threading.Thread | None = None
+        self._idle_reconcile_wakeup = threading.Event()
 
     def list_sessions(self) -> list[dict[str, str]]:
         """List profile identities and managed desktop status without secrets."""
@@ -115,7 +126,9 @@ class EmployeeDesktopRuntime:
             if session["status"] != "running":
                 continue
             employee_id = session["id"]
-            with self._lifecycle_lock(employee_id):
+            with self._lifecycle_lock(employee_id, blocking=False) as acquired:
+                if not acquired:
+                    continue
                 container = self._container_name(employee_id)
                 inspect = self._inspect_optional(container)
                 if inspect is None or not inspect.get("State", {}).get("Running"):
@@ -151,6 +164,7 @@ class EmployeeDesktopRuntime:
             volume = self._volume_name(employee_id)
             network = self._network_name(employee_id)
             inspect = self._inspect_optional(container)
+            was_running = bool(inspect and (inspect.get("State") or {}).get("Running"))
             if inspect is None:
                 self._require_image()
             self._ensure_volume(volume, employee_id)
@@ -192,12 +206,19 @@ class EmployeeDesktopRuntime:
             self._validate_network_isolated(network, container, employee_id)
             if not final_inspect.get("State", {}).get("Running"):
                 raise EmployeeDesktopError("employee desktop stopped while starting")
+            # Start the idle period only after the desktop has fully started.
+            # A successful retry of an already-running desktop preserves the
+            # previous activity time instead of refreshing the idle deadline.
+            if not was_running:
+                self._write_idle_timestamp(employee_id, time.time())
+            else:
+                self._ensure_idle_timestamp(employee_id)
             viewing_url = self.caddy_proxy.url_for(employee_id, container_ip, credentials)
             viewing_parts = urlsplit(viewing_url)
             if (viewing_parts.scheme != "https" or not viewing_parts.netloc
                     or viewing_parts.username is not None or viewing_parts.password is not None):
                 raise EmployeeDesktopError("viewing URL builder must return an HTTPS URL without credentials")
-            return {
+            session = {
                 "employee_id": employee_id,
                 "status": "running",
                 "viewing_url": viewing_url,
@@ -207,6 +228,41 @@ class EmployeeDesktopRuntime:
                 },
                 "cdp_endpoint": cdp_endpoint,
             }
+        self._ensure_idle_worker(employee_id)
+        return session
+
+    @contextmanager
+    def employee_activity(self, employee_id: str):
+        """Start the desktop and renew its idle period after an employee action.
+
+        The action lock spans startup, the caller's browser work, and the
+        completion timestamp write. Idle shutdown takes the same lock, so it
+        cannot stop Chrome while an action is in progress.
+        """
+        with self.employee_action_lock(employee_id):
+            desktop = self.ensure_session(employee_id)
+            action_failure: BaseException | None = None
+            try:
+                yield desktop
+            except BaseException as error:
+                action_failure = error
+                raise
+            finally:
+                try:
+                    self._write_idle_timestamp(employee_id, time.time())
+                    self._wake_idle_worker(employee_id)
+                except BaseException as cleanup_error:
+                    if action_failure is None:
+                        raise
+                    action_failure.add_note(
+                        "Employee desktop idle timestamp update failed: "
+                        + type(cleanup_error).__name__
+                    )
+                    _LOGGER.error(
+                        "Employee desktop activity cleanup failed for employee key %s",
+                        self._employee_key(employee_id),
+                        exc_info=(type(cleanup_error), cleanup_error, cleanup_error.__traceback__),
+                    )
 
     @contextmanager
     def employee_action_lock(self, employee_id: str):
@@ -234,6 +290,127 @@ class EmployeeDesktopRuntime:
             finally:
                 os.close(fd)
 
+    def start_idle_shutdown(self) -> None:
+        """Reconcile existing containers and keep their ten-minute timers alive.
+
+        The coordinator calls this once when constructing its manager. Running
+        containers from earlier service lifetimes receive a first-activity
+        baseline, while existing timestamps remain durable across restarts.
+        """
+        key = str(self.state_root.resolve())
+        with _IDLE_COORDINATORS_LOCK:
+            coordinator = _IDLE_COORDINATORS.get(key)
+            if coordinator is not None and coordinator is not self:
+                return
+            _IDLE_COORDINATORS[key] = self
+            with self._idle_workers_lock:
+                if self._idle_reconcile_thread and self._idle_reconcile_thread.is_alive():
+                    return
+                thread = threading.Thread(
+                    target=self._reconcile_idle_workers,
+                    name="employee-desktop-idle-reconcile",
+                    daemon=True,
+                )
+                self._idle_reconcile_thread = thread
+                thread.start()
+
+    def _reconcile_idle_workers(self) -> None:
+        while True:
+            try:
+                for session in self.list_sessions():
+                    if session["status"] == "running":
+                        self._ensure_idle_worker(session["id"])
+            except Exception:
+                _LOGGER.exception("Employee desktop idle reconciliation failed")
+            self._idle_reconcile_wakeup.wait(_IDLE_RECONCILE_SECONDS)
+
+    def _ensure_idle_worker(self, employee_id: str) -> None:
+        coordinator = self._idle_coordinator()
+        if coordinator is not self:
+            coordinator._ensure_idle_worker_local(employee_id)
+            return
+        self._ensure_idle_worker_local(employee_id)
+
+    def _ensure_idle_worker_local(self, employee_id: str) -> None:
+        with self._idle_workers_lock:
+            current = self._idle_workers.get(employee_id)
+            if current and current[0].is_alive():
+                return
+            wake = threading.Event()
+            worker = threading.Thread(
+                target=self._idle_shutdown_worker,
+                args=(employee_id, wake),
+                name="employee-desktop-idle-" + self._employee_key(employee_id)[:12],
+                daemon=True,
+            )
+            self._idle_workers[employee_id] = (worker, wake)
+            worker.start()
+
+    def _wake_idle_worker(self, employee_id: str) -> None:
+        coordinator = self._idle_coordinator()
+        if coordinator is not self:
+            coordinator._wake_idle_worker_local(employee_id)
+            return
+        self._wake_idle_worker_local(employee_id)
+
+    def _wake_idle_worker_local(self, employee_id: str) -> None:
+        with self._idle_workers_lock:
+            current = self._idle_workers.get(employee_id)
+            if current:
+                current[1].set()
+
+    def _idle_coordinator(self) -> "EmployeeDesktopRuntime":
+        with _IDLE_COORDINATORS_LOCK:
+            return _IDLE_COORDINATORS.get(str(self.state_root.resolve()), self)
+
+    def _idle_shutdown_worker(self, employee_id: str, wake: threading.Event) -> None:
+        try:
+            while True:
+                wake.clear()
+                with self.employee_action_lock(employee_id):
+                    with self._lifecycle_lock(employee_id):
+                        container = self._container_name(employee_id)
+                        inspect = self._inspect_optional(container)
+                        if inspect is None:
+                            return
+                        self._validate_managed_container(inspect, employee_id)
+                        if not (inspect.get("State") or {}).get("Running"):
+                            return
+                        last_activity = self._ensure_idle_timestamp(employee_id)
+                        deadline = last_activity + _IDLE_SHUTDOWN_SECONDS
+
+                remaining = deadline - time.time()
+                if remaining > 0:
+                    wake.wait(remaining)
+                    continue
+
+                # Lock ordering matches employee_activity (action, lifecycle).
+                # Re-read the timestamp only after both locks are held so an
+                # action that completed at the deadline renews the timer.
+                with self.employee_action_lock(employee_id):
+                    with self._lifecycle_lock(employee_id):
+                        inspect = self._inspect_optional(container)
+                        if inspect is None:
+                            return
+                        self._validate_managed_container(inspect, employee_id)
+                        if not (inspect.get("State") or {}).get("Running"):
+                            return
+                        last_activity = self._ensure_idle_timestamp(employee_id)
+                        if time.time() < last_activity + _IDLE_SHUTDOWN_SECONDS:
+                            continue
+                        self._stop_session_locked(employee_id)
+                        return
+        except Exception:
+            _LOGGER.exception(
+                "Employee desktop idle shutdown failed for employee key %s",
+                self._employee_key(employee_id),
+            )
+        finally:
+            with self._idle_workers_lock:
+                current = self._idle_workers.get(employee_id)
+                if current and current[0] is threading.current_thread():
+                    self._idle_workers.pop(employee_id, None)
+
     def stop_session(self, employee_id: str) -> dict[str, str]:
         """Stop the named desktop without removing its container or profile volume."""
         employees = {item["id"] for item in self._employees()}
@@ -241,20 +418,23 @@ class EmployeeDesktopRuntime:
             raise KeyError(employee_id)
         self._ensure_private_state_root()
         with self._lifecycle_lock(employee_id):
-            container = self._container_name(employee_id)
-            if self.caddy_proxy is not None:
-                self.caddy_proxy.remove(employee_id)
-            inspect = self._inspect_optional(container)
-            if inspect is not None:
+            return self._stop_session_locked(employee_id)
+
+    def _stop_session_locked(self, employee_id: str) -> dict[str, str]:
+        container = self._container_name(employee_id)
+        if self.caddy_proxy is not None:
+            self.caddy_proxy.remove(employee_id)
+        inspect = self._inspect_optional(container)
+        if inspect is not None:
+            self._validate_managed_container(inspect, employee_id)
+            self._validate_mount(inspect, self._volume_name(employee_id))
+            if inspect.get("State", {}).get("Running"):
+                self._docker("stop", container)
+                inspect = self._inspect(container)
                 self._validate_managed_container(inspect, employee_id)
-                self._validate_mount(inspect, self._volume_name(employee_id))
                 if inspect.get("State", {}).get("Running"):
-                    self._docker("stop", container)
-                    inspect = self._inspect(container)
-                    self._validate_managed_container(inspect, employee_id)
-                    if inspect.get("State", {}).get("Running"):
-                        raise EmployeeDesktopError("employee desktop did not stop")
-            return {"employee_id": employee_id, "status": "stopped"}
+                    raise EmployeeDesktopError("employee desktop did not stop")
+        return {"employee_id": employee_id, "status": "stopped"}
 
     def _employees(self) -> list[dict[str, Any]]:
         try:
@@ -293,21 +473,71 @@ class EmployeeDesktopRuntime:
             raise EmployeeDesktopError("private employee desktop state directory is unavailable") from error
 
     @contextmanager
-    def _lifecycle_lock(self, employee_id: str):
+    def _lifecycle_lock(self, employee_id: str, *, blocking: bool = True):
         """Serialize lifecycle changes for this employee, not other employees."""
         lock_name = hashlib.sha256(employee_id.encode("utf-8")).hexdigest()
         lock_path = self.state_root / f"employee-lifecycle-{lock_name}.lock"
         fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        locked = False
         try:
             os.fchmod(fd, 0o600)
-            fcntl.flock(fd, fcntl.LOCK_EX)
-            yield
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+                locked = True
+            except BlockingIOError:
+                if blocking:
+                    raise
+                yield False
+                return
+            yield True
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            if locked:
+                fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
 
     def _credentials_path(self, employee_id: str) -> Path:
         return self.state_root / ("employee-" + self._employee_key(employee_id) + ".json")
+
+    def _idle_timestamp_path(self, employee_id: str) -> Path:
+        return self.state_root / ("employee-idle-" + self._employee_key(employee_id) + ".json")
+
+    def _read_idle_timestamp(self, employee_id: str) -> float | None:
+        path = self._idle_timestamp_path(employee_id)
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, json.JSONDecodeError) as error:
+            raise EmployeeDesktopError("employee desktop idle state is unreadable") from error
+        timestamp = value.get("last_activity") if isinstance(value, dict) else None
+        if isinstance(timestamp, bool) or not isinstance(timestamp, (int, float)):
+            raise EmployeeDesktopError("employee desktop idle state is invalid")
+        if timestamp < 0 or timestamp == float("inf") or timestamp != timestamp:
+            raise EmployeeDesktopError("employee desktop idle state is invalid")
+        return float(timestamp)
+
+    def _write_idle_timestamp(self, employee_id: str, timestamp: float) -> None:
+        self._ensure_private_state_root()
+        path = self._idle_timestamp_path(employee_id)
+        fd, temporary = tempfile.mkstemp(prefix=".employee-idle-", dir=self.state_root)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
+                json.dump({"last_activity": timestamp}, output)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, path)
+            path.chmod(0o600)
+        except BaseException:
+            Path(temporary).unlink(missing_ok=True)
+            raise
+
+    def _ensure_idle_timestamp(self, employee_id: str) -> float:
+        timestamp = self._read_idle_timestamp(employee_id)
+        if timestamp is None:
+            timestamp = time.time()
+            self._write_idle_timestamp(employee_id, timestamp)
+        return timestamp
 
     def _credentials(self, employee_id: str, *, create: bool = True) -> dict[str, str]:
         path = self._credentials_path(employee_id)

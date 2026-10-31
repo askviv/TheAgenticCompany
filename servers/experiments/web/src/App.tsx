@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { Switch } from "@base-ui/react/switch"
 import {
   ArrowLeft,
   ArrowRight,
@@ -80,7 +81,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-type LayoutContext = { refreshKey: number; liveError: string | null }
+type LayoutContext = { refreshKey: number }
 
 const statusText: Record<ExperimentRunStatus, string> = {
   initializing: "Preparing company",
@@ -152,13 +153,23 @@ function LoadingCards() {
 
 function AppLayout() {
   const [refreshKey, setRefreshKey] = useState(0)
-  const [liveError, setLiveError] = useState<string | null>(null)
+  const [companyTime, setCompanyTime] = useState<string | null>(null)
   const snapshot = useRef<Map<string, string> | undefined>(undefined)
 
   useEffect(() => {
+    let active = true
+    getCompany().then((company) => {
+      if (active) setCompanyTime(company.simulated_time ?? null)
+    }).catch((error) => {
+      if (active) setCompanyTime(null)
+      console.error("Unable to load company time.", error instanceof Error ? error.name : "UnknownError")
+    })
+    return () => { active = false }
+  }, [refreshKey])
+
+  useEffect(() => {
     const source = new EventSource("/api/events")
-    source.onopen = () => setLiveError(null)
-    source.onerror = () => setLiveError("Live updates are reconnecting. Open a run and use Sync messages to check for replies.")
+    source.onerror = () => console.warn("Live updates are reconnecting.")
     source.addEventListener("runs", (event) => {
       try {
         const payload = JSON.parse((event as MessageEvent<string>).data) as {
@@ -174,7 +185,6 @@ function AppLayout() {
         if (changed) setRefreshKey((current) => current + 1)
       } catch (reason) {
         console.error("Unable to read live run update.", reason instanceof Error ? reason.name : "UnknownError")
-        setLiveError("Live updates could not be read. Open a run and use Sync messages to check for replies.")
       }
     })
     source.addEventListener("activity", () => setRefreshKey((current) => current + 1))
@@ -185,7 +195,7 @@ function AppLayout() {
   return (
     <div className="min-h-svh bg-background text-foreground">
       <header className="sticky top-0 z-20 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
+        <div className="flex min-h-14 w-full flex-wrap items-center justify-between px-4 sm:px-6">
           <Link to="/" className="flex items-center gap-2.5 font-semibold tracking-tight" aria-label="The Agentic Company activity">
             <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground"><Beaker className="size-4" /></span>
             <span>The Agentic Company</span>
@@ -207,17 +217,11 @@ function AppLayout() {
               Help
             </NavLink>
           </nav>
+          <p className="basis-full pb-2 text-center text-xs text-muted-foreground lg:basis-auto lg:pb-0">Company time {companyTime ? formatDate(companyTime) : "—"}</p>
         </div>
       </header>
-      <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
-        {liveError && (
-          <Alert className="mb-6">
-            <CircleAlert />
-            <AlertTitle>Live updates unavailable</AlertTitle>
-            <AlertDescription>{liveError}</AlertDescription>
-          </Alert>
-        )}
-        <Outlet context={{ refreshKey, liveError } satisfies LayoutContext} />
+      <main className="w-full px-4 py-8 sm:px-6 sm:py-10">
+        <Outlet context={{ refreshKey } satisfies LayoutContext} />
       </main>
     </div>
   )
@@ -225,20 +229,6 @@ function AppLayout() {
 
 function useRefreshKey() {
   return useOutletContext<LayoutContext>().refreshKey
-}
-
-function companyProviderStatusLabel(company: Company | null, providerId: string) {
-  const errors = company?.background?.errors
-  const issue = errors?.[providerId] ?? errors?.configuration
-  const provider = company?.background?.providers[providerId]
-  if (provider?.enabled === false && (provider.status === "stopping" || provider.in_flight)) return "Stopping"
-  if (provider?.enabled === false) return `Stopped${issue ? ` (${issue.code})` : ""}`
-  if (issue) {
-    const uncertain = /uncertain|pending/i.test(issue.code)
-    return `${uncertain ? "Outcome uncertain" : "Needs attention"} (${issue.code})`
-  }
-  if (provider?.status === "error") return "Needs attention"
-  return provider?.status ?? (company?.background?.initialized ? "Scheduled" : "Connecting")
 }
 
 function bankingRoleLabel(roleFit?: string) {
@@ -252,16 +242,50 @@ function EmployeeStreamsPage() {
   const refreshKey = useRefreshKey()
   const [employees, setEmployees] = useState<CompanyDesktopEmployee[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [manualRefresh, setManualRefresh] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const [fullscreenError, setFullscreenError] = useState<string | null>(null)
   const focusedViewer = useRef<HTMLDivElement>(null)
+  const focusedFrame = useRef<HTMLIFrameElement>(null)
+
+  useEffect(() => {
+    if (!focusedId) return
+    const frame = focusedFrame.current
+    let frameWindow: Window | null = null
+    let wasFullscreen = Boolean(document.fullscreenElement)
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault()
+        setFocusedId(null)
+      }
+    }
+    const onFullscreenChange = () => {
+      if (wasFullscreen && !document.fullscreenElement) setFocusedId(null)
+      wasFullscreen = Boolean(document.fullscreenElement)
+    }
+    const attachFrame = () => {
+      frameWindow?.removeEventListener("keydown", closeOnEscape, true)
+      try {
+        frameWindow = frame?.contentWindow ?? null
+        frameWindow?.addEventListener("keydown", closeOnEscape, true)
+      } catch (error) {
+        console.error("Unable to attach the stream keyboard shortcut.", error instanceof Error ? error.name : "UnknownError")
+      }
+    }
+    window.addEventListener("keydown", closeOnEscape, true)
+    document.addEventListener("fullscreenchange", onFullscreenChange)
+    frame?.addEventListener("load", attachFrame)
+    attachFrame()
+    return () => {
+      window.removeEventListener("keydown", closeOnEscape, true)
+      document.removeEventListener("fullscreenchange", onFullscreenChange)
+      frame?.removeEventListener("load", attachFrame)
+      frameWindow?.removeEventListener("keydown", closeOnEscape, true)
+    }
+  }, [focusedId])
 
   useEffect(() => {
     let active = true
-    setRefreshing(true)
     getCompanyDesktops().then((items) => {
       if (!active) return
       setEmployees(items)
@@ -272,10 +296,9 @@ function EmployeeStreamsPage() {
     }).finally(() => {
       if (!active) return
       setLoading(false)
-      setRefreshing(false)
     })
     return () => { active = false }
-  }, [refreshKey, manualRefresh])
+  }, [refreshKey])
 
   const running = employees.filter((employee) =>
     ["running", "active", "ready"].includes(employee.status.toLowerCase()),
@@ -293,22 +316,10 @@ function EmployeeStreamsPage() {
 
   return (
     <section className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-sm font-medium text-primary">Live desktop streams</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Employee streams</h1>
-          <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-            Running employee desktops appear here and update with company status refreshes. A desktop can remain open while idle; this view reports session state, not whether someone is actively working.
-          </p>
-        </div>
-        <Button size="sm" variant="outline" onClick={() => setManualRefresh((current) => current + 1)} disabled={refreshing}>
-          <RefreshCw className={refreshing ? "animate-spin" : ""} /> Refresh streams
-        </Button>
-      </div>
       {error && <ErrorNotice message={error} title="Employee streams unavailable" />}
       {loading && <p className="text-sm text-muted-foreground">Loading running desktops…</p>}
       {!loading && !error && running.length === 0 && (
-        <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">No employee desktops are currently running.</CardContent></Card>
+        <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">No live employee streams right now.</CardContent></Card>
       )}
       {!loading && running.length > 0 && !focusedEmployee && (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-label="Running employee desktop streams">
@@ -317,11 +328,8 @@ function EmployeeStreamsPage() {
               <CardHeader className="flex-row items-start justify-between space-y-0 pb-3">
                 <div className="min-w-0">
                   <CardTitle className="truncate text-base">{employee.name}</CardTitle>
-                  <CardDescription>{employee.role} · Running</CardDescription>
+                  <CardDescription>{employee.role}</CardDescription>
                 </div>
-                {employee.viewing_url && <Button size="sm" variant="outline" onClick={() => { setFullscreenError(null); setFocusedId(employee.id) }}>
-                  <Maximize2 className="size-4" /> Focus stream
-                </Button>}
               </CardHeader>
               <CardContent className="pt-0">
                 {employee.viewing_url ? (
@@ -357,7 +365,7 @@ function EmployeeStreamsPage() {
             <div className="flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <h2 className="truncate text-lg font-semibold">{focusedEmployee.name}</h2>
-                <p className="text-sm text-muted-foreground">{focusedEmployee.role} · Running · May be idle</p>
+                <p className="text-sm text-muted-foreground">{focusedEmployee.role}</p>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <Button size="sm" variant="outline" onClick={() => void enterFullscreen()}><Maximize2 className="size-4" /> Full screen</Button>
@@ -366,6 +374,7 @@ function EmployeeStreamsPage() {
             </div>
             {fullscreenError && <p className="text-sm text-destructive">{fullscreenError}</p>}
             <iframe
+              ref={focusedFrame}
               src={focusedEmployee.viewing_url}
               title={`${focusedEmployee.name} employee desktop focused stream`}
               allow="fullscreen; autoplay"
@@ -390,16 +399,13 @@ function ActivityPage() {
   const [manualRefresh, setManualRefresh] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState("all")
-  const [nativeEvaluations, setNativeEvaluations] = useState<Record<string, CompanyNativeEvaluationProvider> | null>(null)
-  const [nativeEvaluationError, setNativeEvaluationError] = useState<string | null>(null)
-  const [evaluatingProvider, setEvaluatingProvider] = useState<string | null>(null)
   const [backgroundControlBusy, setBackgroundControlBusy] = useState<Record<string, boolean>>({})
   const [backgroundControlErrors, setBackgroundControlErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
     let active = true
-    Promise.allSettled([getCompany(), getActivity(), getCompanyEvaluations()])
-      .then(([companyResult, activityResult, evaluationsResult]) => {
+    Promise.allSettled([getCompany(), getActivity()])
+      .then(([companyResult, activityResult]) => {
         if (!active) return
         const errors: string[] = []
         if (companyResult.status === "fulfilled") setCompany(companyResult.value)
@@ -411,12 +417,6 @@ function ActivityPage() {
         } else {
           setMetrics(null)
           setActivityWarning(activityResult.reason instanceof Error ? activityResult.reason.message : "Company activity could not be loaded.")
-        }
-        if (evaluationsResult.status === "fulfilled") {
-          setNativeEvaluations(evaluationsResult.value)
-          setNativeEvaluationError(null)
-        } else {
-          setNativeEvaluationError(evaluationsResult.reason instanceof Error ? evaluationsResult.reason.message : "Saved native evaluations could not be loaded.")
         }
         setError(errors.length ? errors.join(" ") : null)
       })
@@ -447,36 +447,9 @@ function ActivityPage() {
     }
   }
 
-  const saveNativeEvaluation = async (providerId: CompanyNativeEvaluation["provider_id"]) => {
-    const keyName = `experiments.company-evaluation.${providerId}`
-    let key: string | null = null
-    try {
-      key = window.sessionStorage.getItem(keyName)
-      if (!key) {
-        key = crypto.randomUUID()
-        window.sessionStorage.setItem(keyName, key)
-      }
-    } catch {
-      setNativeEvaluationError("This browser could not preserve a retry key. Enable session storage before saving an evaluation.")
-      return
-    }
-    setEvaluatingProvider(providerId)
-    try {
-      await startCompanyEvaluation(providerId, key)
-      window.sessionStorage.removeItem(keyName)
-      setNativeEvaluations(await getCompanyEvaluations())
-      setNativeEvaluationError(null)
-    } catch (reason) {
-      setNativeEvaluationError(reason instanceof Error ? reason.message : "The evaluation result could not be confirmed. Retry to reconcile it.")
-    } finally {
-      setEvaluatingProvider(null)
-    }
-  }
-
   const filtered = [...activity]
     .filter((entry) => filter === "all" || entry.type === filter || (filter === "message" && entry.type === "chat") || (filter === "chatter" && (entry.type === "chatter" || (entry.type === "message" && entry.direction === "sent" && Boolean(entry.actor)))))
     .sort((first, second) => second.timestamp.localeCompare(first.timestamp))
-  const running = company?.status === "running"
   const backgroundErrors = company?.background?.errors ?? {}
   const globalBackgroundErrors = ([
     ["company_background", "Background worker"],
@@ -485,13 +458,6 @@ function ActivityPage() {
   ] as const).flatMap(([code, label]) => backgroundErrors[code]
     ? [{ code, label, detail: backgroundErrors[code].code }]
     : [])
-  const companyStatus = !company
-    ? loading ? "Loading status…" : "Status unavailable"
-    : company.status === "starting" ? "Starting"
-    : company.status === "running" ? "Company service running"
-    : company.status === "paused" ? "Paused"
-    : company.status === "stopped" ? "Stopped"
-    : "Status unavailable"
 
   return (
     <section className="space-y-7">
@@ -504,50 +470,34 @@ function ActivityPage() {
       </div>
 
       <Card>
-        <CardContent className="flex flex-col gap-4 py-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <span className="grid size-11 place-items-center rounded-xl bg-secondary text-secondary-foreground"><Building2 className="size-5" /></span>
-            <div>
-              <p className="font-medium">{company?.name ?? "Your company"}</p>
-              <p className="mt-1 flex items-center gap-2 text-sm text-muted-foreground">
-                <span className={`size-2 rounded-full ${running ? "bg-emerald-500" : "bg-muted-foreground"}`} />
-                {companyStatus}
-                {company?.simulated_time && <span>· Company time {formatDate(company.simulated_time)}</span>}
-              </p>
-              {company?.background && <div className="mt-2 flex flex-wrap gap-2">
-                {([["coffeebench", "CoffeeBench"], ["ecommercebench", "E-CommerceBench"]] as const).map(([id, label]) => {
-                  const error = company.background?.errors[id] ?? company.background?.errors.configuration
-                  const provider = company.background?.providers[id]
-                  const status = companyProviderStatusLabel(company, id)
-                  return <Badge key={id} variant={error || provider?.status === "error" ? "destructive" : "outline"}
-                    aria-label={`${label} status: ${status}`}
-                    title={provider?.next_due ? `Next company-time update: ${formatDate(provider.next_due)}` : undefined}>
-                    {label}: {status}
-                  </Badge>
-                })}
-                <p className="w-full text-xs text-muted-foreground">Company availability is separate from background provider health.</p>
-              </div>}
-              {company?.background && <div className="mt-3 space-y-3">
-                {([['coffeebench', 'CoffeeBench'], ['ecommercebench', 'E-CommerceBench']] as const).map(([providerId, label]) => {
-                  const provider = company.background?.providers[providerId]
-                  const enabled = provider?.enabled
-                  return <div key={providerId} className="flex flex-wrap items-center gap-3">
-                    <Button size="sm" variant="outline" disabled={backgroundControlBusy[providerId] || enabled === undefined || provider?.status === "stopping" || (enabled === false && provider?.in_flight === true)}
-                      onClick={() => void setBackgroundProvider(providerId, !enabled)}>
-                      {backgroundControlBusy[providerId] ? <LoaderCircle className="animate-spin" /> : null}
-                      {enabled ? `Stop ${label}` : `Start ${label}`}
-                    </Button>
-                    {enabled === false && (provider?.status === "stopping" || provider?.in_flight)
-                      ? <span className="text-sm text-muted-foreground">Finishing current work. Company data is preserved.</span>
-                      : enabled === false && <span className="text-sm text-muted-foreground">{label} stopped. Company data is preserved.</span>}
-                    {enabled === true && provider?.status === "starting" && <span className="text-sm text-muted-foreground">{label} is starting…</span>}
-                    {backgroundControlErrors[providerId] && <span className="text-sm text-destructive">{backgroundControlErrors[providerId]}</span>}
-                  </div>
-                })}
-              </div>}
+        <CardHeader>
+          <CardTitle>Background simulations</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          {([['coffeebench', 'CoffeeBench'], ['ecommercebench', 'E-CommerceBench']] as const).map(([providerId, label]) => {
+            const provider = company?.background?.providers[providerId]
+            const enabled = provider?.enabled
+            const issue = company?.background?.errors[providerId] ?? company?.background?.errors.configuration
+            return <div key={providerId} className="rounded-lg border p-4">
+              <div className="flex items-center justify-between gap-4">
+                <span id={`${providerId}-label`} className="font-medium">{label}</span>
+                <Switch.Root
+                  aria-labelledby={`${providerId}-label`}
+                  checked={enabled === true}
+                  disabled={backgroundControlBusy[providerId] || enabled === undefined || provider?.status === "stopping" || (enabled === false && provider?.in_flight === true)}
+                  onCheckedChange={(checked) => void setBackgroundProvider(providerId, checked)}
+                  className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background shadow-sm transition-transform data-[checked]:translate-x-5" />
+                </Switch.Root>
+              </div>
+              {provider?.status === "starting" && <p className="mt-2 text-sm text-muted-foreground">Starting…</p>}
+              {(provider?.status === "stopping" || (enabled === false && provider?.in_flight)) && <p className="mt-2 text-sm text-muted-foreground">Finishing current work…</p>}
+              {issue && <p className="mt-2 text-sm text-destructive">Needs attention ({issue.code}).</p>}
+              {!issue && provider?.status === "error" && <p className="mt-2 text-sm text-destructive">Needs attention.</p>}
+              {backgroundControlErrors[providerId] && <p className="mt-2 text-sm text-destructive">{backgroundControlErrors[providerId]}</p>}
             </div>
-          </div>
-
+          })}
         </CardContent>
       </Card>
 
@@ -564,35 +514,7 @@ function ActivityPage() {
       {company?.error && <ErrorNotice message={company.error} title="Company needs attention" />}
       {error && <ErrorNotice message={error} title="Company activity unavailable" />}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Saved native evaluations</CardTitle>
-          <CardDescription>Company-wide snapshots of the background benchmark worlds. These results are not attributed to an experiment.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          {nativeEvaluationError && <ErrorNotice message={nativeEvaluationError} title="Evaluation history needs attention" />}
-          <div className="grid gap-4 lg:grid-cols-2">
-            {([["coffeebench", "CoffeeBench"], ["ecommercebench", "E-CommerceBench"]] as const).map(([providerId, label]) => {
-              const provider = nativeEvaluations?.[providerId]
-              return <section key={providerId} className="rounded-lg border p-4" aria-label={`${label} saved evaluations`}>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div><h3 className="font-medium">{label}</h3><p className="mt-1 text-xs text-muted-foreground">Company-wide · native scale · no combined score</p></div>
-                  <Button size="sm" variant="outline" disabled={evaluatingProvider !== null} onClick={() => void saveNativeEvaluation(providerId)}>
-                    {evaluatingProvider === providerId ? <LoaderCircle className="animate-spin" /> : null}
-                    Save snapshot
-                  </Button>
-                </div>
-                {provider?.error && <p className="mt-3 text-sm text-destructive">History unavailable ({provider.error.code}).</p>}
-                {!provider?.error && (provider?.evaluations.length ?? 0) === 0 && <p className="mt-3 text-sm text-muted-foreground">No saved evaluation yet.</p>}
-                {!provider?.error && provider && provider.evaluations.length > 0 && <div className="mt-4 space-y-3">
-                  {provider.latest && <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Latest saved</p>}
-                  {provider.evaluations.map((evaluation) => <CompanyEvaluationEntry key={evaluation.evaluation_id} evaluation={evaluation} latest={evaluation.evaluation_id === provider.latest?.evaluation_id} />)}
-                </div>}
-              </section>
-            })}
-          </div>
-        </CardContent>
-      </Card>
+
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Activity metrics">
         {[
@@ -610,7 +532,7 @@ function ActivityPage() {
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="space-y-1"><h2 className="text-lg font-semibold">Live activity</h2><p className="text-sm text-muted-foreground">Emails, messages and completed company actions appear here as they happen.</p></div>
+          <div className="space-y-1"><h2 className="text-lg font-semibold">Live activity</h2></div>
           <Button variant="outline" size="sm" disabled={refreshing} aria-label="Refresh company activity" onClick={refreshCompanyActivity}>
             <RefreshCw className={refreshing ? "animate-spin" : ""} /> Refresh activity
           </Button>
@@ -657,10 +579,89 @@ function ActivityPage() {
   )
 }
 
+function SavedNativeEvaluations() {
+  const refreshKey = useRefreshKey()
+  const [nativeEvaluations, setNativeEvaluations] = useState<Record<string, CompanyNativeEvaluationProvider> | null>(null)
+  const [nativeEvaluationError, setNativeEvaluationError] = useState<string | null>(null)
+  const [evaluatingProvider, setEvaluatingProvider] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    getCompanyEvaluations().then((evaluations) => {
+      if (active) {
+        setNativeEvaluations(evaluations)
+        setNativeEvaluationError(null)
+      }
+    }).catch((reason) => {
+      if (active) setNativeEvaluationError(reason instanceof Error ? reason.message : "Saved native evaluations could not be loaded.")
+    })
+    return () => { active = false }
+  }, [refreshKey])
+
+  const saveNativeEvaluation = async (providerId: CompanyNativeEvaluation["provider_id"]) => {
+    const keyName = `experiments.company-evaluation.${providerId}`
+    let key: string | null = null
+    try {
+      key = window.sessionStorage.getItem(keyName)
+      if (!key) {
+        key = crypto.randomUUID()
+        window.sessionStorage.setItem(keyName, key)
+      }
+    } catch {
+      setNativeEvaluationError("This browser could not preserve a retry key. Enable session storage before saving an evaluation.")
+      return
+    }
+    setEvaluatingProvider(providerId)
+    try {
+      await startCompanyEvaluation(providerId, key)
+      window.sessionStorage.removeItem(keyName)
+      setNativeEvaluations(await getCompanyEvaluations())
+      setNativeEvaluationError(null)
+    } catch (reason) {
+      setNativeEvaluationError(reason instanceof Error ? reason.message : "The evaluation result could not be confirmed. Retry to reconcile it.")
+    } finally {
+      setEvaluatingProvider(null)
+    }
+  }
+
+  return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Saved native evaluations</CardTitle>
+          <CardDescription>Company-wide snapshots of the background benchmark worlds. These results are not attributed to an experiment.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {nativeEvaluationError && <ErrorNotice message={nativeEvaluationError} title="Evaluation history needs attention" />}
+          <div className="grid gap-4 lg:grid-cols-2">
+            {([["coffeebench", "CoffeeBench"], ["ecommercebench", "E-CommerceBench"]] as const).map(([providerId, label]) => {
+              const provider = nativeEvaluations?.[providerId]
+              return <section key={providerId} className="rounded-lg border p-4" aria-label={`${label} saved evaluations`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div><h3 className="font-medium">{label}</h3><p className="mt-1 text-xs text-muted-foreground">Company-wide · native scale · no combined score</p></div>
+                  <Button size="sm" variant="outline" disabled={evaluatingProvider !== null} onClick={() => void saveNativeEvaluation(providerId)}>
+                    {evaluatingProvider === providerId ? <LoaderCircle className="animate-spin" /> : null}
+                    Save snapshot
+                  </Button>
+                </div>
+                {provider?.error && <p className="mt-3 text-sm text-destructive">History unavailable ({provider.error.code}).</p>}
+                {!provider?.error && (provider?.evaluations.length ?? 0) === 0 && <p className="mt-3 text-sm text-muted-foreground">No saved evaluation yet.</p>}
+                {!provider?.error && provider && provider.evaluations.length > 0 && <div className="mt-4 space-y-3">
+                  {provider.latest && <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Latest saved</p>}
+                  {provider.evaluations.map((evaluation) => <CompanyEvaluationEntry key={evaluation.evaluation_id} evaluation={evaluation} latest={evaluation.evaluation_id === provider.latest?.evaluation_id} />)}
+                </div>}
+              </section>
+            })}
+          </div>
+        </CardContent>
+      </Card>
+  )
+}
+
 function HelpPage() {
   return (
     <section className="space-y-7">
       <h1 className="text-2xl font-semibold tracking-tight">Help</h1>
+      <SavedNativeEvaluations />
       <Card>
         <CardHeader>
           <CardTitle>Company tools</CardTitle>
@@ -963,7 +964,6 @@ function RunsPage() {
                 <TableRow key={run.id}>
                   <TableCell className="min-w-52 whitespace-normal">
                     <Link to={`/runs/${encodeURIComponent(run.id)}`} className="font-medium hover:underline">{run.title}</Link>
-                    <span className="mt-1 block font-mono text-xs text-muted-foreground">{run.id.slice(0, 8)}</span>
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-sm text-muted-foreground">{formatDate(run.created_at)}</TableCell>
                   <TableCell><StatusBadge status={run.status} /></TableCell>

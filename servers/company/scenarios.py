@@ -854,7 +854,8 @@ class RealChatTransport:
 
     def post(self, fixture: dict[str, Any], credentials: dict[str, str], attempt_id: str,
              *, on_submission_started: Any = None,
-             on_message_id_captured: Any = None) -> dict[str, str | None]:
+             on_message_id_captured: Any = None,
+             on_effective_message_text: Any = None) -> dict[str, str | None]:
         _safe_ref(attempt_id, "chat attempt reference")
         box = fixture["employee_mailbox"]
         base = box["rocketchat_base_url"].rstrip("/") + "/"
@@ -883,6 +884,8 @@ class RealChatTransport:
             room = self._room(base, headers, room_id)
             mention = self._mention_text(fixture, headers)
             message_text = (mention + " " if mention else "") + fixture["chat_message"]
+            if on_effective_message_text is not None:
+                on_effective_message_text(message_text)
             page.goto(self._browser_room_url(base, room), wait_until="domcontentloaded", timeout=0)
             composer = page.locator(
                 'textarea[aria-label="Message"], textarea.rc-message-box__textarea, '

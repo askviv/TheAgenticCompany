@@ -52,8 +52,7 @@ class EmployeeWebmailSender:
         automated: bool,
         on_submission_started: Callable[[], None],
     ) -> None:
-        with self.employee_desktops.employee_action_lock(employee_id):
-            session = self.employee_desktops.ensure_session(employee_id)
+        with self.employee_desktops.employee_activity(employee_id) as session:
             endpoint = session.get("cdp_endpoint")
             if not isinstance(endpoint, str) or not endpoint:
                 raise EmployeeWebmailError("employee desktop did not provide a CDP endpoint")
@@ -99,8 +98,7 @@ class EmployeeWebmailSender:
         message_url: str,
     ) -> None:
         """Open one exact native inbox message for a committed employee response."""
-        with self.employee_desktops.employee_action_lock(employee_id):
-            session = self.employee_desktops.ensure_session(employee_id)
+        with self.employee_desktops.employee_activity(employee_id) as session:
             endpoint = session.get("cdp_endpoint")
             if not isinstance(endpoint, str) or not endpoint:
                 raise EmployeeWebmailError("employee desktop did not provide a CDP endpoint")

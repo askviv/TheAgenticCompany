@@ -61,6 +61,12 @@ It reads existing employee passwords from `employee-credentials.json` without
 changing that file or any employee account. A missing credential affects only
 that employee's portal/mailbox access; bootstrap reports the count and continues
 for other configured employees. The four workflow mailboxes remain required.
+Employee-authored experiment chat uses a separate private
+`employee-chat-credentials.json` at the path recorded in the generated runtime
+configuration. It is keyed by exact employee ID and stores that account's
+Rocket.Chat username and password; the username must match the company identity
+profile. Keep it outside Git with mode `0600`. The coordinator never returns
+these credentials or includes them in browser URLs, request bodies, or logs.
 The private `mail-credentials.json` also maps Viv's fixed `agent@agent.example.test`
 identity to the dedicated Mailu `viv_reply_relay@example.com` SMTP login. That
 mapping lets inbound mail be authenticated by Mailu's `smtp.auth` result while
