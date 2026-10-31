@@ -205,7 +205,7 @@ function AppLayout() {
               Activity
             </NavLink>
             <NavLink to="/streams" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-              Streams
+              Observe
             </NavLink>
           <NavLink to="/experiments" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
               Experiments
@@ -240,6 +240,7 @@ function bankingRoleLabel(roleFit?: string) {
 
 function EmployeeStreamsPage() {
   const refreshKey = useRefreshKey()
+  const [manualRefresh, setManualRefresh] = useState(0)
   const [employees, setEmployees] = useState<CompanyDesktopEmployee[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -298,7 +299,7 @@ function EmployeeStreamsPage() {
       setLoading(false)
     })
     return () => { active = false }
-  }, [refreshKey])
+  }, [refreshKey, manualRefresh])
 
   const running = employees.filter((employee) =>
     ["running", "active", "ready"].includes(employee.status.toLowerCase()),
@@ -316,6 +317,14 @@ function EmployeeStreamsPage() {
 
   return (
     <section className="space-y-6">
+      {!focusedEmployee && (
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" disabled={loading} onClick={() => {
+            setLoading(true)
+            setManualRefresh((current) => current + 1)
+          }}><RefreshCw /> Refresh streams</Button>
+        </div>
+      )}
       {error && <ErrorNotice message={error} title="Employee streams unavailable" />}
       {loading && <p className="text-sm text-muted-foreground">Loading running desktops…</p>}
       {!loading && !error && running.length === 0 && (
