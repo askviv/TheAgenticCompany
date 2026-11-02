@@ -81,3 +81,5 @@ tick-broadcast proxy is backed by an hrtimer.
 - The combined patches have been built and booted in an empty Ubuntu guest.
   Runtime 1×/24× changes and clock reads have been observed there. Company
   migration and application compatibility remain separate deployment work.
+
+For separate native build commands, see the [x86_64 and ARM64 build guide](../../../docs/enterprise-simulation/architecture-builds.md). ARM64/UTM remains experimental and unverified.

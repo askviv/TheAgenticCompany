@@ -233,3 +233,5 @@ to one so the guest clock is not accelerated twice.
 For an existing company, follow the [migration runbook](../../docs/enterprise-simulation/virtual-time-migration.md). A plain `docker compose up` starts application containers; VM creation, kernel preparation and the coordinated data migration are separate operator steps.
 
 The coordinator runtime JSON exposes `sqlite_busy_timeout_seconds` (existing default: 30). At 24×, use 720 guest seconds to retain a 30-real-second allowance for durable storage contention. This changes resource waiting, not the guest clock or benchmark deadlines. Health reads use a read connection, and displayed company time comes directly from the guest kernel; delayed record processing does not freeze the clock.
+
+Architecture-specific kernel entry points and Apple Silicon/UTM limitations are documented in the [build guide](../../docs/enterprise-simulation/architecture-builds.md).
