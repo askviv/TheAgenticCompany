@@ -153,6 +153,7 @@ export type Company = {
   started_at?: string | null
   updated_at?: string | null
   simulated_time?: string | null
+  clock_mode?: "shared" | "real" | "kernel"
   clock_speed?: number
   error?: string | null
 }

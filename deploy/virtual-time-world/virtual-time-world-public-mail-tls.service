@@ -1,0 +1,9 @@
+[Unit]
+Description=Synchronize the public Mailu certificate into the virtual-time guest
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/data/theagentcompany/virtual-time-world/config/public-mail-tls-sync.env
+ExecStart=/usr/local/lib/virtual-time-world/sync-public-mail-tls-to-guest.sh

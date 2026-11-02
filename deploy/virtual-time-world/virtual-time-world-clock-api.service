@@ -1,0 +1,19 @@
+[Unit]
+Description=Private localhost API for the isolated virtual clock
+After=virtual-time-world-clock.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/usr/local/lib/virtual-time-world
+Environment=VIRTUAL_TIME_ROOT=/data/theagentcompany/virtual-time-world
+Environment=VIRTUAL_TIME_API_TOKEN_FILE=/data/theagentcompany/virtual-time-world/config/clock-api-token
+Environment=VIRTUAL_TIME_SOURCE_ROOT=/data/theagentcompany/virtual-time-world/company-source
+Environment=PYTHONPATH=/data/theagentcompany/virtual-time-world/company-source
+ExecStart=/data/theagentcompany/virtual-time-world/host-venv/bin/uvicorn clock_api:app --host 127.0.0.1 --port 8133 --workers 1 --no-access-log --no-server-header
+Restart=on-failure
+RestartSec=5
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

@@ -109,6 +109,55 @@ def codex_judge(prompt: str, image_path: str = None) -> bool:
         "required": ["answer"],
         "additionalProperties": False,
     }
+    inference_url = os.environ.get('CODEX_INFERENCE_URL')
+    inference_token = os.environ.get('CODEX_INFERENCE_BEARER_TOKEN')
+    token_file = os.environ.get('CODEX_INFERENCE_BEARER_TOKEN_FILE')
+    if inference_token is None and token_file:
+        try:
+            with open(token_file, encoding='utf-8') as credential_file:
+                inference_token = credential_file.read().strip()
+        except OSError as error:
+            raise CodexJudgeError('configuration_missing', correlation_id, error) from error
+    if bool(inference_url) != bool(inference_token):
+        raise CodexJudgeError('configuration_invalid', correlation_id)
+    if inference_url:
+        image_base64 = None
+        if image_path:
+            try:
+                with open(image_path, 'rb') as image_file:
+                    image_base64 = base64.b64encode(image_file.read()).decode('ascii')
+                image_filename = os.path.basename(image_path)
+            except (OSError, ValueError) as error:
+                raise CodexJudgeError('invalid_image', correlation_id, error) from error
+        else:
+            image_filename = None
+        try:
+            response = requests.post(
+                inference_url.rstrip('/') + '/v1/judge',
+                json={
+                    'prompt': prompt, 'model': model, 'output_schema': schema,
+                    'image_bytes': image_base64, 'image_filename': image_filename,
+                },
+                headers={'Authorization': 'Bearer ' + inference_token},
+            )
+        except requests.RequestException as error:
+            raise CodexJudgeError('remote_transport', correlation_id, error) from error
+        if response.status_code != 200:
+            try:
+                detail = response.json().get('detail', {})
+                code = detail.get('error', 'remote_failure') if isinstance(detail, dict) else 'remote_failure'
+            except (ValueError, AttributeError):
+                code = 'remote_failure'
+            cause = RuntimeError(f'remote judge returned HTTP {response.status_code}')
+            raise CodexJudgeError(code, correlation_id, cause) from cause
+        try:
+            result = response.json()
+        except ValueError as error:
+            raise CodexJudgeError('invalid_result', correlation_id, error) from error
+        if not isinstance(result, dict) or set(result) != {'answer'} or result['answer'] not in ('yes', 'no'):
+            raise CodexJudgeError('invalid_result', correlation_id)
+        return result['answer'] == 'yes'
+
     with tempfile.TemporaryDirectory(prefix='codex-judge-') as temp_dir:
         schema_path = os.path.join(temp_dir, 'schema.json')
         output_path = os.path.join(temp_dir, 'answer.json')
@@ -132,12 +181,11 @@ def codex_judge(prompt: str, image_path: str = None) -> bool:
                 input=prompt,
                 text=True,
                 capture_output=True,
-                timeout=int(os.environ.get('CODEX_JUDGE_TIMEOUT_SECONDS', '120')),
+                timeout=None,
                 check=False,
             )
-        except (OSError, subprocess.TimeoutExpired, ValueError) as error:
-            code = 'timeout' if isinstance(error, subprocess.TimeoutExpired) else 'process_start_failed'
-            raise CodexJudgeError(code, correlation_id, error) from error
+        except OSError as error:
+            raise CodexJudgeError('process_start_failed', correlation_id, error) from error
 
         events = []
         try:

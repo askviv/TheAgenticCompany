@@ -1,0 +1,516 @@
+--- a/include/linux/hrtimer.h
++++ b/include/linux/hrtimer.h
+@@ -204,6 +204,8 @@
+ 						    timer->base->get_time());
+ }
+ 
++extern void hrtimer_clock_rate_changed(void);
++
+ #ifdef CONFIG_TIMERFD
+ extern void timerfd_clock_was_set(void);
+ extern void timerfd_resume(void);
+--- a/kernel/time/clockevents.c
++++ b/kernel/time/clockevents.c
+@@ -14,6 +14,7 @@
+ #include <linux/module.h>
+ #include <linux/smp.h>
+ #include <linux/device.h>
++#include <linux/overflow.h>
+ 
+ #include "tick-internal.h"
+ #include "timekeeping_internal.h"
+@@ -190,6 +191,19 @@
+ 	return ret;
+ }
+ 
++static ktime_t clockevents_host_delta_to_guest(ktime_t now, s64 delta,
++					       unsigned int rate)
++{
++	u64 guest_delta;
++
++	if (rate == 1)
++		return ktime_add_ns(now, delta);
++	if (check_mul_overflow((u64)delta, (u64)rate, &guest_delta) ||
++	    guest_delta > KTIME_MAX - now)
++		return KTIME_MAX;
++	return ktime_add_ns(now, guest_delta);
++}
++
+ #ifdef CONFIG_GENERIC_CLOCKEVENTS_MIN_ADJUST
+ 
+ /* Limit min_delta to a jiffy */
+@@ -232,15 +246,21 @@
+  *
+  * Returns 0 on success, -ETIME when the retry loop failed.
+  */
+-static int clockevents_program_min_delta(struct clock_event_device *dev)
++static int clockevents_program_min_delta(struct clock_event_device *dev,
++					 unsigned int expected_seq)
+ {
+ 	unsigned long long clc;
++	unsigned int rate, seq;
++	ktime_t now;
+ 	int64_t delta;
+ 	int i;
+ 
+ 	for (i = 0;;) {
+ 		delta = dev->min_delta_ns;
+-		dev->next_event = ktime_add_ns(ktime_get(), delta);
++		now = timekeeping_get_mono_with_rate(&rate, &seq);
++		if (seq != expected_seq)
++			return -EAGAIN;
++		dev->next_event = clockevents_host_delta_to_guest(now, delta, rate);
+ 
+ 		if (clockevent_state_shutdown(dev))
+ 			return 0;
+@@ -271,15 +291,21 @@
+  *
+  * Returns 0 on success, -ETIME when the retry loop failed.
+  */
+-static int clockevents_program_min_delta(struct clock_event_device *dev)
++static int clockevents_program_min_delta(struct clock_event_device *dev,
++					 unsigned int expected_seq)
+ {
+ 	unsigned long long clc;
++	unsigned int rate, seq;
++	ktime_t now;
+ 	int64_t delta = 0;
+ 	int i;
+ 
+ 	for (i = 0; i < 10; i++) {
+ 		delta += dev->min_delta_ns;
+-		dev->next_event = ktime_add_ns(ktime_get(), delta);
++		now = timekeeping_get_mono_with_rate(&rate, &seq);
++		if (seq != expected_seq)
++			return -EAGAIN;
++		dev->next_event = clockevents_host_delta_to_guest(now, delta, rate);
+ 
+ 		if (clockevent_state_shutdown(dev))
+ 			return 0;
+@@ -306,7 +332,9 @@
+ 			      bool force)
+ {
+ 	unsigned long long clc;
++	unsigned int rate, clock_was_set_seq, current_seq;
+ 	int64_t delta;
++	ktime_t now;
+ 	int rc;
+ 
+ 	if (WARN_ON_ONCE(expires < 0))
+@@ -329,24 +357,39 @@
+ 	if (dev->features & CLOCK_EVT_FEAT_KTIME)
+ 		return dev->set_next_ktime(expires, dev);
+ 
+-	delta = ktime_to_ns(ktime_sub(expires, ktime_get()));
+-	if (delta <= 0)
+-		return force ? clockevents_program_min_delta(dev) : -ETIME;
+-	/*
+-	 * @delta is in accelerated guest nanoseconds; clockevent devices
+-	 * count real host nanoseconds. Round up so a deadline is never early.
+-	 */
+-	if (timekeeping_virtual_rate > 1)
+-		delta = DIV_ROUND_UP_ULL((u64)delta,
+-					 timekeeping_virtual_rate);
+-
+-	delta = min(delta, (int64_t) dev->max_delta_ns);
+-	delta = max(delta, (int64_t) dev->min_delta_ns);
+-
+-	clc = ((unsigned long long) delta * dev->mult) >> dev->shift;
+-	rc = dev->set_next_event((unsigned long) clc, dev);
+-
+-	return (rc && force) ? clockevents_program_min_delta(dev) : rc;
++	for (;;) {
++		now = timekeeping_get_mono_with_rate(&rate, &clock_was_set_seq);
++		delta = ktime_to_ns(ktime_sub(expires, now));
++		if (delta <= 0) {
++			rc = force ? clockevents_program_min_delta(dev, clock_was_set_seq) : -ETIME;
++			timekeeping_get_mono_with_rate(NULL, &current_seq);
++			if (current_seq != clock_was_set_seq)
++				continue;
++			return rc;
++		}
++
++		/* Guest-time interval to physical event interval, rounded up. */
++		if (rate > 1)
++			delta = DIV_ROUND_UP_ULL((u64)delta, rate);
++
++		delta = min(delta, (int64_t) dev->max_delta_ns);
++		delta = max(delta, (int64_t) dev->min_delta_ns);
++
++		clc = ((unsigned long long) delta * dev->mult) >> dev->shift;
++		rc = dev->set_next_event((unsigned long) clc, dev);
++		if (rc && force)
++			rc = clockevents_program_min_delta(dev, clock_was_set_seq);
++
++		/*
++		 * stop_machine() can pause this CPU after the paired time/rate
++		 * sample and before the device write. Retry if a clock-set/rate
++		 * transaction committed in that window, overwriting any stale
++		 * physical deadline.
++		 */
++		timekeeping_get_mono_with_rate(NULL, &current_seq);
++		if (current_seq == clock_was_set_seq)
++			return rc;
++	}
+ }
+ 
+ /*
+--- a/kernel/time/hrtimer.c
++++ b/kernel/time/hrtimer.c
+@@ -986,6 +986,14 @@
+ 	timerfd_clock_was_set();
+ }
+ 
++void hrtimer_clock_rate_changed(void)
++{
++	/* The guest deadlines are unchanged, but every physical deadline moved. */
++	cpus_read_lock();
++	on_each_cpu(retrigger_next_event, NULL, 1);
++	cpus_read_unlock();
++}
++
+ static void clock_was_set_work(struct work_struct *work)
+ {
+ 	clock_was_set(CLOCK_SET_WALL);
+--- a/kernel/time/timekeeping.c
++++ b/kernel/time/timekeeping.c
+@@ -28,6 +28,11 @@
+ #include <linux/random.h>
+ #include <linux/overflow.h>
+ #include <linux/panic.h>
++#include <linux/kobject.h>
++#include <linux/sysfs.h>
++#include <linux/mutex.h>
++#include <linux/capability.h>
++#include <linux/errno.h>
+ 
+ #include "tick-internal.h"
+ #include "ntp_internal.h"
+@@ -47,8 +52,9 @@
+ 
+ DEFINE_RAW_SPINLOCK(timekeeper_lock);
+ 
+-/* Fixed for the lifetime of the kernel; see the virtual_time= boot option. */
++/* Boot-time default; runtime changes are committed under tk_core.seq. */
+ unsigned int timekeeping_virtual_rate __read_mostly = 1;
++static DEFINE_MUTEX(timekeeping_virtual_rate_lock);
+ 
+ static int __init virtual_time_setup(char *str)
+ {
+@@ -782,6 +788,147 @@
+ 		delta -= incr;
+ 	}
+ }
++
++static int timekeeping_virtual_rate_supported(struct clocksource *clock,
++					     unsigned int rate)
++{
++	u64 mult;
++	unsigned int shift_drop = 0;
++
++	if (!rate || rate > S64_MAX / ((u64)NTP_INTERVAL_LENGTH << NTP_SCALE_SHIFT))
++		return -ERANGE;
++
++	mult = (u64)clock->mult * rate;
++	while (mult >= U32_MAX) {
++		if (++shift_drop > clock->shift)
++			return -ERANGE;
++		mult = DIV_ROUND_CLOSEST_ULL((u64)clock->mult * rate,
++					      1ULL << shift_drop);
++	}
++	return 0;
++}
++
++ktime_t timekeeping_get_mono_with_rate(unsigned int *rate,
++				       unsigned int *clock_was_set_seq)
++{
++	struct timekeeper *tk = &tk_core.timekeeper;
++	unsigned int seq;
++	ktime_t base;
++	u64 nsecs;
++
++	do {
++		seq = read_seqcount_begin(&tk_core.seq);
++		base = tk->tkr_mono.base;
++		nsecs = timekeeping_get_ns(&tk->tkr_mono);
++		if (rate)
++			*rate = READ_ONCE(timekeeping_virtual_rate);
++		*clock_was_set_seq = tk->clock_was_set_seq;
++	} while (read_seqcount_retry(&tk_core.seq, seq));
++
++	return ktime_add_ns(base, nsecs);
++}
++
++struct timekeeping_rate_change {
++	unsigned int rate;
++	bool changed;
++};
++
++static int timekeeping_change_rate(void *data)
++{
++	struct timekeeping_rate_change *change = data;
++	struct timekeeper *tk = &tk_core.timekeeper;
++	struct clocksource *clock;
++	unsigned int old_cs_seq;
++	u64 cycle_last;
++	unsigned long flags;
++	int ret;
++
++	ret = tick_rate_change_supported();
++	if (ret)
++		return ret;
++
++	raw_spin_lock_irqsave(&timekeeper_lock, flags);
++	write_seqcount_begin(&tk_core.seq);
++	clock = tk->tkr_mono.clock;
++	ret = timekeeping_virtual_rate_supported(clock, change->rate);
++	if (ret)
++		goto out;
++
++	if (timekeeping_virtual_rate == change->rate)
++		goto out;
++
++	/* Account for elapsed cycles at the old rate before switching scales. */
++	timekeeping_forward_now(tk);
++	cycle_last = tk->tkr_mono.cycle_last;
++	old_cs_seq = tk->cs_was_changed_seq;
++	WRITE_ONCE(timekeeping_virtual_rate, change->rate);
++	tk_setup_internals(tk, clock);
++	/* Keep the old cycle pivot; the interval since it uses the new rate. */
++	tk->tkr_mono.cycle_last = cycle_last;
++	tk->tkr_raw.cycle_last = cycle_last;
++	/* The clocksource did not change; do not report a source replacement. */
++	tk->cs_was_changed_seq = old_cs_seq;
++	timekeeping_update(tk, TK_MIRROR | TK_CLOCK_WAS_SET);
++	change->changed = true;
++
++out:
++	write_seqcount_end(&tk_core.seq);
++	raw_spin_unlock_irqrestore(&timekeeper_lock, flags);
++	return ret;
++}
++
++static ssize_t virtual_time_rate_show(struct kobject *kobj,
++				      struct kobj_attribute *attr, char *buf)
++{
++	unsigned int seq, rate;
++
++	do {
++		seq = read_seqcount_begin(&tk_core.seq);
++		rate = READ_ONCE(timekeeping_virtual_rate);
++	} while (read_seqcount_retry(&tk_core.seq, seq));
++
++	return sysfs_emit(buf, "%u\n", rate);
++}
++
++static ssize_t virtual_time_rate_store(struct kobject *kobj,
++				       struct kobj_attribute *attr,
++				       const char *buf, size_t count)
++{
++	struct timekeeping_rate_change change = { };
++	int ret;
++
++	if (!capable(CAP_SYS_TIME))
++		return -EPERM;
++	ret = kstrtouint(buf, 0, &change.rate);
++	if (ret)
++		return ret;
++
++	mutex_lock(&timekeeping_virtual_rate_lock);
++	ret = stop_machine(timekeeping_change_rate, &change, NULL);
++	if (!ret) {
++		if (change.changed) {
++			clock_was_set(CLOCK_SET_WALL | CLOCK_SET_BOOT);
++			hrtimer_clock_rate_changed();
++			tick_clock_rate_changed();
++		}
++	}
++	mutex_unlock(&timekeeping_virtual_rate_lock);
++	return ret ? ret : count;
++}
++
++static struct kobj_attribute virtual_time_rate_attr =
++	__ATTR(virtual_time_rate, 0644, virtual_time_rate_show,
++	       virtual_time_rate_store);
++
++static int __init timekeeping_virtual_rate_sysfs_init(void)
++{
++	int ret = sysfs_create_file(kernel_kobj, &virtual_time_rate_attr.attr);
++
++	if (ret)
++		pr_err("virtual_time: failed to create rate control sysfs file: %d\n", ret);
++	return ret;
++}
++device_initcall(timekeeping_virtual_rate_sysfs_init);
+ 
+ /**
+  * ktime_get_real_ts64 - Returns the time of day in a timespec64.
+@@ -1567,6 +1714,15 @@
+ 			change = true;
+ 		else
+ 			module_put(new->owner);
++	}
++	if (change && timekeeping_virtual_rate_supported(
++			new, READ_ONCE(timekeeping_virtual_rate))) {
++		pr_warn("virtual_time: rate %u cannot use clocksource %s\n",
++			READ_ONCE(timekeeping_virtual_rate), new->name);
++		if (new->disable)
++			new->disable(new);
++		module_put(new->owner);
++		change = false;
+ 	}
+ 
+ 	raw_spin_lock_irqsave(&timekeeper_lock, flags);
+--- a/kernel/time/timekeeping_internal.h
++++ b/kernel/time/timekeeping_internal.h
+@@ -5,6 +5,7 @@
+ #include <linux/clocksource.h>
+ #include <linux/spinlock.h>
+ #include <linux/time.h>
++#include <linux/ktime.h>
+ 
+ /*
+  * timekeeping debug functions
+@@ -32,5 +33,8 @@
+ /* Fixed boot-time scale shared with the generic clockevent conversion. */
+ extern unsigned int timekeeping_virtual_rate;
+ u64 timekeeping_max_cycles(u64 source_max_cycles, u32 mult, u32 shift);
++/* @rate may be NULL when only checking the clock-set sequence. */
++ktime_t timekeeping_get_mono_with_rate(unsigned int *rate,
++				       unsigned int *clock_was_set_seq);
+ 
+ #endif /* _TIMEKEEPING_INTERNAL_H */
+--- a/kernel/time/tick-broadcast.c
++++ b/kernel/time/tick-broadcast.c
+@@ -664,6 +664,38 @@
+ 
+ 	clockevents_program_event(bc, expires, 1);
+ 	tick_broadcast_set_affinity(bc, cpumask_of(cpu));
++}
++
++int tick_broadcast_rate_change_supported(void)
++{
++	struct clock_event_device *bc = tick_broadcast_device.evtdev;
++
++	if (!bc)
++		return 0;
++	if ((tick_broadcast_device.mode == TICKDEV_MODE_PERIODIC &&
++	     !cpumask_empty(tick_broadcast_mask)) ||
++	    clockevent_state_periodic(bc))
++		return -EOPNOTSUPP;
++	if ((bc->features & CLOCK_EVT_FEAT_KTIME) &&
++	    !(bc->features & CLOCK_EVT_FEAT_HRTIMER))
++		return -EOPNOTSUPP;
++	return 0;
++}
++
++void tick_broadcast_clock_rate_changed(void)
++{
++	struct clock_event_device *bc;
++	unsigned long flags;
++
++	raw_spin_lock_irqsave(&tick_broadcast_lock, flags);
++	bc = tick_broadcast_device.evtdev;
++	if (bc && bc->next_event != KTIME_MAX) {
++		if (clockevent_state_oneshot_stopped(bc))
++			clockevents_switch_state(bc, CLOCK_EVT_STATE_ONESHOT);
++		if (clockevent_state_oneshot(bc))
++			clockevents_program_event(bc, bc->next_event, true);
++	}
++	raw_spin_unlock_irqrestore(&tick_broadcast_lock, flags);
+ }
+ 
+ static void tick_resume_broadcast_oneshot(struct clock_event_device *bc)
+--- a/kernel/time/tick-internal.h
++++ b/kernel/time/tick-internal.h
+@@ -129,6 +129,14 @@
+ static inline int tick_check_oneshot_change(int allow_nohz) { return 0; }
+ #endif /* !CONFIG_TICK_ONESHOT */
+ 
++#ifdef CONFIG_TICK_ONESHOT
++int tick_rate_change_supported(void);
++void tick_clock_rate_changed(void);
++#else
++static inline int tick_rate_change_supported(void) { return -EOPNOTSUPP; }
++static inline void tick_clock_rate_changed(void) { }
++#endif
++
+ /* Functions related to oneshot broadcasting */
+ #if defined(CONFIG_GENERIC_CLOCKEVENTS_BROADCAST) && defined(CONFIG_TICK_ONESHOT)
+ extern void tick_broadcast_switch_to_oneshot(void);
+@@ -136,11 +144,15 @@
+ extern void tick_check_oneshot_broadcast_this_cpu(void);
+ bool tick_broadcast_oneshot_available(void);
+ extern struct cpumask *tick_get_broadcast_oneshot_mask(void);
++extern int tick_broadcast_rate_change_supported(void);
++extern void tick_broadcast_clock_rate_changed(void);
+ #else /* !(BROADCAST && ONESHOT): */
+ static inline void tick_broadcast_switch_to_oneshot(void) { }
+ static inline int tick_broadcast_oneshot_active(void) { return 0; }
+ static inline void tick_check_oneshot_broadcast_this_cpu(void) { }
+ static inline bool tick_broadcast_oneshot_available(void) { return tick_oneshot_possible(); }
++static inline int tick_broadcast_rate_change_supported(void) { return 0; }
++static inline void tick_broadcast_clock_rate_changed(void) { }
+ #endif /* !(BROADCAST && ONESHOT) */
+ 
+ #if defined(CONFIG_GENERIC_CLOCKEVENTS_BROADCAST) && defined(CONFIG_HOTPLUG_CPU)
+--- a/kernel/time/tick-sched.c
++++ b/kernel/time/tick-sched.c
+@@ -1638,6 +1638,57 @@
+ 	ts->idle_sleeps = idle_sleeps;
+ }
+ 
++
++static int tick_rate_change_check_cpu(int cpu)
++{
++	struct tick_device *td = &per_cpu(tick_cpu_device, cpu);
++	struct clock_event_device *dev = td->evtdev;
++
++	if (!dev)
++		return -EOPNOTSUPP;
++	if (td->mode != TICKDEV_MODE_ONESHOT)
++		return -EOPNOTSUPP;
++	if (!clockevent_state_oneshot(dev) &&
++	    !clockevent_state_oneshot_stopped(dev) &&
++	    !clockevent_state_shutdown(dev))
++		return -EOPNOTSUPP;
++	if ((dev->features & CLOCK_EVT_FEAT_KTIME) &&
++	    !(dev->features & CLOCK_EVT_FEAT_HRTIMER))
++		return -EOPNOTSUPP;
++	return 0;
++}
++
++int tick_rate_change_supported(void)
++{
++	int cpu, ret;
++
++	if (!IS_ENABLED(CONFIG_TICK_ONESHOT))
++		return -EOPNOTSUPP;
++	for_each_online_cpu(cpu) {
++		ret = tick_rate_change_check_cpu(cpu);
++		if (ret)
++			return ret;
++	}
++	return tick_broadcast_rate_change_supported();
++}
++
++static void tick_reprogram_rate_changed(void *unused)
++{
++	struct tick_device *td = this_cpu_ptr(&tick_cpu_device);
++	struct clock_event_device *dev = td->evtdev;
++
++	if (dev && dev->next_event != KTIME_MAX)
++		tick_program_event(dev->next_event, true);
++}
++
++void tick_clock_rate_changed(void)
++{
++	cpus_read_lock();
++	on_each_cpu(tick_reprogram_rate_changed, NULL, 1);
++	tick_broadcast_clock_rate_changed();
++	cpus_read_unlock();
++}
++
+ /*
+  * Async notification about clocksource changes
+  */

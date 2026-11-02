@@ -29,7 +29,7 @@ class RocketChatClient:
         viv_username: str,
         channel: str = "viv-experiments",
         *,
-        timeout: float = 15.0,
+        timeout: float | None = None,
         session: requests.Session | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/") + "/"

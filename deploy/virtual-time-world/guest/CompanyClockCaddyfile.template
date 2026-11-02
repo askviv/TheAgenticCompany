@@ -1,0 +1,56 @@
+{
+	admin unix//run/tac-https/admin.sock
+	auto_https disable_redirects
+}
+
+(company_clock_tls) {
+	bind 0.0.0.0
+	tls {$COMPANY_CLOCK_TLS_CERT} {$COMPANY_CLOCK_TLS_KEY}
+}
+
+https://{$TAC_CLOCK_OWNCLOUD_HOST} {
+	import company_clock_tls
+	reverse_proxy 127.0.0.1:8092 {
+		header_up Host {$TAC_CLOCK_OWNCLOUD_UPSTREAM_HOST}:8092
+	}
+}
+
+https://{$TAC_CLOCK_CHAT_HOST} {
+	import company_clock_tls
+	reverse_proxy 127.0.0.1:3000
+}
+
+https://{$TAC_CLOCK_PLANE_HOST} {
+	import company_clock_tls
+	reverse_proxy 127.0.0.1:8091
+}
+
+https://{$TAC_CLOCK_GITLAB_HOST} {
+	import company_clock_tls
+	reverse_proxy 127.0.0.1:8929 {
+		header_up X-Forwarded-Ssl on
+	}
+}
+
+https://{$TAC_CLOCK_MAIL_HOST} {
+	import company_clock_tls
+	reverse_proxy 127.0.0.1:8112
+}
+
+https://{$TAC_CLOCK_ERP_HOST} {
+	import company_clock_tls
+	reverse_proxy 127.0.0.1:8130 {
+		header_up Host {$TAC_CLOCK_ERP_UPSTREAM_HOST}
+	}
+}
+
+https://{$TAC_CLOCK_MIDPOINT_HOST} {
+	import company_clock_tls
+	redir / /midpoint/
+	reverse_proxy 127.0.0.1:18121
+}
+
+https://{$TAC_CLOCK_EXPERIMENTS_HOST} {
+	import company_clock_tls
+	reverse_proxy 127.0.0.1:8110
+}

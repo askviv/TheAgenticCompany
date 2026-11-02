@@ -101,7 +101,7 @@ class ERPNextAdapter:
         receipt_api_secret: str | None = None,
         shipping_api_key: str | None = None,
         shipping_api_secret: str | None = None,
-        timeout: tuple[float, float] = (3.05, 20.0),
+        timeout: tuple[float, float] | None = None,
         review_action: str = "Request Review",
         review_state: str = "Review Requested",
     ):
@@ -947,11 +947,9 @@ class ERPNextSiteAdmin:
             "run", "--rm", "site-admin", operation, canonical_id,
         ]
         try:
-            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=900)
+            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=None)
         except subprocess.CalledProcessError as error:
             raise ERPNextError(f"{operation} owned ERP site") from error
-        except subprocess.TimeoutExpired as error:
-            raise ERPNextError(f"{operation} owned ERP site timed out") from error
         except OSError as error:
             raise ERPNextError(f"{operation} owned ERP site") from error
         try:
@@ -998,11 +996,9 @@ class ERPNextSiteAdmin:
                 "run", "--rm", "site-admin", operation, operation_id,
             ]
             try:
-                completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=900)
+                completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=None)
             except subprocess.CalledProcessError as error:
                 raise ERPNextError(f"{operation} native company ERPNext") from error
-            except subprocess.TimeoutExpired as error:
-                raise ERPNextError(f"{operation} native company ERPNext timed out") from error
             except OSError as error:
                 raise ERPNextError(f"{operation} native company ERPNext") from error
             try:
@@ -1161,11 +1157,9 @@ class ERPNextRetailAdmin:
             "run", "--rm", "site-admin", "seed-tau-retail", experiment_id, task_id,
         ]
         try:
-            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=900)
+            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=None)
         except subprocess.CalledProcessError as error:
             raise ERPNextError("seed τ retail task in company ERPNext") from error
-        except subprocess.TimeoutExpired as error:
-            raise ERPNextError("seed τ retail task in company ERPNext timed out") from error
         except OSError as error:
             raise ERPNextError("seed τ retail task in company ERPNext") from error
         try:
@@ -1189,11 +1183,9 @@ class ERPNextRetailAdmin:
         command = ["docker", "compose", "-f", str(self.compose_file), "--profile", "admin",
                    "run", "--rm", "site-admin", "observe-tau-retail", experiment_id, task_id]
         try:
-            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=900)
+            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=None)
         except subprocess.CalledProcessError as error:
             raise ERPNextError("observe τ retail task in company ERPNext") from error
-        except subprocess.TimeoutExpired as error:
-            raise ERPNextError("observe τ retail task in company ERPNext timed out") from error
         except OSError as error:
             raise ERPNextError("observe τ retail task in company ERPNext") from error
         try:

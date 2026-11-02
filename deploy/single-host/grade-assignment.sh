@@ -28,12 +28,31 @@ fi
 # Preserve task-local grader imports and assets from the published image, while applying reviewed source fixes.
 docker run --rm --user "$(id -u):$(id -g)" --workdir /tmp -e PYTHONPATH=/utils \
   -v "$run_dir/grader-utils:/utils" --entrypoint python_default "$image" -P /utils/encrypt.py
+inference_args=()
+if [ -n "${CODEX_INFERENCE_URL:-}" ]; then
+  inference_token_file=${CODEX_INFERENCE_BEARER_TOKEN_FILE:?CODEX_INFERENCE_BEARER_TOKEN_FILE is required with CODEX_INFERENCE_URL}
+  if [ ! -r "$inference_token_file" ]; then
+    echo "Codex inference token file is unavailable" >&2
+    exit 1
+  fi
+  inference_args+=(
+    -e "CODEX_INFERENCE_URL=$CODEX_INFERENCE_URL"
+    -e CODEX_INFERENCE_BEARER_TOKEN_FILE=/run/secrets/codex-inference-token
+    --mount "type=bind,src=$inference_token_file,dst=/run/secrets/codex-inference-token,readonly"
+  )
+  codex_args=()
+else
+  codex_args=(
+    -e CODEX_HOME=/codex-auth
+    -v "$auth_dir:/codex-auth"
+    -v /usr/local/bin/codex:/usr/local/bin/codex:ro
+  )
+fi
 docker run --rm --name "tac-grader-$run" --label tac.environment=single-host --label "tac.assignment=$run" --user "$(id -u):$(id -g)" \
   --network host --add-host the-agent-company.com:192.0.2.10 \
   --workdir /tmp -e PYTHONPATH=/utils \
-  -e CODEX_HOME=/codex-auth -e CODEX_JUDGE_MODEL=gpt-6-luna \
+  -e CODEX_JUDGE_MODEL=gpt-6-luna "${inference_args[@]}" "${codex_args[@]}" \
   -e DECRYPTION_KEY='theagentcompany is all you need' \
-  -v "$auth_dir:/codex-auth" -v /usr/local/bin/codex:/usr/local/bin/codex:ro \
   -v "$run_dir/grader-utils:/utils" -v "$run_dir/workspace:/workspace" \
   --entrypoint python_default "$image" -P /utils/eval.py --result_path /workspace/result.json "${trajectory[@]}"
 printf 'Result: %s/workspace/result.json\n' "$run_dir"

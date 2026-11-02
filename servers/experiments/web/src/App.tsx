@@ -462,7 +462,7 @@ function ActivityPage() {
 
   const saveClockSpeed = async () => {
     const speed = Number(clockSpeedInput)
-    if (!Number.isFinite(speed) || speed <= 0) return
+    if (!Number.isFinite(speed) || speed <= 0 || (company?.clock_mode === "kernel" && !Number.isInteger(speed))) return
     setClockSpeedBusy(true)
     setClockSpeedError(null)
     try {
@@ -533,7 +533,9 @@ function ActivityPage() {
       <Card>
         <CardHeader>
           <CardTitle>Company clock speed</CardTitle>
-          <CardDescription>Business events and deadlines follow company time. At 24×, one company day takes one real hour. Email delivery, security and the five-minute unread handoff use real time.</CardDescription>
+          <CardDescription>{company?.clock_mode === "kernel"
+            ? "All company systems share this clock. At 24×, one company day takes one real hour."
+            : "Business events and deadlines follow company time. At 24×, one company day takes one real hour. Email delivery, security and the five-minute unread handoff use real time."}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground" aria-live="polite">
@@ -544,10 +546,12 @@ function ActivityPage() {
           <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={(event) => { event.preventDefault(); void saveClockSpeed() }}>
             <div className="flex-1 space-y-2">
               <label htmlFor="company-clock-speed" className="text-sm font-medium">Speed multiplier</label>
-              <Input id="company-clock-speed" type="number" min="0" step="any" required value={clockSpeedInput} onChange={(event) => setClockSpeedInput(event.target.value)} aria-describedby="company-clock-speed-help" />
-              <p id="company-clock-speed-help" className="text-xs text-muted-foreground">Enter a number greater than zero. The new rate applies to the shared company clock.</p>
+              <Input id="company-clock-speed" type="number" min={company?.clock_mode === "kernel" ? "1" : "0"} step={company?.clock_mode === "kernel" ? "1" : "any"} required value={clockSpeedInput} onChange={(event) => setClockSpeedInput(event.target.value)} aria-describedby="company-clock-speed-help" />
+              <p id="company-clock-speed-help" className="text-xs text-muted-foreground">{company?.clock_mode === "kernel"
+                ? "Choose a whole number greater than zero."
+                : "Enter a number greater than zero. The new rate applies to the shared company clock."}</p>
             </div>
-            <Button type="submit" disabled={clockSpeedBusy || !Number.isFinite(Number(clockSpeedInput)) || Number(clockSpeedInput) <= 0}>
+            <Button type="submit" disabled={clockSpeedBusy || !Number.isFinite(Number(clockSpeedInput)) || Number(clockSpeedInput) <= 0 || (company?.clock_mode === "kernel" && !Number.isInteger(Number(clockSpeedInput)))}>
               {clockSpeedBusy && <LoaderCircle className="animate-spin" />}
               {clockSpeedBusy ? "Setting speed" : "Set speed"}
             </Button>

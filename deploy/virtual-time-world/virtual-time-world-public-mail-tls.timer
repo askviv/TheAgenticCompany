@@ -1,0 +1,11 @@
+[Unit]
+Description=Retry public Mailu TLS synchronization after host and guest startup
+
+[Timer]
+OnBootSec=30s
+OnUnitInactiveSec=60s
+AccuracySec=1s
+Unit=virtual-time-world-public-mail-tls.service
+
+[Install]
+WantedBy=timers.target

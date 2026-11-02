@@ -44,7 +44,7 @@ def create_provider_portal_app(config_path: str | Path):
         raise ValueError("Native τ provider worker authentication is not configured")
     worker = NativeProviderHTTPClient(
         str(portal_config["provider_worker_url"]), token.get_secret_value(),
-        timeout=runtime.actor_workers.request_timeout_seconds or 180,
+        timeout=runtime.actor_workers.request_timeout_seconds,
     )
     return create_app(
         store=SQLiteStore(runtime.state_root / "state.sqlite"),

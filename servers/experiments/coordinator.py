@@ -27,7 +27,7 @@ class CoordinatorError(RuntimeError):
 
 
 class SimulationCoordinatorClient:
-    def __init__(self, base_url: str, token: str, *, timeout: float = 15.0,
+    def __init__(self, base_url: str, token: str, *, timeout: float | None = None,
                  session: requests.Session | None = None,
                  session_factory: Any = requests.Session):
         if not base_url or not token:

@@ -145,6 +145,7 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
             )
             return {"company_id": "company", "status": "not_started", "simulated_time": None,
                     "paused": False, "erp_site_id": None,
+                    "clock_mode": getattr(engine, "company_clock_mode", "shared"),
                     "experiments": provider_experiments, "activity": provider_activity}
         experiments = []
         for record in engine.store.company_experiments("company"):
@@ -218,6 +219,7 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         activity.sort(key=lambda item: (str(item.get("timestamp", "")), str(item["id"])))
         result = {"company_id": "company", "background": background_status, "status": company["status"],
                   "simulated_time": company["simulated_time"], "paused": company["paused"],
+                  "clock_mode": getattr(engine, "company_clock_mode", "shared"),
                   "erp_site_id": company["erp_binding"]["site_name"],
                   "experiments": experiments, "activity": activity}
         speed_reader = getattr(engine, "company_clock_speed_reader", None)
@@ -225,7 +227,7 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
             try:
                 result["clock_speed"] = speed_reader()
             except Exception as error:
-                logger.exception("Shared company clock speed read failed exception_type=%s",
+                logger.exception("Company clock speed read failed exception_type=%s",
                                  type(error).__name__)
         return result
 
@@ -630,8 +632,13 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         require_role(principal, "controller")
         setter = getattr(engine, "company_clock_speed_setter", None)
         if not callable(setter):
-            raise HTTPException(status_code=503, detail="Shared company clock speed control is unavailable")
-        result = setter(model.speed, key)
+            raise HTTPException(status_code=503, detail="Company clock speed control is unavailable")
+        if getattr(engine, "company_clock_mode", None) == "kernel":
+            if not model.speed.is_integer():
+                raise HTTPException(status_code=422, detail="Kernel clock speed must be a positive integer")
+            result = setter(int(model.speed), key)
+        else:
+            result = setter(model.speed, key)
         wake = getattr(engine, "company_clock_wake", None)
         if wake:
             wake()

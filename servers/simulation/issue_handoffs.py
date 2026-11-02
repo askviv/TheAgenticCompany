@@ -67,9 +67,15 @@ class IssueHandoffStore:
             connection.execute("""CREATE TABLE IF NOT EXISTS company_issue_handoffs (
                 issue_key TEXT PRIMARY KEY, notification_json TEXT NOT NULL,
                 stage TEXT NOT NULL CHECK(stage IN ('waiting','read','submitting','uncertain','sent')),
-                delivered_at TEXT, deadline_at TEXT, read_at TEXT,
+                delivered_at TEXT, deadline_at TEXT, observed_unread_real_at TEXT,
+                timing_basis TEXT, read_at TEXT,
                 receipt_json TEXT, handoff_json TEXT, handoff_receipt_json TEXT,
                 last_error TEXT, updated_at TEXT NOT NULL)""")
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(company_issue_handoffs)")}
+            if "observed_unread_real_at" not in columns:
+                connection.execute("ALTER TABLE company_issue_handoffs ADD COLUMN observed_unread_real_at TEXT")
+            if "timing_basis" not in columns:
+                connection.execute("ALTER TABLE company_issue_handoffs ADD COLUMN timing_basis TEXT")
 
     def register(self, notification: IssueNotification, now: datetime) -> dict:
         payload = notification.model_dump(mode="json")
@@ -107,7 +113,7 @@ class IssueHandoffStore:
             return [dict(row) for row in connection.execute(
                 "SELECT * FROM company_issue_handoffs WHERE delivered_at IS NOT NULL ORDER BY delivered_at,issue_key")]
 
-    def observe(self, key: str, receipt: dict, now: datetime) -> dict:
+    def observe(self, key: str, receipt: dict, now: datetime, *, kernel_mode: bool = False) -> dict:
         received_at = utc(datetime.fromisoformat(receipt["received_at"]))
         with self.store.transaction() as connection:
             row = connection.execute("SELECT * FROM company_issue_handoffs WHERE issue_key=?", (key,)).fetchone()
@@ -116,11 +122,18 @@ class IssueHandoffStore:
             if row["stage"] in (Stage.READ, Stage.SENT, Stage.SUBMITTING, Stage.UNCERTAIN):
                 return dict(row)
             delivered = row["delivered_at"] or received_at.isoformat()
-            deadline = row["deadline_at"] or (received_at + TIMEOUT).isoformat()
+            anchor = row["observed_unread_real_at"]
+            if kernel_mode and not receipt["seen"] and anchor is None:
+                anchor = utc(now).isoformat()
+            deadline = row["deadline_at"] or (
+                (datetime.fromisoformat(anchor) + TIMEOUT).isoformat() if anchor else
+                (received_at + TIMEOUT).isoformat())
+            basis = row["timing_basis"] or ("first_unread_observation" if kernel_mode and anchor else None)
             stage = Stage.READ if receipt["seen"] else Stage.WAITING
             connection.execute("""UPDATE company_issue_handoffs SET stage=?, delivered_at=?,
-                deadline_at=?,read_at=?,receipt_json=?,last_error=NULL,updated_at=? WHERE issue_key=?""",
-                (stage, delivered, deadline, utc(now).isoformat() if receipt["seen"] else None,
+                deadline_at=?,observed_unread_real_at=?,timing_basis=?,read_at=?,receipt_json=?,
+                last_error=NULL,updated_at=? WHERE issue_key=?""",
+                (stage, delivered, deadline, anchor, basis, utc(now).isoformat() if receipt["seen"] else None,
                  json.dumps(receipt, sort_keys=True), utc(now).isoformat(), key))
         return self.get(key)
 
@@ -161,20 +174,31 @@ class IssueHandoffStore:
 class SystemdIssueScheduler:
     """Native wall-clock timers; durable SQLite is authoritative after reboot."""
     def __init__(self, config_path: Path, *, executable: str, source_root: Path,
-                 state_root: Path, runner=subprocess.run):
+                 state_root: Path, runner=subprocess.run, command_factory=None,
+                 registration_client=None):
         self.config_path, self.executable, self.source_root = config_path, executable, source_root
         self.state_root = state_root
         self.runner = runner
+        self.command_factory = command_factory
+        self.registration_client = registration_client
 
     def schedule(self, key: str, deadline: datetime) -> None:
         if not re.fullmatch(r"[0-9a-f]{64}", key):
             raise ValueError("Invalid issue timer identity")
+        if self.registration_client is not None:
+            self.registration_client.register_deadline(key, utc(deadline))
+            return
         unit = f"tac-issue-handoff-{key}"
         existing = self.runner(["systemctl", "is-active", "--quiet", unit + ".timer"],
                                check=False, capture_output=True, timeout=30)
         if existing.returncode == 0:
             return
         scheduled_at = utc(deadline)
+        if scheduled_at <= datetime.now(timezone.utc):
+            # A transient calendar timer in the past is immediately recreated
+            # by monitor reconciliation. Back off while retaining the original
+            # durable deadline as the source of truth.
+            scheduled_at = datetime.now(timezone.utc) + timedelta(seconds=30)
         if scheduled_at.microsecond:
             scheduled_at = scheduled_at.replace(microsecond=0) + timedelta(seconds=1)
         command = [
@@ -185,9 +209,11 @@ class SystemdIssueScheduler:
             "--property=NoNewPrivileges=yes", "--property=ProtectSystem=strict",
             "--property=ProtectHome=yes",
             "--property=ReadWritePaths=" + str(self.state_root),
+        ]
+        command += (self.command_factory(key) if self.command_factory else [
             self.executable, "-m", "servers.simulation.issue_handoff_runtime",
             "--config", str(self.config_path), "--issue-key", key,
-        ]
+        ])
         try:
             self.runner(command, check=True, capture_output=True, timeout=30)
         except subprocess.CalledProcessError:
@@ -200,11 +226,13 @@ class SystemdIssueScheduler:
 
 class IssueHandoffService:
     def __init__(self, store: IssueHandoffStore, mail, scheduler, *, actors: list[dict],
-                 erp_public_url: str, now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
+                 erp_public_url: str, kernel_mode: bool = False,
+                 now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
         self.store, self.mail, self.scheduler = store, mail, scheduler
         self.actors = {actor["email"].casefold(): actor for actor in actors}
         self.viv = next(actor for actor in actors if actor["actor_id"] == "viv")
         self.erp_public_url = erp_public_url.rstrip("/")
+        self.kernel_mode = kernel_mode
         self.now = now
 
     def register(self, records: list[dict]) -> None:
@@ -278,7 +306,7 @@ class IssueHandoffService:
                 if row["delivered_at"]:
                     raise RuntimeError("Previously delivered issue notification is no longer locatable")
                 return
-            row = self.store.observe(key, receipt, now)
+            row = self.store.observe(key, receipt, now, kernel_mode=self.kernel_mode)
             if row["stage"] == Stage.READ:
                 return
             deadline = datetime.fromisoformat(row["deadline_at"])
@@ -292,13 +320,13 @@ class IssueHandoffService:
             receipt = self.mail.inspect_issue_notification(actor, record.message_id)
             if receipt is None:
                 return
-            if self.store.observe(key, receipt, now)["stage"] == Stage.READ:
+            if self.store.observe(key, receipt, now, kernel_mode=self.kernel_mode)["stage"] == Stage.READ:
                 return
             def submission_started():
                 latest = self.mail.inspect_issue_notification(actor, record.message_id)
                 if latest is None:
                     raise RuntimeError("Issue notification receipt disappeared before submission")
-                if self.store.observe(key, latest, self.now())["stage"] == Stage.READ:
+                if self.store.observe(key, latest, self.now(), kernel_mode=self.kernel_mode)["stage"] == Stage.READ:
                     raise ReadBeforeHandoff()
                 self.store.mark_submitting(key, intent, self.now())
             result = self.mail.send(actor, self.viv, intent["subject"], intent["body"], intent["message_id"],

@@ -65,7 +65,8 @@ def _now() -> str:
 class SQLiteStore:
     """SQLite-backed run state with explicit generation-scoped records."""
 
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, *, busy_timeout_seconds: float = 30):
+        self.busy_timeout_seconds = busy_timeout_seconds
         self.db_path = Path(db_path)
         if str(db_path) == ":memory:":
             raise ValueError("SQLiteStore requires a durable database path")
@@ -75,9 +76,9 @@ class SQLiteStore:
             self.db_path.chmod(0o600)
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
+        connection = sqlite3.connect(self.db_path, timeout=self.busy_timeout_seconds, isolation_level=None)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout = 30000")
+        connection.execute(f"PRAGMA busy_timeout = {int(self.busy_timeout_seconds * 1000)}")
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 

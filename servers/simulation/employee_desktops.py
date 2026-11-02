@@ -30,6 +30,11 @@ from servers.simulation.employee_desktop_proxy import CaddyEmployeeDesktopProxy
 
 
 DEFAULT_SELKIES_IMAGE = "tac-selkies-desktop:2.1.0-ubuntu26.04-socat1"
+EMPLOYEE_DESKTOP_IMAGE_ENV = "EMPLOYEE_DESKTOP_IMAGE"
+EMPLOYEE_DESKTOP_CA_FILE_ENV = "EMPLOYEE_DESKTOP_CA_FILE"
+EMPLOYEE_DESKTOP_CA_CONTAINER_PATH = "/run/company-clock/internal-root-ca.crt"
+EMPLOYEE_DESKTOP_CA_NSS_DB = "/home/ubuntu/.pki/nssdb"
+EMPLOYEE_DESKTOP_CA_NICKNAME = "TheAgentCompany Shared Clock Internal CA"
 MANAGED_LABEL = "tac.employee-desktop.managed"
 EMPLOYEE_LABEL = "tac.employee-desktop.employee-id"
 _CDP_READY = threading.Event()
@@ -65,14 +70,18 @@ class EmployeeDesktopRuntime:
         caddy_proxy: CaddyEmployeeDesktopProxy | None = None,
         docker_binary: str = "docker",
         image: str = DEFAULT_SELKIES_IMAGE,
+        ca_file: str | Path | None = None,
     ):
-        if image != DEFAULT_SELKIES_IMAGE:
-            raise ValueError("image must be the built socat derivative of the pinned official Selkies image")
+        if not isinstance(image, str) or not image.strip():
+            raise ValueError("employee desktop image must be a non-empty image reference")
+        if ca_file is not None and not Path(ca_file).is_absolute():
+            raise ValueError("employee desktop CA file must be configured as an absolute path")
         self.company_profile_path = Path(company_profile_path)
         self.state_root = Path(state_root)
         self.caddy_proxy = caddy_proxy
         self.docker_binary = docker_binary
-        self.image = image
+        self.image = image.strip()
+        self.ca_file = Path(ca_file) if ca_file is not None else None
         self._idle_workers: dict[str, tuple[threading.Thread, threading.Event]] = {}
         self._idle_workers_lock = threading.Lock()
         self._idle_reconcile_thread: threading.Thread | None = None
@@ -157,6 +166,7 @@ class EmployeeDesktopRuntime:
             raise KeyError(employee_id)
         if self.caddy_proxy is None:
             raise EmployeeDesktopError("trusted HTTPS employee desktop proxy is not configured")
+        self._require_ca_file()
         self._ensure_private_state_root()
 
         with self._lifecycle_lock(employee_id):
@@ -196,6 +206,8 @@ class EmployeeDesktopRuntime:
 
             if not self._container_port_open(container, 9222):
                 self._wait_for_display(container)
+                if self.ca_file is not None:
+                    self._install_employee_desktop_ca(container)
                 self._launch_chrome(container)
             if not self._container_port_open(container, 9223):
                 self._launch_cdp_relay(container)
@@ -651,6 +663,12 @@ class EmployeeDesktopRuntime:
             "Employee desktop image is unavailable; rerun coordinator bootstrap to provision it"
         )
 
+    def _require_ca_file(self) -> None:
+        if self.ca_file is not None and (self.ca_file.is_symlink() or not self.ca_file.is_file()):
+            raise EmployeeDesktopError(
+                "employee desktop internal TLS CA must be an existing regular file"
+            )
+
     def _ensure_network(self, network: str, employee_id: str) -> None:
         result = self._docker("network", "inspect", network, check=False)
         if result.returncode == 0:
@@ -682,10 +700,43 @@ class EmployeeDesktopRuntime:
             "--volume", f"{volume}:/home/ubuntu",
             "--env-file", str(env_file),
         ]
+        if self.ca_file is not None:
+            arguments.extend((
+                "--mount",
+                f"type=bind,source={self.ca_file},target={EMPLOYEE_DESKTOP_CA_CONTAINER_PATH},readonly",
+            ))
         for hostname, address in self.caddy_proxy.host_mappings():
             arguments.extend(("--add-host", f"{hostname}:{address}"))
         arguments.append(self.image)
         self._docker(*arguments)
+
+    def _install_employee_desktop_ca(self, container: str) -> None:
+        """Trust the guest Caddy root in Chrome's persistent NSS profile."""
+        db = EMPLOYEE_DESKTOP_CA_NSS_DB
+        self._docker("exec", "--user", "ubuntu", container, "mkdir", "-p", db)
+        db_exists = self._docker(
+            "exec", "--user", "ubuntu", container, "test", "-f", f"{db}/cert9.db",
+            check=False,
+        )
+        if db_exists.returncode == 1:
+            self._docker("exec", "--user", "ubuntu", container,
+                         "certutil", "-N", "-d", f"sql:{db}", "--empty-password")
+        elif db_exists.returncode != 0:
+            raise EmployeeDesktopError("Chrome's internal CA trust database could not be checked")
+
+        listing = self._docker("exec", "--user", "ubuntu", container,
+                               "certutil", "-L", "-d", f"sql:{db}")
+        has_ca = any(line.rsplit(maxsplit=1)[0].strip() == EMPLOYEE_DESKTOP_CA_NICKNAME
+                     for line in listing.stdout.splitlines() if line.strip())
+        if has_ca:
+            self._docker("exec", "--user", "ubuntu", container,
+                         "certutil", "-D", "-d", f"sql:{db}",
+                         "-n", EMPLOYEE_DESKTOP_CA_NICKNAME)
+        self._docker(
+            "exec", "--user", "ubuntu", container,
+            "certutil", "-A", "-d", f"sql:{db}", "-n", EMPLOYEE_DESKTOP_CA_NICKNAME,
+            "-t", "C,,", "-i", EMPLOYEE_DESKTOP_CA_CONTAINER_PATH,
+        )
 
     def _launch_chrome(self, container: str) -> None:
         # The official Selkies desktop image installs Google Chrome and patches
@@ -823,6 +874,19 @@ class EmployeeDesktopRuntime:
             raise EmployeeDesktopError("employee desktop container name is already owned by another resource")
         if (inspect.get("Config") or {}).get("Image") != self.image:
             raise EmployeeDesktopError("employee desktop container uses a different image than configured")
+        self._validate_ca_mount(inspect)
+
+    def _validate_ca_mount(self, inspect: dict[str, Any]) -> None:
+        mounts = [row for row in (inspect.get("Mounts") or [])
+                  if row.get("Destination") == EMPLOYEE_DESKTOP_CA_CONTAINER_PATH]
+        if self.ca_file is None:
+            if mounts:
+                raise EmployeeDesktopError("employee desktop has an unexpected internal TLS CA mount")
+            return
+        if (len(mounts) != 1 or mounts[0].get("Type") != "bind"
+                or mounts[0].get("Source") != str(self.ca_file)
+                or mounts[0].get("RW") is not False):
+            raise EmployeeDesktopError("employee desktop internal TLS CA mount differs from configuration")
 
     @staticmethod
     def _validate_mount(inspect: dict[str, Any], volume: str) -> None:

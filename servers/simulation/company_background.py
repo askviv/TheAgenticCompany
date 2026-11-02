@@ -507,7 +507,7 @@ class CompanyBackgroundService:
         self.stopped.set()
         self.changed.set()
         if self.thread is not None:
-            self.thread.join(timeout=2)
+            self.thread.join()
 
     def status(self) -> dict[str, Any]:
         with self._lock:

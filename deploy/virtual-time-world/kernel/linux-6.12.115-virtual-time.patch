@@ -1,0 +1,338 @@
+--- a/kernel/time/timekeeping.c
++++ b/kernel/time/timekeeping.c
+@@ -5,6 +5,8 @@
+  */
+ #include <linux/timekeeper_internal.h>
+ #include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/math.h>
+ #include <linux/interrupt.h>
+ #include <linux/percpu.h>
+ #include <linux/init.h>
+@@ -24,6 +26,8 @@
+ #include <linux/compiler.h>
+ #include <linux/audit.h>
+ #include <linux/random.h>
++#include <linux/overflow.h>
++#include <linux/panic.h>
+ 
+ #include "tick-internal.h"
+ #include "ntp_internal.h"
+@@ -42,6 +46,22 @@
+ };
+ 
+ DEFINE_RAW_SPINLOCK(timekeeper_lock);
++
++/* Fixed for the lifetime of the kernel; see the virtual_time= boot option. */
++unsigned int timekeeping_virtual_rate __read_mostly = 1;
++
++static int __init virtual_time_setup(char *str)
++{
++	unsigned int rate;
++
++	if (kstrtouint(str, 0, &rate) || !rate ||
++	    rate > S64_MAX / ((u64)NTP_INTERVAL_LENGTH << NTP_SCALE_SHIFT))
++		panic("virtual_time: rate is outside the supported integer range");
++
++	timekeeping_virtual_rate = rate;
++	return 0;
++}
++early_param("virtual_time", virtual_time_setup);
+ 
+ /*
+  * The most important data for readout fits into a single 64 byte
+@@ -210,6 +230,7 @@
+ {
+ 	u64 interval;
+ 	u64 tmp, ntpinterval;
++	u32 mult, shift;
+ 	struct clocksource *old_clock;
+ 
+ 	++tk->cs_was_changed_seq;
+@@ -222,10 +243,13 @@
+ 	tk->tkr_raw.mask = clock->mask;
+ 	tk->tkr_raw.cycle_last = tk->tkr_mono.cycle_last;
+ 
+-	/* Do the ns -> cycle conversion first, using original mult */
++	/*
++	 * Keep cycle_interval in physical cycles. Scale only the conversion
++	 * from cycles to guest nanoseconds, so the clocksource remains a real
++	 * hardware counter while the timekeeper advances faster.
++	 */
+ 	tmp = NTP_INTERVAL_LENGTH;
+ 	tmp <<= clock->shift;
+-	ntpinterval = tmp;
+ 	tmp += clock->mult/2;
+ 	do_div(tmp, clock->mult);
+ 	if (tmp == 0)
+@@ -234,14 +258,41 @@
+ 	interval = (u64) tmp;
+ 	tk->cycle_interval = interval;
+ 
+-	/* Go back from cycles -> shifted ns */
+-	tk->xtime_interval = interval * clock->mult;
++	shift = clock->shift;
++	mult = clock->mult;
++	if (timekeeping_virtual_rate > 1) {
++		u64 scaled_mult = (u64)clock->mult * timekeeping_virtual_rate;
++		u64 rate_mult = scaled_mult;
++		unsigned int shift_drop = 0;
++
++		/*
++		 * Keep the multiplier representable. Reducing both mult and
++		 * shift by the same power of two preserves the conversion, with
++		 * only the rounding error inherent in the reduced precision.
++		 */
++		while (scaled_mult >= U32_MAX) {
++			if (++shift_drop > shift)
++				panic("virtual_time: rate %u unsupported by clocksource %s",
++				      timekeeping_virtual_rate, clock->name);
++			scaled_mult = DIV_ROUND_CLOSEST_ULL(rate_mult,
++							  1ULL << shift_drop);
++		}
++		shift -= shift_drop;
++		mult = scaled_mult;
++	}
++
++	/* The expected time interval is scaled in guest time, not host time. */
++	ntpinterval = (u64)NTP_INTERVAL_LENGTH * timekeeping_virtual_rate;
++	ntpinterval <<= shift;
++
++	/* Go back from cycles -> shifted guest ns. */
++	tk->xtime_interval = interval * mult;
+ 	tk->xtime_remainder = ntpinterval - tk->xtime_interval;
+-	tk->raw_interval = interval * clock->mult;
++	tk->raw_interval = interval * mult;
+ 
+ 	 /* if changing clocks, convert xtime_nsec shift units */
+ 	if (old_clock) {
+-		int shift_change = clock->shift - old_clock->shift;
++		int shift_change = shift - tk->tkr_mono.shift;
+ 		if (shift_change < 0) {
+ 			tk->tkr_mono.xtime_nsec >>= -shift_change;
+ 			tk->tkr_raw.xtime_nsec >>= -shift_change;
+@@ -251,11 +302,11 @@
+ 		}
+ 	}
+ 
+-	tk->tkr_mono.shift = clock->shift;
+-	tk->tkr_raw.shift = clock->shift;
++	tk->tkr_mono.shift = shift;
++	tk->tkr_raw.shift = shift;
+ 
+ 	tk->ntp_error = 0;
+-	tk->ntp_error_shift = NTP_SCALE_SHIFT - clock->shift;
++	tk->ntp_error_shift = NTP_SCALE_SHIFT - shift;
+ 	tk->ntp_tick = ntpinterval << tk->ntp_error_shift;
+ 
+ 	/*
+@@ -263,10 +314,23 @@
+ 	 * active clocksource. These value will be adjusted via NTP
+ 	 * to counteract clock drifting.
+ 	 */
+-	tk->tkr_mono.mult = clock->mult;
+-	tk->tkr_raw.mult = clock->mult;
++	tk->tkr_mono.mult = mult;
++	tk->tkr_raw.mult = mult;
+ 	tk->ntp_err_mult = 0;
+ 	tk->skip_second_overflow = 0;
++}
++
++u64 timekeeping_max_cycles(u64 source_max_cycles, u32 mult, u32 shift)
++{
++	u64 max_cycles = source_max_cycles;
++
++	if (timekeeping_virtual_rate > 1) {
++		u64 max_nsec = (u64)NSEC_PER_SEC << shift;
++		u64 safe_cycles = div64_u64(U64_MAX - max_nsec, mult);
++
++		max_cycles = min(max_cycles, safe_cycles);
++	}
++	return max_cycles;
+ }
+ 
+ /* Timekeeper helper functions. */
+@@ -284,7 +348,8 @@
+ 	 * This detects both negative motion and the case where the delta
+ 	 * overflows the multiplication with tkr->mult.
+ 	 */
+-	if (unlikely(delta > tkr->clock->max_cycles)) {
++	if (unlikely(delta > tkr->clock->max_cycles ||
++		     timekeeping_virtual_rate > 1)) {
+ 		/*
+ 		 * Handle clocksource inconsistency between CPUs to prevent
+ 		 * time from going backwards by checking for the MSB of the
+@@ -701,7 +766,15 @@
+ 
+ 	while (delta > 0) {
+ 		u64 max = tk->tkr_mono.clock->max_cycles;
+-		u64 incr = delta < max ? delta : max;
++		u64 incr;
++
++		if (timekeeping_virtual_rate > 1) {
++			max = timekeeping_max_cycles(max, tk->tkr_mono.mult,
++						    tk->tkr_mono.shift);
++			max = timekeeping_max_cycles(max, tk->tkr_raw.mult,
++						    tk->tkr_raw.shift);
++		}
++		incr = delta < max ? delta : max;
+ 
+ 		tk->tkr_mono.xtime_nsec += incr * tk->tkr_mono.mult;
+ 		tk->tkr_raw.xtime_nsec += incr * tk->tkr_raw.mult;
+@@ -1596,6 +1669,16 @@
+ 		seq = read_seqcount_begin(&tk_core.seq);
+ 
+ 		ret = tk->tkr_mono.clock->max_idle_ns;
++		if (timekeeping_virtual_rate > 1) {
++			u64 max_cycles = timekeeping_max_cycles(
++				tk->tkr_mono.clock->max_cycles,
++				tk->tkr_mono.mult, tk->tkr_mono.shift);
++
++			ret = min_t(u64, ret,
++				    clocksource_cyc2ns(max_cycles >> 1,
++						       tk->tkr_mono.clock->mult,
++						       tk->tkr_mono.clock->shift));
++		}
+ 
+ 	} while (read_seqcount_retry(&tk_core.seq, seq));
+ 
+@@ -2047,6 +2130,25 @@
+ 	tk->ntp_error += offset << tk->ntp_error_shift;
+ }
+ 
++/* Return the NTP tick length in the timekeeper's scaled units. */
++static u64 timekeeping_scaled_ntp_tick_length(void)
++{
++	u64 tick;
++	u64 scaled_tick;
++
++	if (timekeeping_virtual_rate == 1)
++		return ntp_tick_length();
++	tick = ntp_tick_length();
++	if (check_mul_overflow(tick, (u64)timekeeping_virtual_rate,
++			       &scaled_tick))
++		panic("virtual_time: scaled NTP tick length overflow");
++	tick = scaled_tick;
++	if (tick > S64_MAX)
++		panic("virtual_time: scaled NTP tick length is too large");
++
++	return tick;
++}
++
+ /*
+  * Adjust the timekeeper's multiplier to the correct frequency
+  * and also to reduce the accumulated error value.
+@@ -2054,15 +2156,16 @@
+ static void timekeeping_adjust(struct timekeeper *tk, s64 offset)
+ {
+ 	u32 mult;
++	u64 ntp_tick = timekeeping_scaled_ntp_tick_length();
+ 
+ 	/*
+ 	 * Determine the multiplier from the current NTP tick length.
+ 	 * Avoid expensive division when the tick length doesn't change.
+ 	 */
+-	if (likely(tk->ntp_tick == ntp_tick_length())) {
++	if (likely(tk->ntp_tick == ntp_tick)) {
+ 		mult = tk->tkr_mono.mult - tk->ntp_err_mult;
+ 	} else {
+-		tk->ntp_tick = ntp_tick_length();
++		tk->ntp_tick = ntp_tick;
+ 		mult = div64_u64((tk->ntp_tick >> tk->ntp_error_shift) -
+ 				 tk->xtime_remainder, tk->cycle_interval);
+ 	}
+@@ -2078,7 +2181,8 @@
+ 
+ 	timekeeping_apply_adjustment(tk, offset, mult - tk->tkr_mono.mult);
+ 
+-	if (unlikely(tk->tkr_mono.clock->maxadj &&
++	if (unlikely(timekeeping_virtual_rate == 1 &&
++		     tk->tkr_mono.clock->maxadj &&
+ 		(abs(tk->tkr_mono.mult - tk->tkr_mono.clock->mult)
+ 			> tk->tkr_mono.clock->maxadj))) {
+ 		printk_once(KERN_WARNING
+@@ -2233,7 +2337,7 @@
+ 	shift = ilog2(offset) - ilog2(tk->cycle_interval);
+ 	shift = max(0, shift);
+ 	/* Bound shift to one less than what overflows tick_length */
+-	maxshift = (64 - (ilog2(ntp_tick_length())+1)) - 1;
++	maxshift = (64 - (ilog2(timekeeping_scaled_ntp_tick_length()) + 1)) - 1;
+ 	shift = min(shift, maxshift);
+ 	while (offset >= tk->cycle_interval) {
+ 		offset = logarithmic_accumulation(tk, offset, shift,
+--- a/kernel/time/timekeeping_internal.h
++++ b/kernel/time/timekeeping_internal.h
+@@ -29,4 +29,8 @@
+ /* Semi public for serialization of non timekeeper VDSO updates. */
+ extern raw_spinlock_t timekeeper_lock;
+ 
++/* Fixed boot-time scale shared with the generic clockevent conversion. */
++extern unsigned int timekeeping_virtual_rate;
++u64 timekeeping_max_cycles(u64 source_max_cycles, u32 mult, u32 shift);
++
+ #endif /* _TIMEKEEPING_INTERNAL_H */
+--- a/kernel/time/clockevents.c
++++ b/kernel/time/clockevents.c
+@@ -10,11 +10,13 @@
+ #include <linux/clockchips.h>
+ #include <linux/hrtimer.h>
+ #include <linux/init.h>
++#include <linux/math.h>
+ #include <linux/module.h>
+ #include <linux/smp.h>
+ #include <linux/device.h>
+ 
+ #include "tick-internal.h"
++#include "timekeeping_internal.h"
+ 
+ /* The registered clock event devices */
+ static LIST_HEAD(clockevent_devices);
+@@ -319,13 +321,24 @@
+ 	WARN_ONCE(!clockevent_state_oneshot(dev), "Current state: %d\n",
+ 		  clockevent_get_state(dev));
+ 
+-	/* Shortcut for clockevent devices that can deal with ktime. */
++	/*
++	 * KTIME devices consume logical absolute deadlines. In this kernel the
++	 * KTIME device is the broadcast hrtimer proxy; its eventual hardware
++	 * event is translated below when that hrtimer is programmed.
++	 */
+ 	if (dev->features & CLOCK_EVT_FEAT_KTIME)
+ 		return dev->set_next_ktime(expires, dev);
+ 
+ 	delta = ktime_to_ns(ktime_sub(expires, ktime_get()));
+ 	if (delta <= 0)
+ 		return force ? clockevents_program_min_delta(dev) : -ETIME;
++	/*
++	 * @delta is in accelerated guest nanoseconds; clockevent devices
++	 * count real host nanoseconds. Round up so a deadline is never early.
++	 */
++	if (timekeeping_virtual_rate > 1)
++		delta = DIV_ROUND_UP_ULL((u64)delta,
++					 timekeeping_virtual_rate);
+ 
+ 	delta = min(delta, (int64_t) dev->max_delta_ns);
+ 	delta = max(delta, (int64_t) dev->min_delta_ns);
+--- a/kernel/time/vsyscall.c
++++ b/kernel/time/vsyscall.c
+@@ -23,14 +23,18 @@
+ 
+ 	vdata[CS_HRES_COARSE].cycle_last	= tk->tkr_mono.cycle_last;
+ #ifdef CONFIG_GENERIC_VDSO_OVERFLOW_PROTECT
+-	vdata[CS_HRES_COARSE].max_cycles	= tk->tkr_mono.clock->max_cycles;
++	vdata[CS_HRES_COARSE].max_cycles	= timekeeping_max_cycles(
++		tk->tkr_mono.clock->max_cycles, tk->tkr_mono.mult,
++		tk->tkr_mono.shift);
+ #endif
+ 	vdata[CS_HRES_COARSE].mask		= tk->tkr_mono.mask;
+ 	vdata[CS_HRES_COARSE].mult		= tk->tkr_mono.mult;
+ 	vdata[CS_HRES_COARSE].shift		= tk->tkr_mono.shift;
+ 	vdata[CS_RAW].cycle_last		= tk->tkr_raw.cycle_last;
+ #ifdef CONFIG_GENERIC_VDSO_OVERFLOW_PROTECT
+-	vdata[CS_RAW].max_cycles		= tk->tkr_raw.clock->max_cycles;
++	vdata[CS_RAW].max_cycles		= timekeeping_max_cycles(
++		tk->tkr_raw.clock->max_cycles, tk->tkr_raw.mult,
++		tk->tkr_raw.shift);
+ #endif
+ 	vdata[CS_RAW].mask			= tk->tkr_raw.mask;
+ 	vdata[CS_RAW].mult			= tk->tkr_raw.mult;

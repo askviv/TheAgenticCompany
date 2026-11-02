@@ -591,7 +591,12 @@ class SimulationEngine:
         return str(UUID(hex=match.group(1)))
 
     def company_state(self) -> dict[str, Any] | None:
-        return self.store.get_company("company")
+        company = self.store.get_company("company")
+        if company is not None and getattr(self, "company_clock_mode", None) == "kernel":
+            # The kernel owns current time. The saved value is a processing
+            # checkpoint and must not freeze the display while work is pending.
+            company["simulated_time"] = datetime.now(timezone.utc).isoformat()
+        return company
 
     def start_company(self, binding: dict[str, Any], key: str) -> dict[str, Any]:
         key = self._key(key)
@@ -653,15 +658,28 @@ class SimulationEngine:
         on the next tick or after restart.
         """
         clock_provider = getattr(self, "company_time_provider", None)
-        now = self._time(now or (clock_provider() if callable(clock_provider) else datetime.now(timezone.utc)))
         with self._operation_guard("company-time"):
+            if getattr(self, "company_clock_mode", None) == "kernel":
+                now = None  # Sample the kernel after acquiring the clock-state lock.
+            now = self._time(now or (clock_provider() if callable(clock_provider) else datetime.now(timezone.utc)))
             company = self.store.get_company("company")
             if company is None:
                 return company
             before = self._time(company["simulated_time"])
-            anchor = self._time(company["wall_anchor"])
-            effective_now = max(now, anchor)
-            target = before + (effective_now - anchor)
+            if getattr(self, "company_clock_mode", None) == "kernel":
+                if now < before:
+                    raise EngineConflict(
+                        "guest kernel time precedes persisted company time; seed the guest clock at or after company time"
+                    )
+                # The guest kernel already advances the absolute UTC epoch at
+                # the selected rate. Applying the prior wall-anchor delta would
+                # retain an offset from the previous company clock.
+                effective_now = now
+                target = now
+            else:
+                anchor = self._time(company["wall_anchor"])
+                effective_now = max(now, anchor)
+                target = before + (effective_now - anchor)
             # Commit first so another tick can advance the shared clock even
             # while the ordered dispatcher waits on external I/O.
             reserved = self.store.update_company("company", simulated_time=target, wall_anchor=effective_now)

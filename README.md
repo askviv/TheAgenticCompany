@@ -89,6 +89,7 @@ target deployment before starting the stack.
 | [ERPNext runtime](docs/enterprise-simulation/erpnext-runtime.md) | Existing company site, roles and native integration evidence |
 | [Coordinator deployment](deploy/enterprise-simulation/coordinator/README.md) | Private configuration, bootstrap, service operations and persistence |
 | [Actor workers](deploy/enterprise-simulation/actors/README.md) | Pinned upstream runtimes, isolated environments and Codex transport |
+| [Virtual-time VM](deploy/virtual-time-world/README.md) | Whole-company guest kernel clock, host control and migration boundaries |
 | [Dashboard operation](docs/enterprise-simulation/company-dashboard.md) | Shared-company experiment and activity flow |
 | [Identity/email delivery contracts](servers/company/README.md) | Durable mail/chat delivery, ownCloud source references and retries |
 

@@ -222,11 +222,11 @@ class WorkerTurnFailed(Exception):
 
 
 def codex_supplier_model_factory(settings: Any) -> Callable[[ActorTurnRequest], CodexCoffeeModel]:
-    """Create the Coffee Model bridge over the shared Codex CLI transport."""
-    from servers.simulation.codex_model import CodexCLIModel
+    """Create the Coffee Model bridge over the shared inference transport."""
+    from servers.simulation.codex_remote import create_codex_transport
 
     def create(_: ActorTurnRequest) -> CodexCoffeeModel:
-        return CodexCoffeeModel(CodexCLIModel(settings), model_id=settings.model)
+        return CodexCoffeeModel(create_codex_transport(settings), model_id=settings.model)
 
     return create
 

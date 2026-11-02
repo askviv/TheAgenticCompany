@@ -49,7 +49,7 @@ class _ActorRecord(_ActorRef):
 
 
 class _GatewayConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, hide_input_in_errors=True)
 
     actors: list[_ActorRecord]
     mailu_smtp_host: str = "mail.company.example.test"
@@ -59,7 +59,7 @@ class _GatewayConfig(BaseModel):
     webmail_url: str = "https://mail.company.example.test/webmail/"
     delivery_aliases: dict[str, str] = Field(default_factory=dict)
     tls_ca_file: str | None = None
-    smtp_timeout_seconds: float = Field(default=20, gt=0)
+    smtp_timeout_seconds: float | None = Field(default=None, gt=0)
     confirm_timeout_seconds: float = Field(default=30, gt=0)
     smtp4dev_smtp_host: str = "127.0.0.1"
     smtp4dev_smtp_port: int = Field(default=19125, gt=0, le=65535)
@@ -74,11 +74,6 @@ class _GatewayConfig(BaseModel):
             raise ValueError("configured actor IDs must be unique")
         if len(actor_emails) != len(set(actor_emails)):
             raise ValueError("configured actor email addresses must be unique")
-        for actor in self.actors:
-            is_viv_id = actor.actor_id == SPECIAL_VIV_ID
-            is_viv_email = actor.email.casefold() == SPECIAL_VIV_EMAIL
-            if is_viv_id != is_viv_email:
-                raise ValueError("the configured Viv actor must use its fixed actor ID and address")
         from email.headerregistry import Address
         for address, actor_id in self.delivery_aliases.items():
             Address(addr_spec=address)
@@ -281,7 +276,7 @@ class MailuGateway:
         return credentials
 
     def _is_viv(self, actor: _ActorRecord) -> bool:
-        return actor.actor_id == SPECIAL_VIV_ID and actor.email.casefold() == SPECIAL_VIV_EMAIL
+        return actor.actor_id == SPECIAL_VIV_ID
 
     def _employee_id(self, actor: _ActorRecord) -> str | None:
         if self._is_viv(actor):
@@ -1219,7 +1214,8 @@ class MailuGateway:
             port=self.config.mailu_imap_port,
             ssl=True,
             ssl_context=_ssl_context(self.config.tls_ca_file),
-            timeout=max(self.config.smtp_timeout_seconds, context.timeout),
+            timeout=(None if self.config.smtp_timeout_seconds is None else
+                     max(self.config.smtp_timeout_seconds, context.timeout)),
         ) as client:
             client.login(credentials.username, credentials.password)
             client.select_folder("INBOX", readonly=True)

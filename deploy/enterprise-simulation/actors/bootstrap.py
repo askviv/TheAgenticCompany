@@ -88,7 +88,8 @@ def prepare_environment(project: Path, environment: Path, owner: pwd.struct_pass
          "--no-dev", "--no-config", "--python", "/usr/bin/python3.12"], cwd=project)
 
 
-def private_env(path: Path, data: dict[str, str], owner: pwd.struct_passwd) -> None:
+def private_env(path: Path, data: dict[str, str], owner: pwd.struct_passwd,
+                *, remove: tuple[str, ...] = ()) -> None:
     if path.exists():
         info = path.stat()
         if info.st_uid != owner.pw_uid or stat.S_IMODE(info.st_mode) != 0o600:
@@ -102,13 +103,31 @@ def private_env(path: Path, data: dict[str, str], owner: pwd.struct_passwd) -> N
             if key in saved and saved[key] != value:
                 raise RuntimeError(f"{path.name} contains a conflicting private setting: {key}")
         data = {**saved, **data}
+    for key in remove:
+        data.pop(key, None)
     body = "".join(f"{key}={value}\n" for key, value in data.items())
     atomic_write(path, body, 0o600, owner.pw_uid, owner.pw_gid)
 
 
+def read_remote_inference_token(path: Path) -> str:
+    details = path.stat()
+    if stat.S_IMODE(details.st_mode) & 0o077:
+        raise PermissionError("remote inference token file must be private to its owner")
+    token = path.read_text(encoding="utf-8").strip()
+    if not token:
+        raise ValueError("remote inference token file is empty")
+    return token
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args()
+    parser.add_argument("--inference-url", help="opt into the host Codex inference endpoint")
+    parser.add_argument("--inference-token-file", type=Path,
+                        help="private model-provider bearer token to copy into guest actor secrets")
+    args = parser.parse_args()
+    remote_inference = bool(args.inference_url)
+    if remote_inference != bool(args.inference_token_file):
+        parser.error("--inference-url and --inference-token-file must be supplied together")
     if os.geteuid() != 0:
         raise PermissionError("run this bootstrap with sudo")
     owner = pwd.getpwnam("company")
@@ -117,11 +136,14 @@ def main() -> int:
         raise PermissionError("enterprise source is not readable")
     if CONFIG.stat().st_uid != 0 or stat.S_IMODE(CONFIG.stat().st_mode) != 0o600:
         raise PermissionError("runtime.json must remain root-owned and mode 0600")
-    codex_info = CODEX_HOME.stat()
-    if codex_info.st_uid != owner.pw_uid or not CODEX_HOME.is_dir():
-        raise PermissionError("Codex home must be an existing directory owned by company")
-    # Tighten only the directory mode. Existing authenticated CLI state is untouched.
-    CODEX_HOME.chmod(0o700)
+    if remote_inference:
+        inference_token = read_remote_inference_token(args.inference_token_file)
+    else:
+        codex_info = CODEX_HOME.stat()
+        if codex_info.st_uid != owner.pw_uid or not CODEX_HOME.is_dir():
+            raise PermissionError("Codex home must be an existing directory owned by company")
+        # Tighten only the directory mode. Existing authenticated CLI state is untouched.
+        CODEX_HOME.chmod(0o700)
 
     group_id = grp.getgrnam("company").gr_gid
     os.chown(ROOT, 0, group_id)
@@ -152,26 +174,51 @@ def main() -> int:
         "customer_token": customer_token,
         "supplier_url": "http://127.0.0.1:8142",
         "supplier_token": supplier_token,
-        "request_timeout_seconds": 600,
+        "request_timeout_seconds": None,
     })
     atomic_write(CONFIG, json.dumps(config, indent=2, sort_keys=True) + "\n", 0o600, 0, 0)
 
-    private_env(ACTORS / "secrets/customer.env", {
+    customer_env = {
         "TAU2_CUSTOMER_JOB_DB": str(ACTORS / "state/customer/turns.sqlite"),
         "TAU2_ACTOR_BEARER_TOKEN": customer_token,
         "TAU2_CUSTOMER_MODEL": "gpt-6-luna",
-        "TAU2_CODEX_EXECUTABLE": "/usr/local/bin/codex",
-        "TAU2_CODEX_HOME": str(CODEX_HOME),
-        "TAU2_CODEX_TIMEOUT_SECONDS": "180",
-    }, owner)
-    private_env(ACTORS / "secrets/supplier.env", {
+    }
+    supplier_env = {
         "ACTOR_WORKER_DATABASE_PATH": str(ACTORS / "state/supplier/turns.sqlite"),
         "ACTOR_WORKER_BEARER_SECRET": supplier_token,
         "CODEX_MODEL": "gpt-6-luna",
-        "CODEX_EXECUTABLE": "/usr/local/bin/codex",
-        "CODEX_HOME": str(CODEX_HOME),
-        "CODEX_TIMEOUT_SECONDS": "180",
-    }, owner)
+    }
+    if remote_inference:
+        customer_env.update({
+            "TAU2_CODEX_INFERENCE_URL": args.inference_url,
+            "TAU2_CODEX_INFERENCE_BEARER_TOKEN": inference_token,
+        })
+        supplier_env.update({
+            "CODEX_INFERENCE_URL": args.inference_url,
+            "CODEX_INFERENCE_BEARER_TOKEN": inference_token,
+        })
+        atomic_write(ACTORS / "secrets/codex-inference-token", inference_token + "\n",
+                     0o600, owner.pw_uid, owner.pw_gid)
+        customer_remove = ("TAU2_CODEX_EXECUTABLE", "TAU2_CODEX_HOME", "TAU2_CODEX_TIMEOUT_SECONDS")
+        supplier_remove = ("CODEX_EXECUTABLE", "CODEX_HOME", "CODEX_TIMEOUT_SECONDS")
+    else:
+        customer_env.update({
+            "TAU2_CODEX_EXECUTABLE": "/usr/local/bin/codex",
+            "TAU2_CODEX_HOME": str(CODEX_HOME),
+        })
+        supplier_env.update({
+            "CODEX_EXECUTABLE": "/usr/local/bin/codex",
+            "CODEX_HOME": str(CODEX_HOME),
+        })
+        customer_remove = (
+            "TAU2_CODEX_INFERENCE_URL", "TAU2_CODEX_INFERENCE_BEARER_TOKEN",
+            "TAU2_CODEX_TIMEOUT_SECONDS",
+        )
+        supplier_remove = (
+            "CODEX_INFERENCE_URL", "CODEX_INFERENCE_BEARER_TOKEN", "CODEX_TIMEOUT_SECONDS",
+        )
+    private_env(ACTORS / "secrets/customer.env", customer_env, owner, remove=customer_remove)
+    private_env(ACTORS / "secrets/supplier.env", supplier_env, owner, remove=supplier_remove)
     print(f"Actor environments prepared with uv {UV_VERSION}; service units are not installed or started.")
     print("Private actor settings written; credentials are not displayed.")
     return 0

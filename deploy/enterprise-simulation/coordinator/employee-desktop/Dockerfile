@@ -11,7 +11,7 @@ LABEL com.theagentcompany.employee-desktop.dockerfile-sha256="${EMPLOYEE_DESKTOP
 USER 0
 RUN apt-get clean \
     && apt-get update \
-    && apt-get install --no-install-recommends -y netcat-openbsd procps socat x11-utils \
+    && apt-get install --no-install-recommends -y libnss3-tools netcat-openbsd procps socat x11-utils \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /var/cache/debconf/* /var/log/* /tmp/* /var/tmp/*
 USER 1000

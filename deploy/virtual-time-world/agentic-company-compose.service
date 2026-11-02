@@ -1,0 +1,13 @@
+[Unit]
+Description=Company Compose projects after virtual clock synchronization
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=COMPOSE_CONFIG_DIR=/data/theagentcompany/virtual-time-world/config/migration-compose
+ExecStart=/bin/sh -ec 'found=; for config in "$COMPOSE_CONFIG_DIR"/*.json; do [ -f "$config" ] || continue; found=1; docker compose -f "$config" up -d --pull never; done; [ -n "$found" ] || { echo "No prepared migration Compose configurations found" >&2; exit 1; }'
+ExecStop=/usr/local/lib/virtual-time-world/company-compose-stop
+TimeoutStartSec=infinity
+TimeoutStopSec=infinity

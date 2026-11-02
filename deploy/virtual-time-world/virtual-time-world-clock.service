@@ -1,0 +1,20 @@
+[Unit]
+Description=Supervise the isolated virtual-time guest
+After=libvirtd.service
+
+[Service]
+Type=simple
+User=root
+Environment=VIRTUAL_TIME_SOURCE_ROOT=/data/theagentcompany/virtual-time-world/company-source
+Environment=PYTHONPATH=/data/theagentcompany/virtual-time-world/company-source
+ExecStart=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py run
+ExecStop=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py stop
+Restart=on-failure
+RestartSec=5
+UMask=0077
+TimeoutStopSec=infinity
+SendSIGKILL=no
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

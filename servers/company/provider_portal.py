@@ -115,10 +115,10 @@ def authenticate_mailu(
 
 
 class NativeProviderHTTPClient:
-    def __init__(self, base_url: str, bearer_token: str, *, timeout: float = 180, session=None):
+    def __init__(self, base_url: str, bearer_token: str, *, timeout: float | None = None, session=None):
         import requests
 
-        if not base_url or not bearer_token or timeout <= 0:
+        if not base_url or not bearer_token or (timeout is not None and timeout <= 0):
             raise ValueError("native τ provider worker connection is incomplete")
         self.base_url = base_url.rstrip("/")
         self.token = bearer_token
