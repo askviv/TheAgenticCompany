@@ -24,7 +24,7 @@ from urllib.parse import quote, urljoin
 import requests
 from authres import AuthenticationResultsHeader, AuthResError
 from imapclient import IMAPClient
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from servers.company.scenarios import (
     RealMailTransport,
@@ -229,6 +229,16 @@ def _decoded_header(values: list[Any]) -> str:
         str(make_header(decode_header(str(value)))).strip()
         for value in values
     )
+
+
+_COMPANY_TIME = TypeAdapter(AwareDatetime)
+
+
+def _company_time_label(value: str | datetime | None) -> str | None:
+    """Format an explicitly supplied simulation instant for company mail."""
+    if value is None:
+        return None
+    return _COMPANY_TIME.validate_python(value).isoformat()
 
 
 class MailuGateway:
@@ -508,6 +518,7 @@ class MailuGateway:
         reply_to_actor_id: str | None = None,
         automated: bool = False,
         delivery_address: str | None = None,
+        business_time: str | datetime | None = None,
         on_submission_started: Callable[[], None] = lambda: None,
     ) -> dict[str, Any]:
         """Submit once, then require a native, correlated delivery receipt.
@@ -538,6 +549,9 @@ class MailuGateway:
             self._credentials_for(recipient_actor)
         if not isinstance(body, str):
             raise TypeError("body must be text")
+        company_time = _company_time_label(business_time)
+        if company_time is not None:
+            body = f"{body.rstrip()}\n\nCompany time: {company_time}"
         if delivery_address is not None and self.config.delivery_aliases.get(delivery_address) != recipient_actor.actor_id:
             raise PermissionError("delivery address is not a configured alias of the recipient mailbox")
 
@@ -550,6 +564,8 @@ class MailuGateway:
         message["Message-ID"] = context.message_id
         message["X-TAC-Run-ID"] = context.run_id
         message["X-TAC-Generation"] = str(context.generation)
+        if company_time is not None:
+            message["X-TAC-Company-Time"] = company_time
         if context.automated:
             message["Auto-Submitted"] = "auto-replied"
         if context.in_reply_to:

@@ -50,6 +50,7 @@ VIV_RELAY_ACCOUNT_EMAIL = "viv_reply_relay@example.com"
 VIV_PUBLIC_EMAIL = "agent@agent.example.test"
 PRESERVED_RUNTIME_SETTINGS = frozenset({
     "actor_workers", "background_model_id", "company_clock_rate", "company_background_enabled",
+    "shared_company_clock_enabled", "shared_company_clock_file", "shared_company_clock_state",
     "company_issues_enabled", "erp_base_url", "erp_public_url", "issue_config_path",
     "employee_chat_credentials_file", "rocketchat_base_url",
     "retail_operator_users", "workers_enabled",
@@ -747,6 +748,9 @@ def main() -> int:
         "rocketchat_base_url": "https://chat.company.example.test",
         "principals_file": str(principals_path),
         "workers_enabled": True,
+        "shared_company_clock_enabled": True,
+        "shared_company_clock_file": "/data/theagentcompany/enterprise/state/company-clock/time",
+        "shared_company_clock_state": str(state_root / "company-clock.json"),
         "host": args.host,
         "port": args.port,
     }

@@ -1460,6 +1460,7 @@ class CompanyFeedbackRuntime:
                         plan["sender"], plan["recipient"], payload["subject"], payload["body"],
                         payload["message_id"], payload["run_id"], payload["generation"],
                         in_reply_to=payload["in_reply_to"],
+                        business_time=payload.get("occurred_at"),
                         on_submission_started=submission_started,
                     )
                 except Exception as error:

@@ -45,9 +45,6 @@ from servers.simulation.models import (
 )
 from servers.simulation.store import SQLiteStore, StoreConflict, StoreNotFound
 
-COMPANY_CLOCK_RATE = 1
-
-
 class EngineConflict(StoreConflict):
     """A requested workflow transition conflicts with simulation state."""
 
@@ -608,7 +605,8 @@ class SimulationEngine:
             raise EngineConflict("company ERP binding is missing native baseline documents")
         if not binding.get("credentials_ref"):
             raise EngineConflict("company ERP credentials reference is unavailable")
-        now = datetime.now(timezone.utc)
+        clock_provider = getattr(self, "company_time_provider", None)
+        now = self._time(clock_provider() if callable(clock_provider) else datetime.now(timezone.utc))
         def operation(connection):
             existing = self.store.get_company("company", connection=connection)
             if existing:
@@ -622,19 +620,10 @@ class SimulationEngine:
             wake()
         return self.store.get_company("company") or result
 
-    def configure_company_clock_rate(self, rate: int = COMPANY_CLOCK_RATE,
-                                     *, now: datetime | None = None) -> dict[str, Any] | None:
-        """Apply a clock-rate transition at the current wall instant."""
-        wall_now = self._time(now or datetime.now(timezone.utc))
-        with self._operation_guard("company-time"):
-            company = self.store.get_company("company")
-            if company is None:
-                return None
-            return self.store.set_company_clock_rate("company", rate, wall_now)
-
     def pause_company(self, paused: bool, key: str, *, now: datetime | None = None) -> dict[str, Any]:
         key = self._key(key)
-        wall_now = self._time(now or datetime.now(timezone.utc))
+        clock_provider = getattr(self, "company_time_provider", None)
+        wall_now = self._time(now or (clock_provider() if callable(clock_provider) else datetime.now(timezone.utc)))
         if paused:
             # Reserve elapsed time and dispatch outside the short clock-state
             # lock. A slow mailbox/provider call must not hold the clock.
@@ -663,15 +652,16 @@ class SimulationEngine:
         the advanced clock remains committed and the pending event is retried
         on the next tick or after restart.
         """
-        now = self._time(now or datetime.now(timezone.utc))
+        clock_provider = getattr(self, "company_time_provider", None)
+        now = self._time(now or (clock_provider() if callable(clock_provider) else datetime.now(timezone.utc)))
         with self._operation_guard("company-time"):
             company = self.store.get_company("company")
-            if company is None or company["paused"]:
+            if company is None:
                 return company
             before = self._time(company["simulated_time"])
             anchor = self._time(company["wall_anchor"])
             effective_now = max(now, anchor)
-            target = before + (effective_now - anchor) * company["clock_rate"]
+            target = before + (effective_now - anchor)
             # Commit first so another tick can advance the shared clock even
             # while the ordered dispatcher waits on external I/O.
             reserved = self.store.update_company("company", simulated_time=target, wall_anchor=effective_now)
@@ -1673,6 +1663,7 @@ class SimulationEngine:
                 receipt = self.mail.send(sender_ref, recipient_ref, payload["subject"], payload["body"],
                     payload["message_id"], run["run_id"], run["generation"],
                     in_reply_to=payload.get("in_reply_to"), automated=payload.get("automated", False),
+                    business_time=payload.get("simulated_time"),
                     **({"delivery_address": payload["delivery_address"]}
                        if payload.get("delivery_address") else {}),
                     on_submission_started=started)

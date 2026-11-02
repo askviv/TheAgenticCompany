@@ -31,6 +31,7 @@ from servers.simulation.models import (
     StartScenario,
     ModelUsageRecord,
     PauseCompany,
+    SetCompanyClockSpeed,
     StartCompany,
     UpdateCase,
 )
@@ -215,10 +216,18 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         if callable(feedback_activity):
             activity.extend(feedback_activity())
         activity.sort(key=lambda item: (str(item.get("timestamp", "")), str(item["id"])))
-        return {"company_id": "company", "background": background_status, "status": company["status"],
-                "simulated_time": company["simulated_time"], "paused": company["paused"],
-                "erp_site_id": company["erp_binding"]["site_name"],
-                "experiments": experiments, "activity": activity}
+        result = {"company_id": "company", "background": background_status, "status": company["status"],
+                  "simulated_time": company["simulated_time"], "paused": company["paused"],
+                  "erp_site_id": company["erp_binding"]["site_name"],
+                  "experiments": experiments, "activity": activity}
+        speed_reader = getattr(engine, "company_clock_speed_reader", None)
+        if callable(speed_reader):
+            try:
+                result["clock_speed"] = speed_reader()
+            except Exception as error:
+                logger.exception("Shared company clock speed read failed exception_type=%s",
+                                 type(error).__name__)
+        return result
 
     @app.post("/company/evidence/native")
     async def observe_company_evidence(request: Request):
@@ -614,6 +623,19 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         require_role(principal, "controller")
         engine.pause_company(model.paused, key)
         return company_payload()
+
+    @app.post("/company/clock/speed")
+    def set_company_clock_speed(model: SetCompanyClockSpeed, key: str = Depends(idempotency_key),
+                                principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        setter = getattr(engine, "company_clock_speed_setter", None)
+        if not callable(setter):
+            raise HTTPException(status_code=503, detail="Shared company clock speed control is unavailable")
+        result = setter(model.speed, key)
+        wake = getattr(engine, "company_clock_wake", None)
+        if wake:
+            wake()
+        return {**company_payload(), "clock_speed": result["speed"]}
 
     @app.post("/company/experiments")
     def start_company_experiment(model: StartScenario, key: str = Depends(idempotency_key),

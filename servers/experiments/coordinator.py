@@ -187,6 +187,10 @@ class SimulationCoordinatorClient:
         return self._request("POST", f"/company/background/{quote(provider_id, safe='')}/control",
                              idempotency_key=idempotency_key, json={"enabled": enabled})
 
+    def set_company_clock_speed(self, speed: float, *, idempotency_key: str) -> dict[str, Any]:
+        return self._request("POST", "/company/clock/speed", idempotency_key=idempotency_key,
+                             json={"speed": speed})
+
     def start_experiment(self, scenario_id: str, *, idempotency_key: str, task_id: str | None = None) -> dict[str, Any]:
         payload = {"scenario_id": scenario_id}
         if task_id is not None: payload["task_id"] = task_id

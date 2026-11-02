@@ -153,6 +153,7 @@ export type Company = {
   started_at?: string | null
   updated_at?: string | null
   simulated_time?: string | null
+  clock_speed?: number
   error?: string | null
 }
 
@@ -272,6 +273,19 @@ export async function setBackgroundProviderEnabled(providerId: CompanyNativeEval
     },
     body: new URLSearchParams({ csrf_token: session.csrf_token, enabled: String(enabled) }),
   })
+}
+
+export async function setCompanyClockSpeed(speed: number): Promise<number> {
+  const session = await getSession()
+  const result = await requestJson<{ clock_speed: number }>("/api/company/clock/speed", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+      "Idempotency-Key": session.idempotency_key,
+    },
+    body: new URLSearchParams({ csrf_token: session.csrf_token, speed: String(speed) }),
+  })
+  return result.clock_speed
 }
 
 export async function getCompanyEvaluations(): Promise<Record<CompanyNativeEvaluation["provider_id"], CompanyNativeEvaluationProvider>> {

@@ -40,6 +40,11 @@ docker compose --env-file deploy/single-host/host.env -p tac-experiments -f depl
 docker exec tac-experiments python -c 'from experiments.runner import RocketChatClient; print(RocketChatClient.from_env().setup_outgoing_webhook())'
 ```
 
+The company page exposes the shared business-clock speed control through the
+existing coordinator API. At 24×, one company day takes one real hour. Application
+clocks, email transport and the unread-email handoff retain real time. The normal
+dashboard build includes these controls.
+
 To publish a Results UI or Experiments BFF change on the host, sync the reviewed source tree to `/data/theagentcompany/source`, then run these commands on the host. The Docker build compiles the React bundle and the Compose command recreates only the Experiments service; it preserves `/data/theagentcompany/experiments-data` and does not launch a company run or evaluation.
 
 ```sh

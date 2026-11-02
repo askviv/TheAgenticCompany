@@ -1,6 +1,7 @@
 """Private experiment library: real requests to Viv, tracked as Rocket.Chat threads."""
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -363,10 +364,15 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             activity.append({key:item[key] for key in
                 ('id','timestamp','event','description','experiment_id','scenario_id',
                  'type','title','summary','content','actor','direction','received_at','created_at') if key in item})
+        clock_speed=payload.get('clock_speed')
+        if clock_speed is not None and (isinstance(clock_speed,bool) or not isinstance(clock_speed,(int,float))
+                                        or not math.isfinite(clock_speed) or clock_speed<=0):
+            raise CoordinatorError('company','invalid_clock_speed')
         return {key:payload.get(key) for key in ('company_id','simulated_time','erp_site_id')} | {
             'background':background,
             'status':status,'paused':bool(payload.get('paused')),
-            'experiments':experiments,'activity':activity}
+            'experiments':experiments,'activity':activity,
+            **({'clock_speed':float(clock_speed)} if clock_speed is not None else {})}
     def company_state(refresh=True):
         if refresh:
             state=safe_company(coordinator().company(),require_activity=True)
@@ -384,7 +390,8 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 'status':statuses.get(state.get('status'),'stopped'),
                 'simulated_time':state.get('simulated_time'),'paused':bool(state.get('paused')),
                 'erp_site_id':state.get('erp_site_id'),'experiments':state.get('experiments',[]),
-                'activity':state.get('activity',[]),'background':state.get('background'),'error':state.get('error')}
+                'activity':state.get('activity',[]),'background':state.get('background'),'error':state.get('error'),
+                **({'clock_speed':state['clock_speed']} if 'clock_speed' in state else {})}
     def dispatch(run_id):
         with app.app_context():
             item=row(run_id)
@@ -973,6 +980,25 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             message=f'{provider_id} background control could not be confirmed ({type(error).__name__}). Refresh to reconcile the requested state.'
             save_company_error(message)
             return jsonify(error=message),502
+    @app.post('/api/company/clock/speed')
+    def set_company_clock_speed():
+        raw=request.form.get('speed')
+        key=request.headers.get('Idempotency-Key') or request.form.get('idempotency_key')
+        if raw is None or not key: abort(400)
+        try: speed=float(raw)
+        except ValueError: abort(400)
+        if not math.isfinite(speed) or speed<=0: abort(400)
+        try:
+            payload=coordinator().set_company_clock_speed(speed,idempotency_key=key)
+            state=safe_company(payload,require_activity=True)
+            confirmed_speed=state.get('clock_speed')
+            if confirmed_speed is None:
+                raise CoordinatorError('company/clock/speed','missing_clock_speed')
+            notify()
+            return jsonify(clock_speed=confirmed_speed)
+        except Exception as error:
+            logging.exception('Company clock speed update failed')
+            return jsonify(error=f'Company clock speed could not be confirmed ({type(error).__name__}). Refresh to retry.'),502
     @app.get('/api/activity')
     def api_activity():
         activity=[]
