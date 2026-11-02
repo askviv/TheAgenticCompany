@@ -514,7 +514,7 @@ class CompanyFeedback:
             "on_cancel": 3,
             "on_trash": 4,
         }
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             observations = [
                 CompanyEvidence.model_validate_json(row["payload_json"])
                 for row in db.execute("SELECT payload_json FROM company_evidence")

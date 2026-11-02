@@ -97,19 +97,19 @@ class IssueHandoffStore:
         return self.get(notification.issue_key)
 
     def get(self, key: str) -> dict:
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             row = connection.execute("SELECT * FROM company_issue_handoffs WHERE issue_key=?", (key,)).fetchone()
             if row is None:
                 raise KeyError("Tracked company issue not found")
             return dict(row)
 
     def pending(self) -> list[dict]:
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             return [dict(row) for row in connection.execute(
                 "SELECT * FROM company_issue_handoffs WHERE stage NOT IN ('read','sent') ORDER BY issue_key")]
 
     def delivered(self) -> list[dict]:
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             return [dict(row) for row in connection.execute(
                 "SELECT * FROM company_issue_handoffs WHERE delivered_at IS NOT NULL ORDER BY delivered_at,issue_key")]
 

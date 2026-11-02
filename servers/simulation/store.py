@@ -83,10 +83,10 @@ class SQLiteStore:
         return connection
 
     @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
-        """Open a writer transaction that serializes competing mutations."""
+    def transaction(self, *, write: bool = True) -> Iterator[sqlite3.Connection]:
+        """Use a reserved writer or a consistent deferred read snapshot."""
         with closing(self._connect()) as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             try:
                 yield connection
                 connection.commit()

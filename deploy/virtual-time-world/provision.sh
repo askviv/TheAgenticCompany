@@ -60,7 +60,7 @@ write_files:
   - path: /etc/docker/daemon.json
     permissions: '0644'
     content: |
-      {"data-root": "/data/docker", "userland-proxy": false}
+      {"data-root": "/data/docker", "userland-proxy": false, "live-restore": true}
   - path: /etc/systemd/system/docker.service.d/company-data.conf
     permissions: '0644'
     content: |

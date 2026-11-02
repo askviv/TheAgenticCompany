@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
+import imaplib
 import json
 import logging
 import os
@@ -43,6 +44,8 @@ class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     state_root: Path
     sqlite_busy_timeout_seconds: float = Field(default=30, gt=0)
+    mailbox_idle_renewal_seconds: float = Field(default=30, gt=0)
+    company_clock_observation_seconds: float = Field(default=1, gt=0)
     erp_compose: Path
     erp_base_url: str = "http://192.0.2.10:8130"
     erp_credentials_root: Path
@@ -225,13 +228,15 @@ class MailWorkers:
 
     No worker advances simulation time. A failed mailbox watcher is reported
     and stopped; its siblings and unrelated API operations remain available.
-    Restarting the service after repairing that provider restarts its watcher.
+    Transient IMAP transport/authentication failures reconnect after the next
+    listener renewal interval; programming/configuration failures remain visible.
     """
     def __init__(self, engine: SimulationEngine, actors: list[dict], *, hub_connection_factory=None,
-                 viv_mailbox_name: str = "Default"):
+                 viv_mailbox_name: str = "Default", mailbox_idle_renewal_seconds: float = 30):
         self.engine = engine
         self.actors = [actor for actor in actors if actor.get("kind") != "agent"]
         self.viv_mailbox_name = viv_mailbox_name
+        self.mailbox_idle_renewal_seconds = mailbox_idle_renewal_seconds
         self._hub_connection_factory = hub_connection_factory
         self.changed = threading.Event()
         self.stopped = threading.Event()
@@ -278,14 +283,26 @@ class MailWorkers:
                   component, type(error).__name__, causes, frames)
 
     def _watch(self, actor: dict) -> None:
-        try:
-            while not self.stopped.is_set():
-                if self.engine.mail.wait_for_activity(actor, timeout=30):
+        component = "mailbox:" + actor["actor_id"]
+        while not self.stopped.is_set():
+            try:
+                renewal_seconds = _company_clock_interval(
+                    self.mailbox_idle_renewal_seconds, self.engine
+                )
+                changed = self.engine.mail.wait_for_activity(actor, timeout=renewal_seconds)
+                self.errors.pop(component, None)
+                if changed:
                     self.changed.set()
                     if actor.get("kind") == "employee":
                         self._enqueue_employee_inbox(actor)
-        except Exception as error:
-            self._failure("mailbox:" + actor["actor_id"], error)
+            except (OSError, imaplib.IMAP4.error) as error:
+                self._failure(component, error)
+                self.stopped.wait(_company_clock_interval(
+                    self.mailbox_idle_renewal_seconds, self.engine
+                ))
+            except Exception as error:
+                self._failure(component, error)
+                return
 
     def _enqueue_employee_inbox(self, actor: dict[str, Any]) -> None:
         actor_id = actor["actor_id"]
@@ -353,8 +370,8 @@ class MailWorkers:
                     .with_url(api_base + "/hubs/notifications")
                     .with_automatic_reconnect({
                         "type": "raw",
-                        "keep_alive_interval": 15,
-                        "reconnect_interval": 5,
+                        "keep_alive_interval": _company_clock_interval(15, self.engine),
+                        "reconnect_interval": _company_clock_interval(5, self.engine),
                         "max_attempts": 10,
                     })
                     .build()
@@ -490,8 +507,10 @@ class CompanyClockWorker:
     the configured shared company source advances without busy looping. A
     never-started company remains idle until an API operation wakes it.
     """
-    def __init__(self, engine: SimulationEngine, *, shared_time_enabled: bool = False):
+    def __init__(self, engine: SimulationEngine, *, shared_time_enabled: bool = False,
+                 observation_seconds: float = 1):
         self.engine = engine
+        self.observation_seconds = observation_seconds
         self.shared_time_enabled = shared_time_enabled
         self.time_provider = None
         self.wake_event = threading.Event()
@@ -508,7 +527,9 @@ class CompanyClockWorker:
 
     def _run(self) -> None:
         while not self.stopped.is_set():
-            self.wake_event.wait(timeout=1.0)
+            self.wake_event.wait(timeout=_company_clock_interval(
+                self.observation_seconds, self.engine
+            ))
             self.wake_event.clear()
             if self.stopped.is_set():
                 return
@@ -535,7 +556,9 @@ class CompanyClockWorker:
 
     def _dispatch(self) -> None:
         while not self.stopped.is_set():
-            self.dispatch_event.wait(timeout=1.0)
+            self.dispatch_event.wait(timeout=_company_clock_interval(
+                self.observation_seconds, self.engine
+            ))
             self.dispatch_event.clear()
             if self.stopped.is_set():
                 return
@@ -625,8 +648,8 @@ def _company_clock_source(path: Path) -> str:
     return source
 
 
-def _kernel_company_clock_now() -> datetime:
-    """Confirm the patched guest kernel rate control is active, then read UTC."""
+def _kernel_company_clock_speed() -> int:
+    """Read the active kernel rate used to scale company-time observations."""
     try:
         rate = int(Path("/sys/kernel/virtual_time_rate").read_text(encoding="ascii").strip())
     except (OSError, ValueError) as error:
@@ -637,6 +660,19 @@ def _kernel_company_clock_now() -> datetime:
         raise KernelCompanyClockConfigurationError(
             "guest kernel virtual-time-rate capability reported an invalid rate"
         )
+    return rate
+
+
+def _company_clock_interval(seconds: float, engine: SimulationEngine) -> float:
+    """Keep a configured real interval stable across accelerated kernel timers."""
+    if getattr(engine, "company_clock_mode", None) != "kernel":
+        return seconds
+    return seconds * _kernel_company_clock_speed()
+
+
+def _kernel_company_clock_now() -> datetime:
+    """Confirm the patched guest kernel rate control is active, then read UTC."""
+    _kernel_company_clock_speed()
     return datetime.now(timezone.utc)
 
 
@@ -761,8 +797,10 @@ def build_app(config_path: str | Path):
             engine.company_issue_activity = issue_workflow.service.activity
     app = create_app(engine, private_json(config.principals_file))
     workers = MailWorkers(engine, config.mail["actors"],
-                          viv_mailbox_name=config.mail.get("smtp4dev_mailbox_name", "Default"))
-    company_clock = CompanyClockWorker(engine, shared_time_enabled=config.shared_company_clock_enabled)
+                          viv_mailbox_name=config.mail.get("smtp4dev_mailbox_name", "Default"),
+                          mailbox_idle_renewal_seconds=config.mailbox_idle_renewal_seconds)
+    company_clock = CompanyClockWorker(engine, shared_time_enabled=config.shared_company_clock_enabled,
+                                       observation_seconds=config.company_clock_observation_seconds)
     engine.company_clock_wake = company_clock.wake
     shared_clock_publisher = None
     guest_kernel_clock = None
@@ -1059,6 +1097,15 @@ def build_app(config_path: str | Path):
         try:
             yield
         finally:
+            # Stop new work in every worker before joining any of them. This
+            # prevents ongoing producers from starving a draining DB operation.
+            workers.stopped.set()
+            workers.changed.set()
+            company_clock.stopped.set()
+            company_clock.wake()
+            if company_background is not None:
+                company_background.stopped.set()
+                company_background.wake()
             workers.stop()
             if company_background is not None:
                 company_background.stop()
@@ -1093,7 +1140,7 @@ def build_app(config_path: str | Path):
         if feedback_workflow is not None:
             if feedback_workflow.error:
                 components["company_feedback"] = feedback_workflow.error
-            with store._connection(None) as connection:
+            with store.transaction(write=False) as connection:
                 outstanding = connection.execute("SELECT count(*) FROM company_feedback_actions WHERE stage IN ('uncertain','submitting') OR last_error IS NOT NULL").fetchone()[0]
                 feedback_health = connection.execute("SELECT result_json FROM company_feedback_runtime_reports WHERE provider='workflow_health'").fetchone()
                 provider_mail_health = connection.execute(

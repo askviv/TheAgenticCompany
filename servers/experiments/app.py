@@ -22,6 +22,15 @@ from .runner import RocketChatClient
 from .coordinator import CoordinatorError, SimulationCoordinatorClient
 
 ROLES = {'admin':'Administration','hr':'People','finance':'Finance','ds':'Data','pm':'Product','research':'Research','bm':'Business','ml':'Machine learning'}
+COMPANY_TOOLS = (
+    ('erpnext', 'ERPNext'),
+    ('email', 'Email'),
+    ('rocketchat', 'Rocket.Chat'),
+    ('owncloud', 'ownCloud'),
+    ('plane', 'Plane'),
+    ('gitlab', 'GitLab'),
+    ('midpoint', 'midPoint'),
+)
 COMPANY_EVALUATION_PROVIDERS = ('coffeebench', 'ecommercebench')
 SIMULATION_SCENARIOS = {
     'A1': {
@@ -157,11 +166,16 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     app.config.update(SECRET_KEY=os.environ.get('EXPERIMENTS_SECRET_KEY'),
         DATABASE=os.environ.get('EXPERIMENTS_DB', '/data/experiments.sqlite'),
         REPO=os.environ.get('TAC_REPO', str(Path(__file__).resolve().parents[2])),
+        COMPANY_PROFILE_FILE=os.environ.get('COMPANY_PROFILE_FILE'),
         CHAT_PUBLIC_URL=os.environ.get('ROCKETCHAT_PUBLIC_URL','https://chat.company.example.test'),
         EXPERIMENTS_PUBLIC_URL=os.environ.get('EXPERIMENTS_PUBLIC_URL','http://192.0.2.10:8110'),
+        COMPANY_TOOLS_URLS_FILE=os.environ.get(
+            'COMPANY_TOOLS_URLS_FILE', str(Path(__file__).with_name('company-tools-urls.example.json'))),
         SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', MAX_CONTENT_LENGTH=65536,
         SESSION_COOKIE_SECURE=False, EVENTS_WAIT_SECONDS=20)
     if config: app.config.update(config)
+    if app.config['COMPANY_PROFILE_FILE'] is None:
+        app.config['COMPANY_PROFILE_FILE']=str(Path(app.config['REPO'])/'deploy/single-host/company-identities.json')
     if not config or 'SESSION_COOKIE_SECURE' not in config:
         app.config['SESSION_COOKIE_SECURE'] = urlsplit(app.config['EXPERIMENTS_PUBLIC_URL']).scheme.lower() == 'https'
     if not app.secret_key: raise RuntimeError('EXPERIMENTS_SECRET_KEY must be configured')
@@ -368,7 +382,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         if clock_speed is not None and (isinstance(clock_speed,bool) or not isinstance(clock_speed,(int,float))
                                         or not math.isfinite(clock_speed) or clock_speed<=0):
             raise CoordinatorError('company','invalid_clock_speed')
-        return {key:payload.get(key) for key in ('company_id','simulated_time','erp_site_id')} | {
+        return {key:payload.get(key) for key in ('company_id','simulated_time','erp_site_id','clock_mode')} | {
             'background':background,
             'status':status,'paused':bool(payload.get('paused')),
             'experiments':experiments,'activity':activity,
@@ -376,7 +390,9 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def company_state(refresh=True):
         if refresh:
             state=safe_company(coordinator().company(),require_activity=True)
-            save_company(state)
+            # A confirmed snapshot resolves the dashboard request error. Native
+            # provider/action failures remain in the authoritative payload.
+            save_company(state,clear_error=True)
             return state
         with db() as c: item=dict(c.execute('SELECT * FROM company_state WHERE singleton=1').fetchone())
         return {'company_id':item['company_id'] or 'company','status':item['status'],'simulated_time':item['simulated_time'],
@@ -386,9 +402,9 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def api_company_shape(state):
         statuses={'not_started':'stopped','initializing':'starting','running':'running',
                   'paused':'paused','failed':'stopped','resetting':'starting'}
-        return {'id':state.get('company_id') or 'company','name':json.loads((Path(app.config['REPO'])/'deploy/single-host/company-identities.json').read_text())['company']['name'],
+        return {'id':state.get('company_id') or 'company','name':json.loads(Path(app.config['COMPANY_PROFILE_FILE']).read_text())['company']['name'],
                 'status':statuses.get(state.get('status'),'stopped'),
-                'simulated_time':state.get('simulated_time'),'paused':bool(state.get('paused')),
+                'simulated_time':state.get('simulated_time'),'clock_mode':state.get('clock_mode'),'paused':bool(state.get('paused')),
                 'erp_site_id':state.get('erp_site_id'),'experiments':state.get('experiments',[]),
                 'activity':state.get('activity',[]),'background':state.get('background'),'error':state.get('error'),
                 **({'clock_speed':state['clock_speed']} if 'clock_speed' in state else {})}
@@ -597,6 +613,36 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         return jsonify(experiments=entries,provider_catalog_error=error)
     @app.get('/api/compatibility')
     def api_compatibility(): return jsonify(compatibility)
+    @app.get('/api/company-tools')
+    def api_company_tools():
+        try:
+            mapping = json.loads(Path(app.config['COMPANY_TOOLS_URLS_FILE']).read_text(encoding='utf-8'))
+            expected = {key for key, _ in COMPANY_TOOLS}
+            if not isinstance(mapping, dict) or set(mapping) != expected:
+                raise ValueError('mapping keys do not match the company tools')
+            links = []
+            for key, name in COMPANY_TOOLS:
+                value = mapping[key]
+                if not isinstance(value, str) or not value or value != value.strip():
+                    raise ValueError(f'invalid URL for {key}')
+                parsed = urlsplit(value)
+                if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
+                    raise ValueError(f'invalid URL for {key}')
+                _ = parsed.port
+                links.append({'id': key, 'name': name, 'url': value})
+        except (OSError, TypeError, ValueError) as error:
+            logging.exception('Company tools URL mapping unavailable (%s)', type(error).__name__)
+            return jsonify(error='Company tools URL mapping is unavailable or invalid.'), 503
+        return jsonify(tools=links)
+    @app.get('/api/company/clock')
+    def api_company_clock():
+        try:
+            clock=coordinator().company_clock()
+            return jsonify(simulated_time=clock['simulated_time'],clock_mode=clock['clock_mode'])
+        except Exception:
+            logging.exception('Company clock retrieval failed')
+            return jsonify(error='Company clock could not be retrieved.'),503
+
     @app.get('/api/company')
     def api_company():
         try:
@@ -610,7 +656,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         return jsonify(company=api_company_shape(state))
 
     def company_employee_roster():
-        path=Path(app.config['REPO'])/'deploy/single-host/company-identities.json'
+        path=Path(app.config['COMPANY_PROFILE_FILE'])
         try:
             document=json.loads(path.read_text(encoding='utf-8'))
             employees=document['employees']
@@ -633,7 +679,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         return roster
 
     def company_experiment_sender(role, employee_id=None):
-        path=Path(app.config['REPO'])/'deploy/single-host/company-identities.json'
+        path=Path(app.config['COMPANY_PROFILE_FILE'])
         try:
             document=json.loads(path.read_text(encoding='utf-8'))
             company=document['company']

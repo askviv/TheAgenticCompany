@@ -25,6 +25,19 @@ Persistent data: `/data/theagentcompany/experiments-data/experiments.sqlite` (an
 - `VIV_ROCKETCHAT_USERNAME=viv`.
 - Optional `EXPERIMENTS_ROCKETCHAT_CHANNEL` (default `viv-experiments`), `EXPERIMENTS_PUBLIC_URL` (default `http://192.0.2.10:8110`).
 
+Company tools links are deployment-specific. Copy
+`servers/experiments/company-tools-urls.example.json` to a private file outside
+the repository (default `/data/theagentcompany/enterprise/secrets/company-tools-urls.json`),
+replace the seven reserved example URLs with this deployment’s application URLs,
+and set `COMPANY_TOOLS_URLS_SOURCE` in `deploy/single-host/host.env` if the file
+is stored elsewhere. Compose mounts that file read-only at
+`/run/config/company-tools-urls.json`; the API reads it when the Help page asks
+for links. The JSON keys must be `erpnext`, `email`, `rocketchat`, `owncloud`,
+`plane`, `gitlab`, and `midpoint`, each with an HTTP or HTTPS URL. Missing or
+invalid mappings produce a clear Company tools unavailable message in the UI.
+The committed example contains only generic `.example.test` addresses and is
+not the deployed mapping.
+
 Financial scenarios use these Compose settings (defaults shown):
 
 - `SIMULATION_COORDINATOR_URL=http://192.0.2.10:8131`.
@@ -82,3 +95,5 @@ JSON is separately bound read-only from the canonical enterprise source path.
 This keeps the dashboard name/identity metadata aligned with the coordinator
 without replacing the preserved task files. Recreate the dashboard container
 after an atomic identity-file replacement so Docker binds the current file.
+
+`COMPANY_PROFILE_SOURCE` selects the existing company identity/role JSON for the dashboard. It is mounted read-only and passed as `COMPANY_PROFILE_FILE`; use the same file as the coordinator’s `company_profile_file`.

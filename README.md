@@ -78,9 +78,17 @@ recipient route connects the evaluated agent's inbox to company communications.
 
 ## Deployment and development
 
-The project uses persistent application services, Docker Compose and isolated
-Python environments. Configure service addresses, storage and resources for the
-target deployment before starting the stack.
+The accelerated company runs in a dedicated Ubuntu VM on a Linux host, with
+Docker Compose inside that VM. Its patched guest kernel provides the clock
+shared by applications, databases and employee desktops. The host keeps normal
+time for external transport and model authentication.
+
+Start with the [VM deployment guide](deploy/virtual-time-world/README.md). Its
+provisioning command creates the VM; Docker Compose starts the application
+containers inside it. For an existing company, follow the
+[migration runbook](docs/enterprise-simulation/virtual-time-migration.md) to
+preserve records, volumes and the clock epoch. Configure domain mappings and
+clock speed in deployment files, not dashboard controls.
 
 | Guide | Purpose |
 | --- | --- |

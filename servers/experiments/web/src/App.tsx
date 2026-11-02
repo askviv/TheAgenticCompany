@@ -32,8 +32,10 @@ import {
   getActivity,
   getCatalog,
   getCompany,
+  getCompanyClock,
   getCompanyDesktops,
   getCompanyEvaluations,
+  getCompanyTools,
   getEvaluation,
   getEvaluations,
   getLatestEvaluation,
@@ -46,13 +48,13 @@ import {
   startEvaluation,
   startCompanyEvaluation,
   setBackgroundProviderEnabled,
-  setCompanyClockSpeed,
   type ActivityEntry,
   type ActivityMetrics,
   type Company,
   type CompanyDesktopEmployee,
   type CompanyNativeEvaluation,
   type CompanyNativeEvaluationProvider,
+  type CompanyToolLink,
   type Experiment,
   type ExperimentRun,
   type ExperimentRunStatus,
@@ -159,14 +161,21 @@ function AppLayout() {
 
   useEffect(() => {
     let active = true
-    getCompany().then((company) => {
-      if (active) setCompanyTime(company.simulated_time ?? null)
-    }).catch((error) => {
-      if (active) setCompanyTime(null)
-      console.error("Unable to load company time.", error instanceof Error ? error.name : "UnknownError")
-    })
-    return () => { active = false }
-  }, [refreshKey])
+    let pending = false
+    const refreshClock = () => {
+      if (pending) return
+      pending = true
+      getCompanyClock().then((clock) => {
+        if (active) setCompanyTime(clock.simulated_time)
+      }).catch((error) => {
+        if (active) setCompanyTime(null)
+        console.error("Unable to load company time.", error instanceof Error ? error.name : "UnknownError")
+      }).finally(() => { pending = false })
+    }
+    refreshClock()
+    const interval = window.setInterval(refreshClock, 1000)
+    return () => { active = false; window.clearInterval(interval) }
+  }, [])
 
   useEffect(() => {
     const source = new EventSource("/api/events")
@@ -411,9 +420,6 @@ function ActivityPage() {
   const [filter, setFilter] = useState("all")
   const [backgroundControlBusy, setBackgroundControlBusy] = useState<Record<string, boolean>>({})
   const [backgroundControlErrors, setBackgroundControlErrors] = useState<Record<string, string>>({})
-  const [clockSpeedInput, setClockSpeedInput] = useState("")
-  const [clockSpeedBusy, setClockSpeedBusy] = useState(false)
-  const [clockSpeedError, setClockSpeedError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
@@ -460,21 +466,7 @@ function ActivityPage() {
     }
   }
 
-  const saveClockSpeed = async () => {
-    const speed = Number(clockSpeedInput)
-    if (!Number.isFinite(speed) || speed <= 0 || (company?.clock_mode === "kernel" && !Number.isInteger(speed))) return
-    setClockSpeedBusy(true)
-    setClockSpeedError(null)
-    try {
-      const confirmedSpeed = await setCompanyClockSpeed(speed)
-      setCompany((current) => current ? { ...current, clock_speed: confirmedSpeed } : current)
-      setClockSpeedInput(String(confirmedSpeed))
-    } catch (reason) {
-      setClockSpeedError(reason instanceof Error ? reason.message : "Company clock speed could not be confirmed. Refresh to retry.")
-    } finally {
-      setClockSpeedBusy(false)
-    }
-  }
+
 
   const filtered = [...activity]
     .filter((entry) => filter === "all" || entry.type === filter || (filter === "message" && entry.type === "chat") || (filter === "chatter" && (entry.type === "chatter" || (entry.type === "message" && entry.direction === "sent" && Boolean(entry.actor)))))
@@ -530,35 +522,7 @@ function ActivityPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Company clock speed</CardTitle>
-          <CardDescription>{company?.clock_mode === "kernel"
-            ? "All company systems share this clock. At 24×, one company day takes one real hour."
-            : "Business events and deadlines follow company time. At 24×, one company day takes one real hour. Email delivery, security and the five-minute unread handoff use real time."}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground" aria-live="polite">
-            {typeof company?.clock_speed === "number"
-              ? `Current speed: ${company.clock_speed}×.`
-              : "Current speed is not available from the coordinator."}
-          </p>
-          <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={(event) => { event.preventDefault(); void saveClockSpeed() }}>
-            <div className="flex-1 space-y-2">
-              <label htmlFor="company-clock-speed" className="text-sm font-medium">Speed multiplier</label>
-              <Input id="company-clock-speed" type="number" min={company?.clock_mode === "kernel" ? "1" : "0"} step={company?.clock_mode === "kernel" ? "1" : "any"} required value={clockSpeedInput} onChange={(event) => setClockSpeedInput(event.target.value)} aria-describedby="company-clock-speed-help" />
-              <p id="company-clock-speed-help" className="text-xs text-muted-foreground">{company?.clock_mode === "kernel"
-                ? "Choose a whole number greater than zero."
-                : "Enter a number greater than zero. The new rate applies to the shared company clock."}</p>
-            </div>
-            <Button type="submit" disabled={clockSpeedBusy || !Number.isFinite(Number(clockSpeedInput)) || Number(clockSpeedInput) <= 0 || (company?.clock_mode === "kernel" && !Number.isInteger(Number(clockSpeedInput)))}>
-              {clockSpeedBusy && <LoaderCircle className="animate-spin" />}
-              {clockSpeedBusy ? "Setting speed" : "Set speed"}
-            </Button>
-          </form>
-          {clockSpeedError && <ErrorNotice message={clockSpeedError} title="Company clock speed could not be changed" />}
-        </CardContent>
-      </Card>
+
 
 
       {globalBackgroundErrors.length > 0 && <Alert variant="destructive">
@@ -717,6 +681,19 @@ function SavedNativeEvaluations() {
 }
 
 function HelpPage() {
+  const [companyTools, setCompanyTools] = useState<CompanyToolLink[]>([])
+  const [companyToolsError, setCompanyToolsError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    getCompanyTools().then((tools) => {
+      if (active) setCompanyTools(tools)
+    }).catch(() => {
+      if (active) setCompanyToolsError("The deployment’s Company tools URL mapping is missing or invalid. An operator needs to correct it.")
+    })
+    return () => { active = false }
+  }, [])
+
   return (
     <section className="space-y-7">
       <h1 className="text-2xl font-semibold tracking-tight">Help</h1>
@@ -724,20 +701,12 @@ function HelpPage() {
       <Card>
         <CardHeader>
           <CardTitle>Company tools</CardTitle>
-          <CardDescription>Open the company’s systems and administration.</CardDescription>
+          <CardDescription>Open the company’s systems and administration using this deployment’s configured addresses.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
-          {[
-            ["ERPNext", "https://erp.company.example.test"],
-            ["Email", "https://mail.company.example.test"],
-            ["Rocket.Chat", "https://chat.company.example.test"],
-            ["ownCloud", "https://owncloud.company.example.test"],
-            ["Plane", "https://plane.company.example.test"],
-            ["GitLab", "https://gitlab.company.example.test"],
-            ["midPoint", "https://midpoint.company.example.test/midpoint/"],
-          ].map(([name, href]) => (
-            <Button key={name} variant="outline" render={<a href={href} target="_blank" rel="noopener noreferrer" />}>
-              {name}<ExternalLink className="size-4" />
+          {companyToolsError ? <ErrorNotice message={companyToolsError} title="Company tools unavailable" /> : companyTools.map((tool) => (
+            <Button key={tool.id} variant="outline" render={<a href={tool.url} target="_blank" rel="noopener noreferrer" />}>
+              {tool.name}<ExternalLink className="size-4" />
             </Button>
           ))}
         </CardContent>

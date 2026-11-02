@@ -824,7 +824,7 @@ class Controller:
             db.commit()
         print(f'pending rate resolved as {rate}x using operator evidence')
 
-    def run(self):
+    def run(self, requested_rate=None):
         with self.operation_lock():
             connection = libvirt.open(CONNECTION)
             if connection is None:
@@ -834,7 +834,7 @@ class Controller:
             finally:
                 connection.close()
             if not active:
-                self.start()
+                self.start(requested_rate)
         self.monitor()
 
 
@@ -850,7 +850,8 @@ def main():
     sub.add_parser('stop')
     sub.add_parser('prepare')
     sub.add_parser('monitor')
-    sub.add_parser('run')
+    run = sub.add_parser('run')
+    run.add_argument('--rate', type=int)
     process_issue = sub.add_parser('process-issue')
     process_issue.add_argument('--issue-key', required=True)
     rate = sub.add_parser('set-rate')
@@ -873,7 +874,9 @@ def main():
     controller = Controller(args.root, args.name, args.ssh_port)
     try:
         if args.action == 'run':
-            controller.run()
+            if args.rate is not None and args.rate < 1:
+                parser.error('--rate must be a positive integer')
+            controller.run(args.rate)
         elif args.action == 'process-issue':
             controller.process_issue(args.issue_key)
         elif args.action == 'monitor':

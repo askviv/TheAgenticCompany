@@ -233,3 +233,33 @@ to one so the guest clock is not accelerated twice.
 For an existing company, follow the [migration runbook](../../docs/enterprise-simulation/virtual-time-migration.md). A plain `docker compose up` starts application containers; VM creation, kernel preparation and the coordinated data migration are separate operator steps.
 
 The coordinator runtime JSON exposes `sqlite_busy_timeout_seconds` (existing default: 30). At 24×, use 720 guest seconds to retain a 30-real-second allowance for durable storage contention. This changes resource waiting, not the guest clock or benchmark deadlines. Health reads use a read connection, and displayed company time comes directly from the guest kernel; delayed record processing does not freeze the clock.
+
+Clock speed is deployment configuration. Install `clock.env.example` as `$WORLD_ROOT/config/clock.env`, set `WORLD_CLOCK_RATE`, and run `sudo systemctl reload virtual-time-world-clock.service` to apply it without stopping the VM. The service uses this rate when starting a stopped VM; recovery of an already-running VM retains its durable confirmed clock state. The dashboard displays company time and has no speed editor.
+
+Keep `mailbox_idle_renewal_seconds` at its existing 30-second base value. In kernel-clock mode the runtime multiplies it by the current kernel rate, keeping IMAP IDLE renewal at 30 real seconds. New-mail notifications still wake immediately. Transport heartbeat and reconnect intervals use the same rate at connection setup.
+
+Keep `company_clock_observation_seconds` at its existing one-second base value; the runtime multiplies it by the active kernel rate so database checkpoints and event-queue scans run once per real second. This is a processing cadence, not a second clock: the header and business timestamps use the guest kernel, and queued events retain their scheduled timestamps. It avoids performing 24 checkpoint writes per real second on slower persistent storage.
+
+Docker health probes are infrastructure observations, not business events. In
+the guest, after creating the company containers (or for an existing guest
+deployment), run:
+
+```sh
+sudo python3 deploy/virtual-time-world/prepare-healthcheck-cadence.py \
+  --config-dir /data/theagentcompany/virtual-time-world/config/migration-compose
+```
+
+Install the helper at `/usr/local/lib/virtual-time-world/prepare-healthcheck-cadence.py` in the guest. The company Compose unit runs it before startup, reading the same kernel rate; there is no separate cadence-rate configuration. After changing the clock rate in an already-running deployment, rerun the helper and apply the prepared Compose configurations.
+
+The helper captures native effective health metadata privately, scales probe
+intervals, startup intervals, and resource-wait allowances, and retains their
+commands and retry criteria. Repeated runs use the saved baseline rather than
+multiplying again. Startup probes use the saved native startup interval scaled
+by the same rate. The helper reads the active kernel rate by default (or accepts
+the same rate explicitly with `--rate`), saves the native
+`tac-company-issues.timer` monotonic interval privately, and installs a systemd
+drop-in scaled from that saved baseline. Repeated runs do not multiply the
+previous drop-in value. Recreate the affected containers through Compose to
+apply their health configuration, preserving volumes. This prevents
+accelerated health polling from saturating storage; business clocks, issue
+deadlines and evaluator criteria are unchanged.

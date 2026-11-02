@@ -168,6 +168,9 @@ class SimulationCoordinatorClient:
             idempotency_key=idempotency_key, json={},
         )
 
+    def company_clock(self) -> dict[str, Any]:
+        return self._request("GET", "/company/clock", independent_session=True)
+
     def company_evaluations(self, provider_id: str) -> dict[str, Any]:
         return self._request("GET", f"/company/evaluations/{quote(provider_id, safe='')}")
 

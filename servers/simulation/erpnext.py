@@ -993,7 +993,7 @@ class ERPNextSiteAdmin:
             os.replace(temporary, manifest_path)
             command = [
                 "docker", "compose", "-f", str(self.compose_file), "--profile", "admin",
-                "run", "--rm", "site-admin", operation, operation_id,
+                "run", "--rm", "--no-deps", "site-admin", operation, operation_id,
             ]
             try:
                 completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=None)

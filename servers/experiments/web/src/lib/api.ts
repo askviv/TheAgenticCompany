@@ -37,6 +37,8 @@ export type CompatibilityCatalogue = {
   source_revisions: { name: string; revision: string }[]
 }
 
+export type CompanyToolLink = { id: string; name: string; url: string }
+
 export type ExperimentRunStatus =
   | "initializing"
   | "running"
@@ -216,6 +218,11 @@ export async function getCatalog(): Promise<{
 
 export async function getCompatibilityCatalogue(): Promise<CompatibilityCatalogue> {
   return requestJson<CompatibilityCatalogue>("/api/compatibility")
+}
+
+export async function getCompanyTools(): Promise<CompanyToolLink[]> {
+  const result = await requestJson<{ tools: CompanyToolLink[] }>("/api/company-tools")
+  return result.tools
 }
 
 export async function getSession(): Promise<Session> {
@@ -399,4 +406,8 @@ export async function retryRun(runId: string): Promise<RunResponse> {
   return postForm(`/runs/${encodeURIComponent(runId)}/retry`, {
     csrf_token: session.csrf_token,
   })
+}
+
+export async function getCompanyClock(): Promise<{ simulated_time: string | null; clock_mode: string }> {
+  return requestJson<{ simulated_time: string | null; clock_mode: string }>("/api/company/clock")
 }

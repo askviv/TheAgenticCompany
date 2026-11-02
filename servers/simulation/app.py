@@ -322,6 +322,14 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         require_role(principal, "controller")
         return company_payload()
 
+    @app.get("/company/clock")
+    async def get_company_clock(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        provider = getattr(engine, "company_time_provider", None)
+        instant = provider() if callable(provider) else (engine.company_state() or {}).get("simulated_time")
+        return {"simulated_time": instant.isoformat() if hasattr(instant, "isoformat") else instant,
+                "clock_mode": getattr(engine, "company_clock_mode", "real")}
+
     @app.get("/company/desktops")
     def list_employee_desktops(principal: Principal = Depends(authenticate)):
         require_role(principal, "controller")

@@ -211,8 +211,8 @@ class EmployeeDesktopRuntime:
                 self._launch_chrome(container)
             if not self._container_port_open(container, 9223):
                 self._launch_cdp_relay(container)
-            cdp_document = self._wait_for_cdp(container, cdp_port)
-            cdp_endpoint = self._rewrite_cdp_endpoint(cdp_document, cdp_port)
+            cdp_document = self._wait_for_cdp(container, 9223, host=container_ip)
+            cdp_endpoint = self._rewrite_cdp_endpoint(cdp_document, 9223, host=container_ip)
             final_inspect = self._inspect(container)
             self._validate_managed_container(final_inspect, employee_id)
             self._validate_network_isolated(network, container, employee_id)
@@ -608,12 +608,12 @@ class EmployeeDesktopRuntime:
             return None
         network = self._network_name(employee_id)
         self._validate_network_isolated(network, container, employee_id)
-        self._container_ip(inspect, network)
+        container_ip = self._container_ip(inspect, network)
         cdp_port = self._published_ports(inspect).get("9223")
         if cdp_port is None:
             raise EmployeeDesktopError("desktop container is missing its private CDP port mapping")
-        document = self._cdp_document(cdp_port)
-        endpoint = self._rewrite_cdp_endpoint(document, cdp_port)
+        document = self._cdp_document(9223, host=container_ip)
+        endpoint = self._rewrite_cdp_endpoint(document, 9223, host=container_ip)
         return {"employee_id": employee_id, "cdp_endpoint": endpoint}
 
     def _write_env_file(self, credentials: dict[str, str], employee_id: str) -> Path:
@@ -799,11 +799,11 @@ class EmployeeDesktopRuntime:
                     raise EmployeeDesktopError("Selkies Xvfb supervision status could not be read")
             _CDP_READY.wait(0.1)
 
-    def _wait_for_cdp(self, container: str, port: int) -> dict[str, Any]:
+    def _wait_for_cdp(self, container: str, port: int, *, host: str = "127.0.0.1") -> dict[str, Any]:
         last_error: BaseException | None = None
         while True:
             try:
-                document = self._cdp_document(port)
+                document = self._cdp_document(port, host=host)
                 if isinstance(document.get("webSocketDebuggerUrl"), str):
                     return document
             except (URLError, HTTPError, TimeoutError, OSError, ValueError) as error:
@@ -828,23 +828,23 @@ class EmployeeDesktopRuntime:
         )
 
     @staticmethod
-    def _cdp_document(port: int) -> dict[str, Any]:
+    def _cdp_document(port: int, *, host: str = "127.0.0.1") -> dict[str, Any]:
         opener = build_opener(ProxyHandler({}))
-        with opener.open(f"http://127.0.0.1:{port}/json/version") as response:
+        with opener.open(f"http://{host}:{port}/json/version") as response:
             document = json.loads(response.read().decode("utf-8"))
         if not isinstance(document, dict):
             raise ValueError("Chrome DevTools returned an invalid response")
         return document
 
     @staticmethod
-    def _rewrite_cdp_endpoint(document: dict[str, Any], port: int) -> str:
+    def _rewrite_cdp_endpoint(document: dict[str, Any], port: int, *, host: str = "127.0.0.1") -> str:
         value = document.get("webSocketDebuggerUrl")
         if not isinstance(value, str):
             raise EmployeeDesktopError("Chrome DevTools endpoint is missing")
         parts = urlsplit(value)
         if parts.scheme not in {"ws", "wss"} or not parts.path.startswith("/devtools/browser/"):
             raise EmployeeDesktopError("Chrome DevTools endpoint has an unexpected format")
-        return urlunsplit(("ws", f"127.0.0.1:{port}", parts.path, parts.query, ""))
+        return urlunsplit(("ws", f"{host}:{port}", parts.path, parts.query, ""))
 
     def _inspect_optional(self, container: str) -> dict[str, Any] | None:
         result = self._docker("inspect", container, check=False)

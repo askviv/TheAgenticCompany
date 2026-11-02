@@ -5,9 +5,11 @@ After=libvirtd.service
 [Service]
 Type=simple
 User=root
+EnvironmentFile=/data/theagentcompany/virtual-time-world/config/clock.env
 Environment=VIRTUAL_TIME_SOURCE_ROOT=/data/theagentcompany/virtual-time-world/company-source
 Environment=PYTHONPATH=/data/theagentcompany/virtual-time-world/company-source
-ExecStart=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py run
+ExecStart=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py run --rate ${WORLD_CLOCK_RATE}
+ExecReload=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py set-rate ${WORLD_CLOCK_RATE}
 ExecStop=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py stop
 Restart=on-failure
 RestartSec=5
