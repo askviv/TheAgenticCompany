@@ -31,6 +31,25 @@ COMPANY_TOOLS = (
     ('gitlab', 'GitLab'),
     ('midpoint', 'midPoint'),
 )
+
+
+def _kernel_virtual_time_rate():
+    rate_path = Path('/sys/kernel/virtual_time_rate')
+    try:
+        raw_rate = rate_path.read_text(encoding='ascii').strip()
+    except FileNotFoundError:
+        return 1
+    except OSError as error:
+        raise RuntimeError('Could not read the active kernel virtual-time rate') from error
+    try:
+        rate = int(raw_rate)
+    except ValueError as error:
+        raise RuntimeError('The active kernel virtual-time rate is invalid') from error
+    if rate < 1:
+        raise RuntimeError('The active kernel virtual-time rate must be positive')
+    return rate
+
+
 COMPANY_EVALUATION_PROVIDERS = ('coffeebench', 'ecommercebench')
 SIMULATION_SCENARIOS = {
     'A1': {
@@ -182,7 +201,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     Path(app.config['DATABASE']).parent.mkdir(parents=True, exist_ok=True)
     @contextmanager
     def db():
-        with closing(sqlite3.connect(app.config['DATABASE'], timeout=15)) as connection:
+        with closing(sqlite3.connect(app.config['DATABASE'], timeout=15 * _kernel_virtual_time_rate())) as connection:
             connection.row_factory=sqlite3.Row
             with connection:
                 yield connection
@@ -1333,7 +1352,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             while True:
                 with changed:
                     received=changed.wait_for(lambda: version[0]!=last,
-                        timeout=app.config['EVENTS_WAIT_SECONDS'])
+                        timeout=app.config['EVENTS_WAIT_SECONDS'] * _kernel_virtual_time_rate())
                     last=version[0]
                 if received:
                     snapshot=[{k:r[k] for k in ('id','status','revision')} for r in all_runs()]
