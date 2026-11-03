@@ -26,6 +26,8 @@ from authres import AuthenticationResultsHeader, AuthResError
 from imapclient import IMAPClient
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
+from servers.simulation.clock_rate import kernel_virtual_time_rate
+
 from servers.company.scenarios import (
     RealMailTransport,
     _confirm_smtp4dev_until,
@@ -1024,7 +1026,9 @@ class MailuGateway:
             self.config.smtp4dev_api_base_url.rstrip("/") + "/",
             f"api/Messages/{message_uuid}",
         )
-        response = requests.get(detail_url, timeout=self.config.smtp_timeout_seconds)
+        response = requests.get(
+            detail_url, timeout=self.config.confirm_timeout_seconds * kernel_virtual_time_rate(),
+        )
         response.raise_for_status()
         headers: dict[str, list[str]] = {}
         for item in response.json().get("headers", []):
@@ -1418,7 +1422,10 @@ class MailuGateway:
     def _smtp4dev_get(self, path: str, operation: str, *, params: dict[str, Any] | None = None) -> requests.Response:
         url = urljoin(self.config.smtp4dev_api_base_url.rstrip("/") + "/", path)
         try:
-            response = requests.get(url, params=params, timeout=self.config.smtp_timeout_seconds)
+            response = requests.get(
+                url, params=params,
+                timeout=self.config.confirm_timeout_seconds * kernel_virtual_time_rate(),
+            )
             response.raise_for_status()
             return response
         except requests.RequestException as error:
