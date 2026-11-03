@@ -635,6 +635,9 @@ def main() -> int:
     python_info = subprocess.run([args.python, "--version"], check=True, capture_output=True, text=True)
     if "3.12" not in python_info.stdout + python_info.stderr:
         raise RuntimeError("Coordinator runtime requires the workplace's Python 3.12 environment")
+    cua_driver = root / "tools/cua-driver/bin/cua-driver"
+    subprocess.run([args.python, str(source / "deploy/enterprise-simulation/coordinator/install-cua-driver.py"),
+                    "--destination", str(cua_driver)], check=True)
     employee_desktop_image = ensure_employee_desktop_image(source)
     print(f"Employee desktop image ready: {employee_desktop_image}")
 
@@ -743,6 +746,8 @@ def main() -> int:
         "company_profile_file": str(company_profile_path),
         "employee_desktop_image": employee_desktop_image,
         "employee_desktop_view_only": True,
+        "employee_cua_driver_file": str(cua_driver),
+        "employee_cua_inference_token_file": str(root / "actors/secrets/codex-inference-token"),
         "employee_desktop_ca_file": str(args.tls_ca_file) if args.tls_ca_file else None,
         "rocketchat_base_url": args.chat_url,
         "principals_file": str(principals_path),

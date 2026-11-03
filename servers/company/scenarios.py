@@ -638,85 +638,22 @@ class RealMailTransport:
 
 
 class RealChatTransport:
-    """Send through an employee's Rocket.Chat browser and verify its DDP receipt."""
+    """CUA UI submission with native Rocket.Chat read-only receipt verification."""
 
-    def __init__(self, session: requests.Session | None = None, browser_session_provider: Any = None):
+    def __init__(self, session: requests.Session | None = None):
         self.session = session or requests.Session()
-        self.browser_session_provider = browser_session_provider
 
-    def _browser_provider(self):
-        if self.browser_session_provider is None:
-            from .browser_chat import PlaywrightEmployeeBrowserSessionProvider
+    def _cua_transport(self):
+        from .cua_chat import CuaChatTransport
+        from .browser_chat import _configured_desktop_manager
+        return CuaChatTransport(_configured_desktop_manager(), self.session)
 
-            self.browser_session_provider = PlaywrightEmployeeBrowserSessionProvider()
-        return self.browser_session_provider
+    def post(self, fixture, credentials, attempt_id, **callbacks):
+        return self._cua_transport().post(fixture, credentials, attempt_id, **callbacks)
 
-    @staticmethod
-    def _message_from_frame(frame: Any) -> list[dict[str, Any]]:
-        if isinstance(frame, bytes):
-            try:
-                frame = frame.decode("utf-8")
-            except UnicodeDecodeError:
-                return []
-        if isinstance(frame, str):
-            try:
-                frame = json.loads(frame)
-            except ValueError:
-                return []
-        found: list[dict[str, Any]] = []
-        pending = [frame]
-        while pending:
-            value = pending.pop()
-            if isinstance(value, dict):
-                found.append(value)
-                pending.extend(value.values())
-            elif isinstance(value, list):
-                pending.extend(value)
-        return found
-
-    @staticmethod
-    def _ddp_frame(frame: Any) -> dict[str, Any] | None:
-        if isinstance(frame, bytes):
-            try:
-                frame = frame.decode("utf-8")
-            except UnicodeDecodeError:
-                return None
-        if isinstance(frame, str):
-            try:
-                frame = json.loads(frame)
-            except ValueError:
-                return None
-        return frame if isinstance(frame, dict) else None
-
-    def _ddp_send_requests(self, frames: list[Any], room_id: str,
-                           message_text: str) -> list[dict[str, str]]:
-        requests_found = []
-        for raw_frame in frames:
-            frame = self._ddp_frame(raw_frame)
-            if not frame or frame.get("msg") != "method" or frame.get("method") != "sendMessage":
-                continue
-            message_ids = [value.get("_id") for value in self._message_from_frame(frame.get("params"))
-                           if value.get("rid") == room_id and value.get("msg") == message_text
-                           and isinstance(value.get("_id"), str) and value.get("_id")]
-            if len(message_ids) == 1 and isinstance(frame.get("id"), str) and frame["id"]:
-                requests_found.append({"rpc_id": frame["id"], "message_id": message_ids[0]})
-        # Identical matching send calls are ambiguous and cannot identify this attempt.
-        return requests_found
-
-    def _ddp_send_acknowledged(self, frames: list[Any], rpc_id: str,
-                               message_id: str) -> bool:
-        for raw_frame in frames:
-            frame = self._ddp_frame(raw_frame)
-            if (not frame or frame.get("msg") != "result" or frame.get("id") != rpc_id
-                    or "error" in frame or "result" not in frame):
-                continue
-            result = frame["result"]
-            acknowledged_id = result if isinstance(result, str) else None
-            if isinstance(result, dict):
-                acknowledged_id = result.get("_id") or result.get("messageId")
-            if acknowledged_id is None or acknowledged_id == message_id:
-                return True
-        return False
+    def confirm_message(self, fixture, credentials, message_id, message_text, submission_started_at):
+        return self._cua_transport().confirm_message(
+            fixture, credentials, message_id, message_text, submission_started_at)
 
     @staticmethod
     def _browser_room_url(base: str, room: dict[str, Any]) -> str:
@@ -726,36 +663,6 @@ class RealChatTransport:
         parts = urlsplit(message_url)
         return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
-    @staticmethod
-    def _is_chat_websocket(socket: Any, base: str) -> bool:
-        parsed, origin = urlsplit(socket.url), urlsplit(base)
-        return parsed.netloc == origin.netloc and parsed.path.endswith("/websocket")
-
-    def _active_chat_websocket(self, page: Any, sockets: list[Any],
-                               socket_states: dict[int, dict[str, Any]], base: str) -> Any:
-        while True:
-            candidates = [socket for socket in sockets
-                          if self._is_chat_websocket(socket, base) and not socket.is_closed()]
-            if candidates:
-                socket = candidates[-1]
-            else:
-                page.wait_for_event(
-                    "websocket", predicate=lambda candidate: self._is_chat_websocket(candidate, base),
-                    timeout=0,
-                )
-                continue
-
-            state = socket_states[id(socket)]
-            if state["connected"]:
-                return socket
-            try:
-                # The listener installed on the page event buffers this frame even
-                # if it arrives while React is making the composer visible.
-                socket.wait_for_event("framereceived", timeout=0)
-            except Exception as error:
-                if socket.is_closed():
-                    continue
-                raise
 
     def _room(self, base: str, headers: dict[str, str], room_id: str) -> dict[str, Any]:
         response = self.session.get(urljoin(base, "api/v1/rooms.info"), headers=headers,
@@ -766,39 +673,6 @@ class RealChatTransport:
             raise RuntimeError("ROCKETCHAT_ROOM_LOOKUP_MISMATCH")
         return room
 
-    def _browser_auth(self, page: Any, base: str, credentials: dict[str, str], expected_user_id: str) -> dict[str, str]:
-        page.goto(base, wait_until="domcontentloaded", timeout=0)
-        auth = page.evaluate("""() => ({
-          token: localStorage.getItem('Meteor.loginToken'),
-          userId: localStorage.getItem('Meteor.userId')
-        })""")
-        if not isinstance(auth, dict) or not auth.get("token") or not auth.get("userId"):
-            password = page.locator('input[type="password"]')
-            username = page.locator('input[name="username"], input[name="email"], input[type="email"]')
-            username.first.wait_for(state="visible", timeout=0)
-            password.wait_for(state="visible", timeout=0)
-            username.first.fill(credentials["username"], timeout=0)
-            password.fill(credentials["password"], timeout=0)
-            submit = page.locator('button[type="submit"]')
-            submit.first.wait_for(state="visible", timeout=0)
-            submit.first.click(timeout=0)
-            page.wait_for_function(
-                "() => !!localStorage.getItem('Meteor.loginToken') && !!localStorage.getItem('Meteor.userId')",
-                timeout=0,
-            )
-            auth = page.evaluate("""() => ({
-              token: localStorage.getItem('Meteor.loginToken'),
-              userId: localStorage.getItem('Meteor.userId')
-            })""")
-        token, user_id = auth.get("token"), auth.get("userId")
-        if not isinstance(token, str) or not token or not isinstance(user_id, str) or not user_id:
-            raise RuntimeError("ROCKETCHAT_BROWSER_AUTHENTICATION_UNAVAILABLE")
-        headers = {"X-Auth-Token": token, "X-User-Id": user_id}
-        response = self.session.get(urljoin(base, "api/v1/me"), headers=headers, timeout=15)
-        response.raise_for_status()
-        if (response.json().get("_id") != expected_user_id or user_id != expected_user_id):
-            raise RuntimeError("ROCKETCHAT_AUTHOR_MISMATCH")
-        return headers
 
     @staticmethod
     def _verified_message(value: Any, *, message_id: str, room_id: str,
@@ -814,6 +688,7 @@ class RealChatTransport:
             raise RuntimeError("ROCKETCHAT_MESSAGE_TEXT_MISMATCH")
         return value
 
+
     def _message_by_id(self, base: str, headers: dict[str, str], message_id: str,
                        room_id: str, author_id: str, message_text: str) -> dict[str, Any] | None:
         response = self.session.get(urljoin(base, "api/v1/chat.getMessage"), headers=headers,
@@ -824,6 +699,7 @@ class RealChatTransport:
         message = response.json().get("message")
         return self._verified_message(message, message_id=message_id, room_id=room_id,
                                       author_id=author_id, message_text=message_text)
+
 
     def _receipt(self, fixture: dict[str, Any], room: dict[str, Any],
                  message: dict[str, Any]) -> dict[str, str | None]:
@@ -837,6 +713,7 @@ class RealChatTransport:
         if fixture.get("mention_account_id"):
             receipt["mention_account_id"] = fixture["mention_account_id"]
         return receipt
+
 
     def _mention_text(self, fixture: dict[str, Any], headers: dict[str, str]) -> str | None:
         account_id = fixture.get("mention_account_id")
@@ -854,128 +731,6 @@ class RealChatTransport:
             raise RuntimeError("ROCKETCHAT_MENTION_USERNAME_MISSING")
         return "@" + username
 
-    def post(self, fixture: dict[str, Any], credentials: dict[str, str], attempt_id: str,
-             *, on_submission_started: Any = None,
-             on_message_id_captured: Any = None,
-             on_effective_message_text: Any = None) -> dict[str, str | None]:
-        _safe_ref(attempt_id, "chat attempt reference")
-        box = fixture["employee_mailbox"]
-        base = box["rocketchat_base_url"].rstrip("/") + "/"
-        expected_author = box["rocketchat_expected_user_id"]
-        with self._browser_provider().open_for_employee_email(box["address"]) as page:
-            sockets = []
-            socket_states: dict[int, dict[str, Any]] = {}
-
-            def track_socket(socket: Any) -> None:
-                sockets.append(socket)
-                state: dict[str, Any] = {"connected": False, "frames": [], "sent_frames": []}
-                socket_states[id(socket)] = state
-
-                def track_frame(frame: Any) -> None:
-                    state["frames"].append(frame)
-                    if any(message.get("msg") == "connected"
-                           for message in self._message_from_frame(frame)):
-                        state["connected"] = True
-
-                socket.on("framereceived", track_frame)
-                socket.on("framesent", lambda frame: state["sent_frames"].append(frame))
-
-            page.on("websocket", track_socket)
-            headers = self._browser_auth(page, base, credentials, expected_author)
-            room_id = box["rocketchat_room_id"]
-            room = self._room(base, headers, room_id)
-            mention = self._mention_text(fixture, headers)
-            message_text = (mention + " " if mention else "") + fixture["chat_message"]
-            if on_effective_message_text is not None:
-                on_effective_message_text(message_text)
-            page.goto(self._browser_room_url(base, room), wait_until="domcontentloaded", timeout=0)
-            composer = page.locator(
-                'textarea[aria-label="Message"], textarea.rc-message-box__textarea, '
-                'textarea[placeholder*="message" i], [contenteditable="true"][role="textbox"]'
-            ).first
-            composer.wait_for(state="visible", timeout=0)
-            if not composer.is_visible():
-                raise RuntimeError("ROCKETCHAT_MESSAGE_COMPOSER_UNAVAILABLE")
-            socket = self._active_chat_websocket(page, sockets, socket_states, base)
-            socket_state = socket_states[id(socket)]
-            sent_frames = socket_state["sent_frames"]
-            received_frames = socket_state["frames"]
-            message_text = message_text.replace("\r\n", "\n").replace("\r", "\n")
-            composer.fill("", timeout=0)
-            lines = message_text.split("\n")
-            for index, line in enumerate(lines):
-                if line:
-                    composer.press_sequentially(line, delay=150 * kernel_virtual_time_rate(), timeout=0)
-                if index < len(lines) - 1:
-                    # Rocket.Chat documents Shift+Enter as a line break; plain
-                    # Enter remains reserved for the final submit action.
-                    composer.press("Shift+Enter", timeout=0)
-            if on_submission_started is not None:
-                on_submission_started()
-            # Drop room-history events buffered during page load. Attribution below
-            # still requires the ID observed in this click's outgoing DDP method.
-            sent_frames.clear()
-            received_frames.clear()
-            composer.press("Enter", timeout=0)
-
-            native_message = None
-            while True:
-                requests_found = self._ddp_send_requests(sent_frames, room_id, message_text)
-                if len(requests_found) > 1:
-                    raise RuntimeError("ROCKETCHAT_BROWSER_SEND_OUTCOME_UNCERTAIN")
-                if requests_found:
-                    send_request = requests_found[0]
-                    for raw_frame in received_frames:
-                        for candidate in self._message_from_frame(raw_frame):
-                            author = candidate.get("u") or {}
-                            if (candidate.get("_id") == send_request["message_id"]
-                                    and candidate.get("rid") == room_id
-                                    and isinstance(author, dict) and author.get("_id") == expected_author
-                                    and candidate.get("msg") == message_text):
-                                native_message = candidate
-                                break
-                        if native_message is not None:
-                            break
-                    acknowledged = self._ddp_send_acknowledged(
-                        received_frames, send_request["rpc_id"], send_request["message_id"])
-                else:
-                    acknowledged = False
-                if native_message is not None and acknowledged:
-                    break
-                try:
-                    # Listener buffering plus Playwright's event wait avoids polling
-                    # and leaves the acknowledged send pending until frames arrive.
-                    socket.wait_for_event("framereceived", timeout=0)
-                except Exception as error:
-                    raise RuntimeError("ROCKETCHAT_BROWSER_SEND_OUTCOME_UNCERTAIN") from error
-            native_id = native_message["_id"]
-            if on_message_id_captured is not None:
-                on_message_id_captured(native_id)
-            confirmed = self._message_by_id(base, headers, native_id, room_id,
-                                            expected_author, message_text)
-            if confirmed is None:
-                raise RuntimeError("ROCKETCHAT_MESSAGE_API_NOT_CONFIRMED")
-            return self._receipt(fixture, room, confirmed)
-
-    def confirm_message(self, fixture: dict[str, Any], credentials: dict[str, str],
-                        message_id: str | None, message_text: str,
-        submission_started_at: str | None) -> dict[str, str | None] | None:
-        """Read-only recovery check; uncertain browser sends are never resent."""
-        box = fixture["employee_mailbox"]
-        base = box["rocketchat_base_url"].rstrip("/") + "/"
-        author_id = box["rocketchat_expected_user_id"]
-        with self._browser_provider().open_for_employee_email(box["address"]) as page:
-            headers = self._browser_auth(page, base, credentials, author_id)
-            room_id = box["rocketchat_room_id"]
-            room = self._room(base, headers, room_id)
-            if message_id:
-                message = self._message_by_id(base, headers, message_id, room_id, author_id, message_text)
-            else:
-                # Text/time matches can identify an older identical message. Without
-                # the browser-generated DDP ID persisted before failure, recovery is
-                # deliberately inconclusive and the attempt is never resent.
-                return None
-            return self._receipt(fixture, room, message) if message else None
 
 class ScenarioStore:
     def __init__(self, database: Path):

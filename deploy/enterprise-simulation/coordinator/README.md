@@ -88,17 +88,12 @@ sudo python3.12 /data/theagentcompany/enterprise/source/deploy/enterprise-simula
 ```
 
 The script creates private runtime configuration, an agent-only client file,
-the venv, and attempts to prepare the pinned local Selkies desktop image. Image
-setup skips when the existing local image carries the current Dockerfile
-digest; a source image change triggers a build. The build only reads the pinned
-official base and tags the local derivative. It does not restart or replace
-any running host service. If Docker cannot build or pull the image, bootstrap
-prints a warning and completes core company setup; desktop start then reports
-that the image is unavailable. Rerun bootstrap after Docker connectivity is
-restored. See `employee-desktop/README.md` for image details. The script prints
-file locations and account outcomes, never passwords,
-principal tokens, API bodies, or message content. It does not start the API or
-install/enable the unit.
+and the Python environment. It pulls the pinned published Selkies desktop image
+and installs the checksum-pinned official Cua Driver binary. No custom desktop
+image is built. Employee actions use native CUA tools in that employee's X11
+session; the observer stream is view-only by default. File locations and account
+outcomes are reported without passwords, tokens or message content.
+The script does not start the API or install/enable its unit.
 
 `secrets/principals.json` contains three generated credentials: controller,
 evaluator, and agent. `secrets/agent-client.json` contains only the agent
@@ -458,3 +453,17 @@ containers must be recreated to apply a changed mode, retaining their profile vo
 Employee desktops use Selkies' native fixed 1920 × 1080 resolution with dynamic
 resize locked off. Grid thumbnails and focused viewers scale the same desktop;
 connecting, focusing or disconnecting a viewer does not change its resolution.
+
+Native employee computer actions use the official Cua Driver MCP catalog, exposed
+through the existing Codex model transport. The model receives native desktop
+screenshots and accessibility state and chooses native foreground clicks, cursor
+movement and keyboard actions. No Playwright or browser script action path is used.
+The local credential tool types passwords without placing their values in model
+prompts. Message preparation finishes before the existing durable submission
+boundary; delivery is confirmed from native mailbox or chat records.
+
+Runtime configuration uses `employee_cua_driver_file`, `employee_cua_inference_url`,
+`employee_cua_inference_token_file` and `employee_cua_model`. The pinned driver and
+capability manifest are mounted read-only into new desktops; existing desktops
+receive the same files when their CUA session is opened. No model-backed action is
+executed by installation or tool-catalog discovery.

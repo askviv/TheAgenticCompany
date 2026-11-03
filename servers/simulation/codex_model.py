@@ -7,6 +7,7 @@ tool calls as structured data; it must never execute those tools itself.
 from __future__ import annotations
 
 import json
+import base64
 import os
 from pathlib import Path
 import subprocess
@@ -111,16 +112,36 @@ class CodexCLIModel:
     ) -> dict:
         """Make one CLI invocation; failures/uncertain outcomes are not retried."""
         tools = tools or []
+        images = []
+        model_messages = []
+        for message in messages:
+            content = message.get("content")
+            if not isinstance(content, list):
+                model_messages.append(message)
+                continue
+            parts = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") in {"image_url", "input_image"}:
+                    address = part.get("image_url")
+                    if isinstance(address, dict):
+                        address = address.get("url")
+                    header, encoded = address.split(",", 1)
+                    extension = {"data:image/png;base64": ".png", "data:image/jpeg;base64": ".jpg"}[header]
+                    images.append((base64.b64decode(encoded, validate=True), "screenshot" + extension))
+                    parts.append({"type": "text", "text": f"[Attached screenshot {len(images)}]"})
+                else:
+                    parts.append(part)
+            model_messages.append({**message, "content": parts})
         prompt = (
             "Act only as the inference provider for the supplied conversation. "
             "Follow its system/developer instructions and reply to its latest turn. "
             "The supplied tools belong to the calling runtime: return tool calls as data, "
             "never execute commands, inspect files, or contact services. "
             "Return content and tool_calls matching the output schema.\n"
-            + json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False)
+            + json.dumps({"messages": model_messages, "tools": tools}, ensure_ascii=False)
         )
         output, usage = self._run_structured_cli(
-            prompt, ModelReply.model_json_schema(),
+            prompt, ModelReply.model_json_schema(), images=images,
             on_submission_started=on_submission_started,
             reasoning_effort=self.settings.reasoning_effort,
             reject_native_tools=True, validate_usage=True,
@@ -183,11 +204,11 @@ class CodexCLIModel:
             # actor workers retain their explicitly configured effort.
             if reasoning_effort is not None:
                 command.extend(["--config", f'model_reasoning_effort="{reasoning_effort}"'])
-            for image, filename in images or []:
+            for image_index, (image, filename) in enumerate(images or []):
                 suffix = Path(filename).suffix
                 if "/" in suffix or "\\" in suffix:
                     raise ValueError("image filename suffix is invalid")
-                image_path = root / ("evidence" + suffix)
+                image_path = root / (f"evidence-{image_index}" + suffix)
                 image_path.write_bytes(image)
                 image_path.chmod(0o600)
                 command.extend(["--image", str(image_path)])

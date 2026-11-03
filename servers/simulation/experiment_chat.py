@@ -14,8 +14,7 @@ import traceback
 from datetime import datetime, timezone
 from typing import Any
 
-from servers.company.browser_chat import PlaywrightEmployeeBrowserSessionProvider
-from servers.company.scenarios import RealChatTransport
+from servers.company.cua_chat import CuaChatTransport
 from servers.simulation.clock_rate import kernel_virtual_time_rate
 from servers.simulation.runtime import private_json
 
@@ -218,9 +217,8 @@ class ExperimentChatDispatch:
             raise ExperimentChatError("employee_chat_credentials_unavailable")
         return {"username": username, "password": password}
 
-    def _transport(self) -> RealChatTransport:
-        provider = PlaywrightEmployeeBrowserSessionProvider(lambda: self.desktop_manager)
-        return RealChatTransport(browser_session_provider=provider)
+    def _transport(self) -> CuaChatTransport:
+        return CuaChatTransport(self.desktop_manager)
 
     @contextmanager
     def _attempt_lock(self, key_hash: str):

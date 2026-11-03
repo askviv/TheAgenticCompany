@@ -74,6 +74,7 @@ class EmployeeDesktopRuntime:
         docker_binary: str = "docker",
         image: str = DEFAULT_SELKIES_IMAGE,
         view_only: bool = True,
+        cua_driver_file: str | Path = "/data/theagentcompany/enterprise/tools/cua-driver/bin/cua-driver",
         ca_file: str | Path | None = None,
     ):
         if not isinstance(image, str) or not image.strip():
@@ -86,6 +87,8 @@ class EmployeeDesktopRuntime:
         self.docker_binary = docker_binary
         self.image = image.strip()
         self.view_only = view_only
+        self.cua_driver_file = Path(cua_driver_file)
+        self.cua_manifest_file = Path(__file__).resolve().parents[2] / "deploy/enterprise-simulation/coordinator/employee-cua-capabilities.yaml"
         self.ca_file = Path(ca_file) if ca_file is not None else None
         self._idle_workers: dict[str, tuple[threading.Thread, threading.Event]] = {}
         self._idle_workers_lock = threading.Lock()
@@ -721,6 +724,10 @@ class EmployeeDesktopRuntime:
             "--volume", f"{volume}:/home/ubuntu",
             "--env-file", str(env_file),
         ]
+        arguments.extend((
+            "--mount", f"type=bind,source={self.cua_driver_file},target=/opt/employee-cua/cua-driver,readonly",
+            "--mount", f"type=bind,source={self.cua_manifest_file},target=/opt/employee-cua/capabilities.yaml,readonly",
+        ))
         if ca_nss_db is not None:
             arguments.extend((
                 "--mount",
@@ -776,12 +783,29 @@ class EmployeeDesktopRuntime:
                 os.chown(database_file, 1000, 1000)
         return db
 
+    def prepare_cua_runtime(self, employee_id: str) -> None:
+        """Install native tool files into existing desktops; new ones bind them read-only."""
+        container = self._container_name(employee_id)
+        self._validate_managed_container(self._inspect(container), employee_id)
+        self._docker("exec", "--user", "root", container, "mkdir", "-p", "/opt/employee-cua")
+        for source, target in ((self.cua_driver_file, "/opt/employee-cua/cua-driver"),
+                               (self.cua_manifest_file, "/opt/employee-cua/capabilities.yaml")):
+            digest = hashlib.sha256(source.read_bytes()).hexdigest()
+            actual = self._docker("exec", container, "sha256sum", target, check=False)
+            if actual.returncode == 0 and actual.stdout.split()[0] == digest:
+                continue
+            if actual.returncode not in {0, 1}:
+                raise EmployeeDesktopError("Native CUA tool files could not be inspected")
+            self._docker("cp", str(source), f"{container}:{target}")
+            self._docker("exec", "--user", "root", container, "chmod",
+                         "0755" if target.endswith("cua-driver") else "0644", target)
+
     def _launch_chrome(self, container: str) -> None:
         # The official Selkies desktop image installs Google Chrome and patches
         # its launcher with the container-compatible sandbox/password-store flags.
         self._docker(
             "exec", "--user", "ubuntu", "--env", "DISPLAY=:20", "--detach", container,
-            "google-chrome", "--no-first-run", "--no-default-browser-check", "--start-fullscreen",
+            "google-chrome", "--no-first-run", "--no-default-browser-check", "--start-fullscreen", "--force-renderer-accessibility",
             "--remote-debugging-port=9222",
             "--user-data-dir=/home/ubuntu/.employee-browser-profile", "about:blank",
         )
