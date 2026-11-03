@@ -17,6 +17,7 @@ services:
       - default
 
   front:
+    profiles: [public]
     image: ghcr.io/mailu/nginx:2024.06.58@sha256:78fb2f9dbc3081e4fa251bd16b589d06a48ebd428b64daed16a483c8db899288
     healthcheck:
       test: ["CMD", "curl", "-m3", "-skfLo", "/dev/null", "http://127.0.0.1:10204/health"]
@@ -25,14 +26,36 @@ services:
       tac.environment: single-host
     env_file: /data/theagentcompany/mailu/mailu.env
     ports:
-      # Caddy keeps host port 443. Caddy can proxy to this loopback-only HTTP port.
-      - "127.0.0.1:8112:80"
-      # LAN-bound ports for local SMTP delivery and authenticated submission/IMAP.
+      # Public protocol listener uses the host Caddy certificate.
       - "192.0.2.10:2525:25"
       - "192.0.2.10:2587:587"
       - "192.0.2.10:2993:993"
     volumes:
       - /data/theagentcompany/https-tls:/certs:ro
+      - /data/theagentcompany/mailu/overrides/nginx:/overrides:ro
+    dns:
+      - 9.9.9.9
+      - 1.1.1.1
+    networks:
+      default: {}
+      webmail: {}
+
+  front-company-clock-internal:
+    image: ghcr.io/mailu/nginx:2024.06.58@sha256:78fb2f9dbc3081e4fa251bd16b589d06a48ebd428b64daed16a483c8db899288
+    healthcheck:
+      test: ["CMD", "curl", "-m3", "-skfLo", "/dev/null", "http://127.0.0.1:10204/health"]
+    restart: unless-stopped
+    labels:
+      tac.environment: single-host
+    env_file: /data/theagentcompany/mailu/mailu.env
+    ports:
+      # Private CA listeners for guest services and the local Caddy proxy.
+      - "0.0.0.0:12525:25"
+      - "127.0.0.1:8112:80"
+      - "0.0.0.0:12587:587"
+      - "0.0.0.0:12993:993"
+    volumes:
+      - /data/theagentcompany/mailu/internal-https-tls:/certs:ro
       - /data/theagentcompany/mailu/overrides/nginx:/overrides:ro
     dns:
       - 9.9.9.9
@@ -71,7 +94,7 @@ services:
       - /data/theagentcompany/mailu/mail:/mail
       - /data/theagentcompany/mailu/overrides/dovecot:/overrides:ro
     depends_on:
-      - front
+      - front-company-clock-internal
     dns:
       - 9.9.9.9
       - 1.1.1.1
@@ -88,7 +111,7 @@ services:
       - /data/theagentcompany/mailu/mailqueue:/queue
       - /data/theagentcompany/mailu/overrides/postfix:/overrides:ro
     depends_on:
-      - front
+      - front-company-clock-internal
     dns:
       - 9.9.9.9
       - 1.1.1.1
@@ -106,7 +129,7 @@ services:
       - /data/theagentcompany/mailu/filter:/var/lib/rspamd
       - /data/theagentcompany/mailu/overrides/rspamd:/overrides:ro
     depends_on:
-      - front
+      - front-company-clock-internal
       - redis
     dns:
       - 9.9.9.9
@@ -124,7 +147,7 @@ services:
       - /data/theagentcompany/mailu/webmail:/data
       - /data/theagentcompany/mailu/overrides/roundcube:/overrides:ro
     depends_on:
-      - front
+      - front-company-clock-internal
     networks:
       - webmail
 networks:

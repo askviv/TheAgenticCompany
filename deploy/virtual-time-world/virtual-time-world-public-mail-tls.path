@@ -1,0 +1,11 @@
+[Unit]
+Description=Synchronize public Mailu TLS when Caddy's mail certificate changes
+
+[Path]
+PathChanged=/etc/caddy/company-world
+PathChanged=/var/lib/tac-https/caddy/certificates/acme-v02.api.letsencrypt.org-directory/__PUBLIC_MAIL_HOST__
+PathChanged=/var/lib/tac-https/caddy/certificates/acme.zerossl.com-v2-dv90/__PUBLIC_MAIL_HOST__
+Unit=virtual-time-world-public-mail-tls.service
+
+[Install]
+WantedBy=paths.target

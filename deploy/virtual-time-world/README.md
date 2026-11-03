@@ -43,7 +43,13 @@ QEMU forwards guest HTTP/HTTPS to host loopback ports 18080/18443 and forwards
 Mailu SMTP, submission, and IMAPS on the configured `mail_ports` to the
 profile's local `public_ip`. The defaults are 2525, 2587, and 2993; ensure those
 ports are available and configure external DNS/firewalls for the selected
-protocol ports.
+protocol ports. Guest company processes use the private-CA Mailu front on local
+ports 12587/12993. The public Mailu front uses the same public certificate as
+host Caddy: the host path/timer helper copies the validated Caddy-managed or
+profile-supplied certificate into the guest and starts the standard pinned
+Mailu nginx front. The public front is independent of internal company startup,
+so ACME issuance can finish asynchronously while the private front serves the
+company services.
 
 Running the command again starts the clock/API and ensures the guest company
 target, Compose projects, and HTTPS frontend are active. To rebuild the selected

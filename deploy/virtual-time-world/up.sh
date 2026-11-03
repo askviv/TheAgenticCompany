@@ -126,6 +126,14 @@ fi
 if (( fresh == 1 )); then
   images=$WORLD_ROOT/images
   [[ ! -L $images ]] || fail '--fresh refuses symlinked image directories'
+  if systemctl cat virtual-time-world-public-mail-tls.timer >/dev/null 2>&1; then
+    systemctl stop virtual-time-world-public-mail-tls.timer
+  fi
+  if systemctl cat virtual-time-world-public-mail-tls.path >/dev/null 2>&1; then
+    systemctl stop virtual-time-world-public-mail-tls.path
+  fi
+  exec 8>/run/lock/virtual-time-world-public-mail-tls.lock
+  flock --exclusive 8
   for name in world.qcow2 company-data.qcow2 seed.img console.log candidate-vmlinuz candidate-initrd candidate-release candidate.json; do
     [[ ! -L $images/$name ]] || fail "--fresh refuses symlinked image artifact: $images/$name"
   done
@@ -184,6 +192,8 @@ EOF2
     "$WORLD_ROOT/config/containerd-timeout-baseline" "$WORLD_ROOT/config/issue-timer-cadence-baseline" \
     "$WORLD_ROOT/config/native-service-timeout-baseline" "$WORLD_ROOT/config/native-issue-timer-baseline"
   stage=0
+  flock --unlock 8
+  exec 8>&-
 fi
 
 WORLD_MAIL_BIND_IP=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["public_ip"])' "$PROFILE")
@@ -253,6 +263,9 @@ rsync -a --delete --exclude=.git --exclude='__pycache__' --exclude='node_modules
   -e "ssh -i $WORLD_ROOT/config/ssh_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=$WORLD_ROOT/config/known_hosts -p $WORLD_SSH_PORT" \
   "$REPO_ROOT/" ubuntu@127.0.0.1:"$GUEST_SOURCE/" \
   || fail 'could not install repository source in guest'
+# Build the timed kernel before starting applications, while the guest has
+# its full memory and CPU available to the compiler.
+ssh_cmd "sudo bash $GUEST_SOURCE/deploy/virtual-time-world/kernel/build.sh"
 scp -i "$WORLD_ROOT/config/ssh_ed25519" -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
   -o UserKnownHostsFile="$WORLD_ROOT/config/known_hosts" -P "$WORLD_SSH_PORT" \
   "$PROFILE" ubuntu@127.0.0.1:/tmp/company-deployment-profile.json
@@ -300,7 +313,7 @@ fi
 
 # Install stock systemd/Compose wiring, without starting the company target yet.
 if (( stage < 2 )); then
-ssh_cmd "sudo install -d -m 0755 /usr/local/lib/virtual-time-world /etc/systemd/system/agentic-company.target.d && sudo install -m 0755 $GUEST_SOURCE/deploy/virtual-time-world/prepare-healthcheck-cadence.py /usr/local/lib/virtual-time-world/prepare-healthcheck-cadence.py && sudo install -m 0755 $GUEST_SOURCE/deploy/virtual-time-world/prepare-containerd-timeouts.py /usr/local/lib/virtual-time-world/prepare-containerd-timeouts.py && sudo install -m 0755 $GUEST_SOURCE/deploy/virtual-time-world/company-compose-stop.py /usr/local/lib/virtual-time-world/company-compose-stop && sudo install -m 0644 $GUEST_SOURCE/deploy/virtual-time-world/agentic-company.target /etc/systemd/system/agentic-company.target && sudo install -m 0644 $GUEST_SOURCE/deploy/virtual-time-world/agentic-company.target.d/services.conf /etc/systemd/system/agentic-company.target.d/services.conf && sudo install -m 0644 $GUEST_SOURCE/deploy/virtual-time-world/agentic-company-compose.service /etc/systemd/system/agentic-company-compose.service && sudo install -m 0644 $GUEST_SOURCE/deploy/virtual-time-world/guest/tac-company-clock-caddy.service /etc/systemd/system/tac-https.service && for unit in $GUEST_SOURCE/deploy/enterprise-simulation/coordinator/*.service $GUEST_SOURCE/deploy/enterprise-simulation/coordinator/*.timer $GUEST_SOURCE/deploy/enterprise-simulation/actors/tac-customer-actor.service $GUEST_SOURCE/deploy/enterprise-simulation/actors/tac-supplier-actor.service; do sudo install -m 0644 \$unit /etc/systemd/system/; done && for dropin in $GUEST_SOURCE/deploy/virtual-time-world/tac-*.service.d; do sudo install -d -m 0755 /etc/systemd/system/\$(basename \$dropin); sudo install -m 0644 \$dropin/* /etc/systemd/system/\$(basename \$dropin)/; done && sudo systemctl daemon-reload && sudo bash $GUEST_SOURCE/deploy/virtual-time-world/kernel/build.sh"
+ssh_cmd "sudo install -d -m 0755 /usr/local/lib/virtual-time-world /etc/systemd/system/agentic-company.target.d && sudo install -m 0755 $GUEST_SOURCE/deploy/virtual-time-world/prepare-healthcheck-cadence.py /usr/local/lib/virtual-time-world/prepare-healthcheck-cadence.py && sudo install -m 0755 $GUEST_SOURCE/deploy/virtual-time-world/prepare-containerd-timeouts.py /usr/local/lib/virtual-time-world/prepare-containerd-timeouts.py && sudo install -m 0755 $GUEST_SOURCE/deploy/virtual-time-world/company-compose-stop.py /usr/local/lib/virtual-time-world/company-compose-stop && sudo install -m 0644 $GUEST_SOURCE/deploy/virtual-time-world/agentic-company.target /etc/systemd/system/agentic-company.target && sudo install -m 0644 $GUEST_SOURCE/deploy/virtual-time-world/agentic-company.target.d/services.conf /etc/systemd/system/agentic-company.target.d/services.conf && sudo install -m 0644 $GUEST_SOURCE/deploy/virtual-time-world/agentic-company-compose.service /etc/systemd/system/agentic-company-compose.service && sudo install -m 0644 $GUEST_SOURCE/deploy/virtual-time-world/guest/tac-company-clock-caddy.service /etc/systemd/system/tac-https.service && for unit in $GUEST_SOURCE/deploy/enterprise-simulation/coordinator/*.service $GUEST_SOURCE/deploy/enterprise-simulation/coordinator/*.timer $GUEST_SOURCE/deploy/enterprise-simulation/actors/tac-customer-actor.service $GUEST_SOURCE/deploy/enterprise-simulation/actors/tac-supplier-actor.service; do sudo install -m 0644 \$unit /etc/systemd/system/; done && for dropin in $GUEST_SOURCE/deploy/virtual-time-world/tac-*.service.d; do sudo install -d -m 0755 /etc/systemd/system/\$(basename \$dropin); sudo install -m 0644 \$dropin/* /etc/systemd/system/\$(basename \$dropin)/; done && sudo systemctl daemon-reload"
 mark_stage 2
 fi
 
@@ -314,13 +327,20 @@ install -m 0755 "$REPO_ROOT/deploy/virtual-time-world/clock_control.py" "$HOST_L
 install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/clock_api.py" "$HOST_LIB/clock_api.py"
 install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/prepare-healthcheck-cadence.py" "$HOST_LIB/prepare-healthcheck-cadence.py"
 install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/company-compose-stop.py" "$HOST_LIB/company-compose-stop"
+install -m 0755 "$REPO_ROOT/deploy/virtual-time-world/sync-public-mail-tls-to-guest.sh" "$HOST_LIB/sync-public-mail-tls-to-guest.sh"
 install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/virtual-time-world-clock.service" "$HOST_UNIT_DIR/virtual-time-world-clock.service"
 install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/virtual-time-world-clock-api.service" "$HOST_UNIT_DIR/virtual-time-world-clock-api.service"
-python3 - "$HOST_UNIT_DIR/virtual-time-world-clock.service" "$HOST_UNIT_DIR/virtual-time-world-clock-api.service" "$HOST_UNIT_DIR/tac-codex-inference.service" \
-  "$WORLD_ROOT" "$WORLD_NAME" "$WORLD_SSH_PORT" <<'PY'
+install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/virtual-time-world-public-mail-tls.service" "$HOST_UNIT_DIR/virtual-time-world-public-mail-tls.service"
+install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/virtual-time-world-public-mail-tls.timer" "$HOST_UNIT_DIR/virtual-time-world-public-mail-tls.timer"
+install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/virtual-time-world-public-mail-tls.path" "$HOST_UNIT_DIR/virtual-time-world-public-mail-tls.path"
+python3 - "$HOST_UNIT_DIR/virtual-time-world-clock.service" "$HOST_UNIT_DIR/virtual-time-world-clock-api.service" \
+  "$HOST_UNIT_DIR/virtual-time-world-public-mail-tls.service" "$HOST_UNIT_DIR/virtual-time-world-public-mail-tls.path" \
+  "$HOST_UNIT_DIR/tac-codex-inference.service" "$WORLD_ROOT" "$WORLD_NAME" "$WORLD_SSH_PORT" "$PROFILE" <<'PY'
 from pathlib import Path
+import json
 import sys
-*units, root, name, port = sys.argv[1:]
+clock, api, mail_tls, mail_path, codex, root, name, port, profile = sys.argv[1:]
+units = (clock, api, mail_tls, codex)
 for filename in units:
     path=Path(filename)
     content=path.read_text()
@@ -328,12 +348,17 @@ for filename in units:
     content=content.replace('tac-virtual-time-world', name)
     content=content.replace('22220', port)
     path.write_text(content)
+path=Path(mail_path)
+mail_host=json.loads(Path(profile).read_text(encoding='utf-8'))['domains']['mail']
+path.write_text(path.read_text().replace('__PUBLIC_MAIL_HOST__', mail_host))
 PY
 install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/host-tac-https.service" "$HOST_UNIT_DIR/tac-https.service"
 install -m 0755 "$REPO_ROOT/deploy/virtual-time-world/configure-public-caddy.py" "$HOST_LIB/configure-public-caddy.py"
 python3 "$REPO_ROOT/deploy/virtual-time-world/configure-public-caddy.py" \
   --profile "$PROFILE" --guest-root-ca "$WORLD_ROOT/config/guest-root-ca.crt"
 caddy validate --config /etc/caddy/company-world/Caddyfile --adapter caddyfile
+systemctl daemon-reload
+systemctl enable --now tac-https.service
 mark_stage 3
 fi
 if [[ ! -s $WORLD_ROOT/config/clock-api-token ]]; then
@@ -346,6 +371,12 @@ WORLD_SSH_PORT=$WORLD_SSH_PORT
 WORLD_CLOCK_RATE=$WORLD_CLOCK_RATE
 EOF2
 chmod 0600 "$WORLD_ROOT/config/clock.env"
+systemctl enable --now virtual-time-world-public-mail-tls.timer
+systemctl enable --now virtual-time-world-public-mail-tls.path
+public_cert_configured=$(python3 -c 'import json,sys; p=json.load(open(sys.argv[1])); t=p.get("public_tls",{}); print(int(bool(t.get("cert_file") and t.get("key_file"))))' "$PROFILE")
+if (( public_cert_configured )); then
+  systemctl start virtual-time-world-public-mail-tls.service
+fi
 
 # Start host bridge before workers so dashboard device-auth and inference share the same CLI.
 if (( stage < 4 )); then
@@ -417,6 +448,9 @@ while ! ssh "${ssh_opts[@]}" ubuntu@127.0.0.1 \
 done
 rm -f "$ssh_error"
 ssh_cmd 'sudo systemctl start agentic-company.target && sudo systemctl reload agentic-company-compose.service && sudo systemctl restart tac-https.service'
+# Configure the external inbox only after the company is running. A missing
+# external inbox reports an integration failure without stopping company apps.
+ssh_cmd "sudo python3 $GUEST_SOURCE/deploy/single-host/smtp4dev-bridge/configure_reply.py --profile $GUEST_CONFIG/deployment-profile.json"
 printf 'Fresh world boot requested. Clock supervisor will synchronize guest before the company target.\n'
 printf 'Public HTTPS routes use the supplied certificate or Caddy ACME with the configured DNS.\n'
 printf 'Complete Codex CLI device authentication from the dashboard when prompted.\n'

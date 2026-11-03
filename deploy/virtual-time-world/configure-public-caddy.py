@@ -85,7 +85,9 @@ def main() -> int:
 \t\t}}
 \t}}
 }}''')
-    caddyfile = '{\n\tadmin unix//run/tac-https/admin.sock\n}\n\n' + '\n\n'.join(sites) + '\n'
+    caddyfile = ('{\n\tadmin unix//run/tac-https/admin.sock\n'
+                 '\tstorage file_system /var/lib/tac-https/caddy\n}\n\n'
+                 + '\n\n'.join(sites) + '\n')
     output = args.config_dir / 'Caddyfile'
     atomic_write(output, caddyfile, 0o640)
     os.chown(output, 0, __import__('grp').getgrnam('caddy').gr_gid)

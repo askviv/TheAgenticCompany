@@ -185,7 +185,7 @@ def _mailu_compose(source: Path, profile: dict, mail_domain: str, ports: dict[st
     tls_key = TLS_ROOT / "server.key"
     if not tls_cert.is_file() or not tls_key.is_file():
         raise FileNotFoundError("Workplace TLS must be prepared before starting Mailu")
-    tls_data = ROOT / "https-tls"
+    tls_data = MAIL_ROOT / "internal-https-tls"
     tls_data.mkdir(parents=True, exist_ok=True, mode=0o700)
     shutil.copyfile(tls_cert, tls_data / "fullchain.pem")
     shutil.copyfile(tls_key, tls_data / "privkey.pem")
@@ -197,6 +197,24 @@ def _mailu_compose(source: Path, profile: dict, mail_domain: str, ports: dict[st
     compose = compose.replace("192.0.2.10:2525:25", f"0.0.0.0:{ports['smtp']}:25")
     compose = compose.replace("192.0.2.10:2587:587", f"0.0.0.0:{ports['submission']}:587")
     compose = compose.replace("192.0.2.10:2993:993", f"0.0.0.0:{ports['imaps']}:993")
+    # Mailu loads native Postfix/Rspamd overrides from its persistent data
+    # directory. Preserve the repository's complete configuration, then render
+    # only the two exact Viv mappings from the private deployment profile.
+    overrides_source = source / "deploy/single-host/mailu/overrides"
+    overrides_target = MAIL_ROOT / "overrides"
+    shutil.copytree(overrides_source, overrides_target, dirs_exist_ok=True)
+    viv_email = profile["viv"]["email"]
+    smtp_host = str(profile["viv"]["smtp_host"])
+    smtp_port = int(profile["viv"]["smtp_port"])
+    if any(character in smtp_host for character in "\r\n[]"):
+        raise ValueError("deployment profile viv.smtp_host is invalid for a Postfix transport map")
+    if "@" not in viv_email or any(character.isspace() for character in viv_email):
+        raise ValueError("deployment profile viv.email is invalid for a Postfix lookup map")
+    postfix_dir = overrides_target / "postfix"
+    _private_write(postfix_dir / "recipient-transport.map",
+                   f"{viv_email} smtp:[{smtp_host}]:{smtp_port}\n")
+    _private_write(postfix_dir / "viv-sender-login.map",
+                   f"{viv_email} viv_reply_relay@{mail_domain}\n")
     _private_write(yaml_path, compose)
     json_path = compose_dir / "mailu.json"
     rendered = _run(["docker", "compose", "--file", str(yaml_path), "config", "--format", "json"], capture=True)
@@ -288,7 +306,7 @@ def main() -> int:
     provision = source / "deploy/single-host/mailu/provision.py"
     _run([sys.executable, str(provision), "--root", str(MAIL_ROOT), "--identities",
           str(identities_path), "--api", "http://127.0.0.1:8112/api/v1", "--mail-domain", mail_domain,
-          "--smtp-host", profile["domains"]["mail"], "--smtp-port", str(mail_ports["submission"]),
+          "--smtp-host", profile["domains"]["mail"], "--smtp-port", "12587",
           "--mailbox-password-file", str(sandbox_password_file)])
 
     erp_compose = _prepare_erp(source, profile, sandbox_password, identities_path)
@@ -297,7 +315,7 @@ def main() -> int:
     site_id = str(uuid.uuid5(uuid.NAMESPACE_URL, str(ENTERPRISE_ROOT / "company-baseline")))
     setup_env = os.environ.copy()
     setup_env.update({"TAC_MAIL_HOST": profile["domains"]["mail"],
-                      "TAC_MAIL_SMTP_PORT": str(mail_ports["submission"])})
+                      "TAC_MAIL_SMTP_PORT": "12587"})
     setup = _run(["docker", "compose", "--profile", "admin", "--file", str(erp_compose),
                   "run", "--rm", "-e", "TAC_MAIL_HOST", "-e", "TAC_MAIL_SMTP_PORT",
                   "site-admin", "company-only", site_id],
@@ -316,8 +334,8 @@ def main() -> int:
     _run([sys.executable, str(coordinator), "--root", str(ENTERPRISE_ROOT), "--source", str(ENTERPRISE_ROOT / "source"),
           "--mail-root", str(MAIL_ROOT), "--mail-api", "http://127.0.0.1:8112/api/v1",
           "--mail-domain", mail_domain, "--mail-host", profile["domains"]["mail"],
-          "--mail-smtp-port", str(mail_ports["submission"]),
-          "--mail-imap-port", str(mail_ports["imaps"]),
+          "--mail-smtp-port", "12587",
+          "--mail-imap-port", "12993",
           "--mail-webmail-url", f"https://{profile['domains']['mail']}/webmail/",
           "--erp-base-url", f"https://{profile['domains']['erp']}",
           "--chat-url", f"https://{profile['domains']['chat']}",
