@@ -153,6 +153,14 @@ class EmployeeCuaAction:
             {"role": "system", "content": _system_prompt(submission=on_submission_started is not None)},
             {"role": "user", "content": safe_instruction},
         ]
+        state, images = self._call_tool("get_desktop_state", {})
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Current native employee desktop state:\n" + state},
+                *images,
+            ],
+        })
         phase = "prepare" if on_submission_started is not None else "act"
         while True:
             response = self.model.complete(messages, tools=self.tools)
@@ -546,6 +554,7 @@ def _system_prompt(*, submission: bool) -> str:
         "Use either target or the scope/pid/window_id fields, never both forms in one call. "
         "Use foreground delivery so native pointer and keyboard actions are visible. "
         "Use type_text for ordinary text, never clipboard tools. "
+        "Every response must include a supplied tool call; finish_action is the completion tool. "
         "For configured account credentials, call type_credential with username or password; credential "
         "values are local and are never in this prompt. Do not infer or request those values. "
         "Credential-entry tool results withhold screenshots; later fresh screenshots remain available, and "
