@@ -96,6 +96,26 @@ class FakeCoordinator:
         self.provider_tasks=[]
         self.provider_cases={}
         self.provider_catalog_failure=None
+        self.desktop_statuses={}
+        self.desktop_start_requests=[]
+        self.desktop_stop_requests=[]
+
+    def company_desktops(self):
+        employees=json.loads((REPOSITORY_ROOT/'deploy/single-host/company-identities.json').read_text())['employees']
+        return {'employees':[{'id':item['id'],'status':self.desktop_statuses.get(item['id'],'stopped')}
+                             for item in employees]}
+
+    def start_company_desktop(self, employee_id, *, idempotency_key):
+        self.desktop_start_requests.append((employee_id,idempotency_key))
+        self.desktop_statuses[employee_id]='running'
+        return {'employee_id':employee_id,'status':'running',
+                'viewing_url':f'https://selkies.example.test/{employee_id}/',
+                'viewing_credentials':{'username':f'{employee_id}-user','password':'temporary-pass'}}
+
+    def stop_company_desktop(self, employee_id, *, idempotency_key):
+        self.desktop_stop_requests.append((employee_id,idempotency_key))
+        self.desktop_statuses[employee_id]='stopped'
+        return {'employee_id':employee_id,'status':'stopped'}
 
     def provider_catalog(self):
         if self.provider_catalog_failure:
@@ -272,9 +292,6 @@ class ExperimentAppIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.database = Path(self.temp_dir.name) / "experiments.sqlite"
-        self.operator_key_file = Path(self.temp_dir.name) / "operator-key"
-        self.operator_key_file.write_text("integration-test-operator-key\n")
-        self.operator_key_file.chmod(0o600)
         self.rocket = FakeRocketChat()
         self.coordinator = FakeCoordinator()
         self.apps=[]
@@ -297,7 +314,6 @@ class ExperimentAppIntegrationTests(unittest.TestCase):
                 "DATABASE": str(self.database),
                 "REPO": str(REPOSITORY_ROOT),
                 "CHAT_PUBLIC_URL": "https://chat.example.test",
-                "OPERATOR_KEY_FILE": str(self.operator_key_file),
                 "SESSION_COOKIE_SECURE": False,
             },
             client_factory=lambda: self.rocket,
@@ -307,15 +323,8 @@ class ExperimentAppIntegrationTests(unittest.TestCase):
         return app
 
     def authenticate(self, client):
-        status = client.get('/api/operator/status')
-        self.assertEqual(status.status_code, 200)
-        if status.get_json()['authenticated']:
-            return
-        csrf = client.get('/api/session').get_json()['csrf_token']
-        response = client.post('/api/operator/login', data={
-            'csrf_token': csrf, 'key': self.operator_key_file.read_text().strip(),
-        })
-        self.assertEqual(response.status_code, 200)
+        # The dashboard has no operator login; browser writes still carry CSRF.
+        return None
 
     def test_activity_and_library_direct_links_serve_the_frontend(self):
         static = Path(self.temp_dir.name) / "static"
@@ -430,8 +439,8 @@ class ExperimentAppIntegrationTests(unittest.TestCase):
     def test_company_native_evaluation_history_is_private_company_scoped_and_preserves_native_values(self):
         anonymous=self.app.test_client()
         before=len(self.coordinator.company_native_evaluation_requests)
-        self.assertEqual(anonymous.get('/api/company/evaluations').status_code,401)
-        self.assertEqual(anonymous.post('/api/company/evaluations/coffeebench').status_code,401)
+        self.assertEqual(anonymous.get('/api/company/evaluations').status_code,200)
+        self.assertEqual(anonymous.post('/api/company/evaluations/coffeebench').status_code,400)
         self.assertEqual(len(self.coordinator.company_native_evaluation_requests),before)
 
         posted=self.client.post('/api/company/evaluations/coffeebench',data={
@@ -532,62 +541,19 @@ class ExperimentAppIntegrationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         return response.get_json()["runs"]
 
-    def test_private_operator_routes_return_empty_401_without_dispatch_or_scores(self):
+    def test_dashboard_routes_are_open_without_login_and_state_changes_still_require_csrf(self):
         anonymous = self.app.test_client()
         for path in (
             "/api/catalog", "/api/compatibility", "/api/company", "/api/activity",
-            "/api/runs", "/api/events", "/api/runs/private-run",
-            "/api/runs/private-run/evaluations", "/api/runs/private-run/evaluations/latest",
+            "/api/runs",
         ):
             with self.subTest(path=path):
                 response = anonymous.get(path)
-                self.assertEqual(response.status_code, 401)
-                self.assertEqual(response.data, b"")
-        for path in ("/company/start", "/api/company/background/coffeebench/control", "/experiments/A1/runs", "/runs/private-run/evaluate"):
-            with self.subTest(path=path):
-                response = anonymous.post(path, data={})
-                self.assertEqual(response.status_code, 401)
-                self.assertEqual(response.data, b"")
+                self.assertIn(response.status_code, (200, 204))
+        response = anonymous.post("/company/start", data={})
+        self.assertEqual(response.status_code, 400)
         self.assertEqual(self.rocket.dispatches, [])
         self.assertEqual(self.coordinator.start_keys, [])
-
-    def test_operator_key_login_logout_csrf_and_signed_session_survive_app_restart(self):
-        anonymous = self.app.test_client()
-        csrf = anonymous.get('/api/session').get_json()['csrf_token']
-        rejected = anonymous.post('/api/operator/login', data={
-            'csrf_token': csrf, 'key': 'wrong-key',
-        })
-        self.assertEqual(rejected.status_code, 401)
-        self.assertEqual(rejected.get_json(), {'error': 'operator_key_invalid'})
-        unicode_rejected = anonymous.post('/api/operator/login', data={
-            'csrf_token': csrf, 'key': '🔐clé-incorrecte',
-        })
-        self.assertEqual(unicode_rejected.status_code, 401)
-        self.assertEqual(unicode_rejected.get_json(), {'error': 'operator_key_invalid'})
-        self.assertFalse(anonymous.get('/api/operator/status').get_json()['authenticated'])
-        no_csrf = anonymous.post('/api/operator/login', data={'key': self.operator_key_file.read_text().strip()})
-        self.assertEqual(no_csrf.status_code, 400)
-
-        accepted_csrf = anonymous.get('/api/session').get_json()['csrf_token']
-        accepted = anonymous.post('/api/operator/login', data={
-            'csrf_token': accepted_csrf, 'key': self.operator_key_file.read_text().strip(),
-        })
-        self.assertEqual(accepted.status_code, 200)
-        self.assertTrue(anonymous.get('/api/operator/status').get_json()['authenticated'])
-        cookie = anonymous.get_cookie('session')
-        self.assertIsNotNone(cookie)
-        self.assertTrue(cookie.http_only)
-
-        restarted_client = self.make_app().test_client()
-        restarted_client.set_cookie('session', cookie.value)
-        self.assertTrue(restarted_client.get('/api/operator/status').get_json()['authenticated'])
-        self.assertEqual(restarted_client.get('/api/catalog').status_code, 200)
-
-        csrf = anonymous.get('/api/session').get_json()['csrf_token']
-        logged_out = anonymous.post('/api/operator/logout', data={'csrf_token': csrf})
-        self.assertEqual(logged_out.status_code, 200)
-        self.assertFalse(anonymous.get('/api/operator/status').get_json()['authenticated'])
-        self.assertEqual(anonymous.get('/api/catalog').status_code, 401)
 
     def test_public_shell_author_files_webhook_and_health_remain_available(self):
         anonymous = self.app.test_client()
@@ -613,32 +579,14 @@ class ExperimentAppIntegrationTests(unittest.TestCase):
             })
         self.assertEqual(webhook.status_code, 200)
 
-    def test_missing_operator_key_is_a_scoped_503_and_does_not_take_down_health(self):
-        app = create_app(
-            {
-                "TESTING": True, "SECRET_KEY": "integration-test-secret",
-                "DATABASE": str(Path(self.temp_dir.name) / "missing-key.sqlite"),
-                "REPO": str(REPOSITORY_ROOT), "OPERATOR_KEY_FILE": str(Path(self.temp_dir.name) / "absent-key"),
-                "SESSION_COOKIE_SECURE": False,
-            },
-            client_factory=lambda: self.rocket, coordinator_factory=lambda: self.coordinator,
-        )
-        self.apps.append(app)
-        client = app.test_client()
-        csrf = client.get('/api/session').get_json()['csrf_token']
-        response = client.post('/api/operator/login', data={'csrf_token': csrf, 'key': 'candidate'})
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.get_json(), {'error': 'operator_access_unavailable'})
-        self.assertEqual(client.get('/api/health').status_code, 200)
-
-    def test_operator_session_cookie_security_follows_configured_public_scheme(self):
+    def test_csrf_session_cookie_security_follows_configured_public_scheme(self):
         for scheme, secure in (("http", False), ("https", True)):
             with self.subTest(scheme=scheme):
                 app = create_app(
                     {
                         "TESTING": True, "SECRET_KEY": "integration-test-secret",
                         "DATABASE": str(Path(self.temp_dir.name) / f"{scheme}-cookie.sqlite"),
-                        "REPO": str(REPOSITORY_ROOT), "OPERATOR_KEY_FILE": str(self.operator_key_file),
+                        "REPO": str(REPOSITORY_ROOT),
                         "EXPERIMENTS_PUBLIC_URL": f"{scheme}://experiments.example.test",
                     },
                     client_factory=lambda: self.rocket, coordinator_factory=lambda: self.coordinator,
@@ -651,32 +599,7 @@ class ExperimentAppIntegrationTests(unittest.TestCase):
                 self.assertIn("HttpOnly", cookie)
                 self.assertIn("SameSite=Lax", cookie)
                 self.assertEqual("Secure" in cookie, secure)
-                logged_in = client.post('/api/operator/login', base_url=base_url, data={
-                    'csrf_token': session_response.get_json()['csrf_token'],
-                    'key': self.operator_key_file.read_text().strip(),
-                })
-                self.assertEqual(logged_in.status_code, 200)
-                self.assertTrue(client.get('/api/operator/status', base_url=base_url).get_json()['authenticated'])
-
-    def test_operator_key_file_permissions_must_be_private(self):
-        unprotected_key = Path(self.temp_dir.name) / "group-readable-operator-key"
-        unprotected_key.write_text("test-key")
-        unprotected_key.chmod(0o644)
-        app = create_app(
-            {
-                "TESTING": True, "SECRET_KEY": "integration-test-secret",
-                "DATABASE": str(Path(self.temp_dir.name) / "permission-check.sqlite"),
-                "REPO": str(REPOSITORY_ROOT), "OPERATOR_KEY_FILE": str(unprotected_key),
-                "SESSION_COOKIE_SECURE": False,
-            },
-            client_factory=lambda: self.rocket, coordinator_factory=lambda: self.coordinator,
-        )
-        self.apps.append(app)
-        client = app.test_client()
-        csrf = client.get('/api/session').get_json()['csrf_token']
-        response = client.post('/api/operator/login', data={'csrf_token': csrf, 'key': 'test-key'})
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.get_json(), {'error': 'operator_access_unavailable'})
+                self.assertEqual(client.get('/api/catalog', base_url=base_url).status_code, 200)
 
     def wait_for_sse_status(self, run_id, status):
         response = self.client.get("/api/events", buffered=False)
@@ -854,6 +777,51 @@ class ExperimentAppIntegrationTests(unittest.TestCase):
         self.assertEqual(resumed.status_code,200)
         self.assertEqual(resumed.get_json()['company']['status'],'running')
         self.assertEqual(self.coordinator.pause_requests[-1],(False,'company-resume-1'))
+
+    def test_employee_desktop_routes_list_identity_roster_start_and_stop_without_leaking_internal_data(self):
+        listing=self.client.get('/api/company/desktops')
+        self.assertEqual(listing.status_code,200)
+        employees=listing.get_json()['employees']
+        self.assertEqual(len(employees),17)
+        sarah=next(item for item in employees if item['id']=='sarah-johnson')
+        self.assertEqual(sarah,{'id':'sarah-johnson','name':'Sarah Johnson','role':'Technical','status':'stopped'})
+        self.assertNotIn('accounts',sarah)
+
+        denied=self.client.post('/api/company/desktops/start',json={})
+        self.assertEqual(denied.status_code,400)
+        started=self.client.post('/api/company/desktops/start',json={
+            'employee_id':'sarah-johnson',
+            'csrf_token':self.csrf_token(),'idempotency_key':'desktop-start-key'})
+        self.assertEqual(started.status_code,200)
+        self.assertEqual(started.headers['Cache-Control'],'no-store')
+        self.assertEqual(started.get_json(),{
+            'employee_id':'sarah-johnson','status':'running',
+            'viewing_url':'https://selkies.example.test/sarah-johnson/',
+        })
+        self.assertEqual(self.coordinator.desktop_start_requests,[('sarah-johnson','desktop-start-key')])
+
+        stopped=self.client.post('/api/company/desktops/stop',json={
+            'employee_id':'sarah-johnson',
+            'csrf_token':self.csrf_token(),'idempotency_key':'desktop-stop-key'})
+        self.assertEqual(stopped.status_code,200)
+        self.assertEqual(stopped.get_json(),{'employee_id':'sarah-johnson','status':'stopped'})
+        self.assertEqual(self.coordinator.desktop_stop_requests,[('sarah-johnson','desktop-stop-key')])
+        refreshed=self.client.get('/api/company/desktops').get_json()['employees']
+        self.assertEqual(next(item for item in refreshed if item['id']=='sarah-johnson')['status'],'stopped')
+
+    def test_employee_desktop_routes_reject_unknown_employees_and_unsafe_view_urls(self):
+        unknown=self.client.post('/api/company/desktops/start',json={
+            'employee_id':'not-an-employee','csrf_token':self.csrf_token(),
+            'idempotency_key':'desktop-unknown'})
+        self.assertEqual(unknown.status_code,404)
+        self.coordinator.start_company_desktop=lambda employee_id, *, idempotency_key: {
+            'employee_id':employee_id,'status':'running','viewing_url':'https://selkies.example.test/?access_token=secret',
+            'viewing_credentials':{'username':'employee','password':'temporary-pass'}}
+        unsafe=self.client.post('/api/company/desktops/start',json={
+            'employee_id':'sarah-johnson','csrf_token':self.csrf_token(),
+            'idempotency_key':'desktop-unsafe'})
+        self.assertEqual(unsafe.status_code,502)
+        self.assertNotIn('secret',unsafe.get_data(as_text=True))
 
     def test_resume_uses_request_idempotency_key_and_preserves_failure(self):
         self.coordinator.state.update(status='paused',paused=True)

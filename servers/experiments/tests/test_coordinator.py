@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import unittest
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import Mock
 
 import requests
@@ -11,6 +13,76 @@ from servers.experiments.coordinator import CoordinatorError, SimulationCoordina
 
 
 class CoordinatorClientTests(unittest.TestCase):
+    def test_employee_desktop_start_and_stop_use_controller_auth_and_bounded_start_timeout(self):
+        response=Mock()
+        response.json.return_value={'employee_id':'sarah-johnson','status':'running',
+                                   'viewing_url':'https://selkies.example.test/',
+                                   'viewing_credentials':{'username':'employee','password':'private'}}
+        start_session=Mock()
+        start_session.request.return_value=response
+        stop_session=Mock()
+        stop_session.request.return_value=response
+        client=SimulationCoordinatorClient(
+            'http://coordinator:8131','private-token',session=Mock(),
+            session_factory=Mock(side_effect=[start_session, stop_session]))
+
+        started=client.start_company_desktop('sarah-johnson',idempotency_key='desktop-start')
+        response.json.return_value={'employee_id':'sarah-johnson','status':'stopped'}
+        stopped=client.stop_company_desktop('sarah-johnson',idempotency_key='desktop-stop')
+
+        self.assertEqual(started['status'],'running')
+        self.assertEqual(stopped['status'],'stopped')
+        self.assertEqual(start_session.request.call_args.args,
+                         ('POST','http://coordinator:8131/company/desktops/start'))
+        self.assertEqual(start_session.request.call_args.kwargs,{
+            'headers':{'Authorization':'Bearer private-token','Idempotency-Key':'desktop-start'},
+            'timeout':None,'json':{'employee_id':'sarah-johnson'},
+        })
+        self.assertEqual(stop_session.request.call_args.args,
+                         ('POST','http://coordinator:8131/company/desktops/stop'))
+        self.assertEqual(stop_session.request.call_args.kwargs,{
+            'headers':{'Authorization':'Bearer private-token','Idempotency-Key':'desktop-stop'},
+            'timeout':None,'json':{'employee_id':'sarah-johnson'},
+        })
+        start_session.close.assert_called_once_with()
+        stop_session.close.assert_called_once_with()
+
+    def test_blocked_desktop_start_does_not_block_company_status_request(self):
+        start_entered=threading.Event()
+        release_start=threading.Event()
+        start_response=Mock()
+        start_response.json.return_value={'employee_id':'sarah-johnson','status':'running'}
+
+        class SlowDesktopSession:
+            def request(self, *args, **kwargs):
+                start_entered.set()
+                if not release_start.wait(timeout=3):
+                    raise TimeoutError('synthetic start gate timed out')
+                return start_response
+
+            def close(self):
+                pass
+
+        status_response=Mock()
+        status_response.json.return_value={'status':'running'}
+        shared_session=Mock()
+        shared_session.request.return_value=status_response
+        client=SimulationCoordinatorClient(
+            'http://coordinator:8131','private-token',session=shared_session,
+            session_factory=SlowDesktopSession)
+
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            start=workers.submit(client.start_company_desktop,'sarah-johnson',idempotency_key='start-key')
+            self.assertTrue(start_entered.wait(timeout=1))
+            status=workers.submit(client.company)
+            try:
+                self.assertEqual(status.result(timeout=1),{'status':'running'})
+            finally:
+                release_start.set()
+            self.assertEqual(start.result(timeout=1)['status'],'running')
+
+        shared_session.request.assert_called_once()
+
     def test_background_provider_control_uses_controller_auth_and_idempotency(self):
         response=Mock()
         response.json.return_value={'provider_id':'coffeebench','enabled':False,'in_flight':True,'status':'stopping'}
