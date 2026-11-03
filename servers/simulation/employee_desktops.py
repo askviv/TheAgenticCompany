@@ -151,9 +151,11 @@ class EmployeeDesktopRuntime:
                     network = self._network_name(employee_id)
                     self._validate_network_isolated(network, container, employee_id)
                     container_ip = self._container_ip(inspect, network)
-                    viewing_url = self.caddy_proxy.existing_url_for(employee_id, container_ip)
-                    if viewing_url is not None:
-                        viewers.append({"employee_id": employee_id, "viewing_url": viewing_url})
+                    if not self._container_port_open(container, 8080):
+                        continue
+                    credentials = self._credentials(employee_id, create=False)
+                    viewing_url = self.caddy_proxy.url_for(employee_id, container_ip, credentials)
+                    viewers.append({"employee_id": employee_id, "viewing_url": viewing_url})
                     continue
                 container = self._container_name(employee_id)
                 inspect = self._inspect_optional(container)
