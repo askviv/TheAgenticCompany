@@ -23,7 +23,7 @@ Persistent data: `/data/theagentcompany/experiments-data/experiments.sqlite` (an
 - `ROCKETCHAT_PUBLIC_URL=https://chat.company.example.test`.
 - `ROCKETCHAT_USERNAME`, `ROCKETCHAT_PASSWORD`: existing benchmark operator account with channel/integration permissions.
 - `VIV_ROCKETCHAT_USERNAME=viv`.
-- Optional `EXPERIMENTS_ROCKETCHAT_CHANNEL` (default `general`), `EXPERIMENTS_PUBLIC_URL` (default `http://192.0.2.10:8110`).
+- Optional `EXPERIMENTS_ROCKETCHAT_CHANNEL` (default `general`), `EXPERIMENTS_PUBLIC_URL` (required for source-file links; use the deployment’s public dashboard URL).
 
 To expose the dashboard’s Codex connection control, include the optional
 `deploy/single-host/experiments.codex-auth.compose.yml` overlay when starting

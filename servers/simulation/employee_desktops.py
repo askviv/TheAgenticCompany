@@ -240,7 +240,7 @@ class EmployeeDesktopRuntime:
             self.configure_chrome_policy(employee_id)
             if not self._container_port_open(container, 9222):
                 self._wait_for_display(container)
-                self._launch_chrome(container)
+                self._launch_chrome(container, employee_id)
             proxy_port = self._start_cdp_proxy(employee_id, int((self._inspect(container).get("State") or {}).get("Pid") or 0))
             cdp_document = self._wait_for_cdp(container, proxy_port, host="127.0.0.1")
             cdp_endpoint = self._rewrite_cdp_endpoint(cdp_document, proxy_port, host="127.0.0.1")
@@ -801,33 +801,14 @@ class EmployeeDesktopRuntime:
 
     def cua_environment(self, employee_id: str) -> dict[str, str]:
         container = self._container_name(employee_id)
-        # Read only display-session variables from the already-running Chrome
-        # process. Never return the full process environment or expose it to Codex.
+        # Chrome and CUA must share the desktop's native D-Bus session so
+        # accessibility resolves to the same applications as the visible screen.
         script = r"""
     set -eu
-    pid="$(pgrep -f 'remote-debugging-port=9222' | head -n 1)"
+    pid="$(pgrep -x lxqt-session | head -n 1)"
     test -n "$pid"
     tr '\000' '\n' < "/proc/$pid/environ" |
       awk -F= '$1 ~ /^(XAUTHORITY|DBUS_SESSION_BUS_ADDRESS|AT_SPI_BUS_ADDRESS|XDG_RUNTIME_DIR|XDG_CURRENT_DESKTOP|XDG_SESSION_TYPE)$/ { print }'
-    if ! tr '\000' '\n' < "/proc/$pid/environ" | grep -q '^XDG_RUNTIME_DIR='; then
-      for runtime in /run/user/1000 /tmp/runtime-ubuntu; do
-        if [ -d "$runtime" ]; then
-          printf 'XDG_RUNTIME_DIR=%s\n' "$runtime"
-          break
-        fi
-      done
-    fi
-    if ! tr '\000' '\n' < "/proc/$pid/environ" | grep -q '^DBUS_SESSION_BUS_ADDRESS='; then
-      runtime="$(tr '\000' '\n' < "/proc/$pid/environ" | sed -n 's/^XDG_RUNTIME_DIR=//p' | head -n 1)"
-      if [ -z "$runtime" ]; then
-        for candidate in /run/user/1000 /tmp/runtime-ubuntu; do
-          if [ -d "$candidate" ]; then runtime="$candidate"; break; fi
-        done
-      fi
-      if [ -n "$runtime" ] && [ -S "$runtime/bus" ]; then
-        printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=%s/bus\n' "$runtime"
-      fi
-    fi
     """
         result = self._docker(
             "exec", "--user", "ubuntu", container, "/bin/sh", "-c", script,
@@ -882,16 +863,14 @@ class EmployeeDesktopRuntime:
         self._docker("cp", str(self.cua_driver_file), f"{container}:{target}")
         self._docker("exec", "--user", "root", container, "chmod", "0755", target)
 
-    def _launch_chrome(self, container: str) -> None:
-        # Bypass Selkies' launcher, which silently falls back to --no-sandbox.
-        # Keep Chrome's native namespace and seccomp sandboxes enabled.
-        self._docker("exec", "--user", "root", container,
-                     "chown", "root:root", "/opt/google/chrome/chrome-sandbox")
-        self._docker("exec", "--user", "root", container,
-                     "chmod", "4755", "/opt/google/chrome/chrome-sandbox")
+    def _launch_chrome(self, container: str, employee_id: str) -> None:
+        # Selkies' supported launcher keeps Chrome sandboxed when the
+        # configured Docker policy permits its user namespaces.
+        environment = self.cua_environment(employee_id)
+        env_args = [part for name, value in environment.items() for part in ("--env", f"{name}={value}")]
         self._docker(
-            "exec", "--user", "ubuntu", "--env", "DISPLAY=:20", "--detach", container,
-            "/opt/google/chrome/chrome", "--password-store=basic", "--no-first-run", "--no-default-browser-check", "--start-fullscreen", "--force-renderer-accessibility",
+            "exec", "--user", "ubuntu", *env_args, "--detach", container,
+            "google-chrome", "--no-first-run", "--no-default-browser-check", "--start-fullscreen", "--force-renderer-accessibility",
             "--remote-debugging-port=9222",
             "--user-data-dir=/home/ubuntu/.employee-browser-profile", "about:blank",
         )

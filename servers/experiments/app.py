@@ -161,7 +161,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         REPO=os.environ.get('TAC_REPO', str(Path(__file__).resolve().parents[2])),
         COMPANY_PROFILE_FILE=os.environ.get('COMPANY_PROFILE_FILE'),
         CHAT_PUBLIC_URL=os.environ.get('ROCKETCHAT_PUBLIC_URL','https://chat.company.example.test'),
-        EXPERIMENTS_PUBLIC_URL=os.environ.get('EXPERIMENTS_PUBLIC_URL','http://192.0.2.10:8110'),
+        EXPERIMENTS_PUBLIC_URL=os.environ.get('EXPERIMENTS_PUBLIC_URL'),
         COMPANY_TOOLS_URLS_FILE=os.environ.get(
             'COMPANY_TOOLS_URLS_FILE', str(Path(__file__).with_name('company-tools-urls.example.json'))),
         CODEX_AUTH_BRIDGE_URL=os.environ.get('CODEX_AUTH_BRIDGE_URL'),
@@ -435,7 +435,11 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 return
             try:
                 update(run_id,status='sending',error=None)
-                files=[{'name':Path(f['source']).name,'url':os.environ.get('EXPERIMENTS_PUBLIC_URL','http://192.0.2.10:8110').rstrip('/')+f"/experiments/{item['experiment_id']}/inputs/{i}"} for i,f in enumerate(inputs.get(item['experiment_id'],[]))]
+                source_files = inputs.get(item['experiment_id'], [])
+                public_url = app.config['EXPERIMENTS_PUBLIC_URL']
+                if source_files and not public_url:
+                    raise RuntimeError('EXPERIMENTS_PUBLIC_URL must be configured for source-file links')
+                files=[{'name':Path(f['source']).name,'url':public_url.rstrip('/')+f"/experiments/{item['experiment_id']}/inputs/{i}"} for i,f in enumerate(source_files)]
                 definition=definition_for(item['experiment_id'])
                 role=definition.get('role')
                 if not isinstance(role,str) or not role:

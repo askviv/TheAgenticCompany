@@ -41,8 +41,8 @@ CUA_TOOLS = [
     "list_apps", "list_windows", "get_window_state", "get_desktop_state", "get_guide",
     "bring_to_front", "set_window_frame",
     "get_screen_size", "get_cursor_position", "move_cursor", "click", "double_click",
-    "right_click", "drag", "scroll", "type_text", "press_key", "hotkey", "run_steps",
-    "set_agent_cursor_enabled", "get_agent_cursor_state",
+    "right_click", "drag", "scroll", "type_text", "set_value", "press_key", "hotkey", "run_steps",
+    "set_agent_cursor_enabled", "get_agent_cursor_state", "clipboard_read", "clipboard_write",
 ]
 
 
