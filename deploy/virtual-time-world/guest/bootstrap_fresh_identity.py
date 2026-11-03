@@ -299,6 +299,68 @@ def _rocket_email(user: dict[str, Any]) -> str | None:
     return addresses[0] if len(addresses) == 1 else None
 
 
+def _provision_department_channels(
+    client: RocketChatRest, identities: dict[str, Any], *,
+    protected_room_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    """Reconcile company department rooms without changing accounts or messages.
+
+    Existing deployments pass rooms containing active requests as protected IDs.
+    Archiving retires the seeded project rooms while retaining their history.
+    """
+    protected = protected_room_ids or set()
+    departments: dict[str, list[dict[str, Any]]] = {}
+    for employee in identities["employees"]:
+        departments.setdefault(employee["department"], []).append(employee)
+    assistant = identities["company"].get("background", {}).get("rocketchat", {})
+    assistant_id = assistant.get("assistant_user_id")
+    listed = client.request("GET", "channels.list?" + urlencode({"count": 1000}))
+    rooms = {room["name"]: room for room in listed["channels"]}
+    aliases = {"technical": "engineering", "product-ux": "product"}
+    desired = {"General": identities["employees"], **departments}
+    reconciled: dict[str, str] = {}
+    for department, employees in desired.items():
+        # Rocket.Chat's channel names prohibit spaces and slashes. Topics retain
+        # the exact department label from the company profile.
+        name = department.casefold().replace("/", "-").replace(" ", "-")
+        room = rooms.get(name)
+        alias = aliases.get(name)
+        previous = rooms.get(alias) if alias else None
+        if room is None and previous is not None and previous["_id"] not in protected:
+            result = client.request("POST", "channels.rename", {
+                "roomId": previous["_id"], "name": name,
+            })
+            room = result["channel"]
+            rooms.pop(alias)
+        if room is None:
+            result = client.request("POST", "channels.create", {"name": name})
+            room = result["channel"]
+        rooms[name] = room
+        room_id = room["_id"]
+        if room.get("archived"):
+            client.request("POST", "channels.unarchive", {"roomId": room_id})
+        topic = "Shared company requests and discussion" if name == "general" else department
+        if room.get("topic") != topic:
+            client.request("POST", "channels.setTopic", {"roomId": room_id, "topic": topic})
+        result = client.request("GET", "channels.members?" + urlencode({"roomId": room_id, "count": 1000}))
+        member_ids = {member["_id"] for member in result["members"]}
+        required_ids = {employee["accounts"]["rocketchat"]["id"] for employee in employees}
+        if assistant_id:
+            required_ids.add(assistant_id)
+        for user_id in sorted(required_ids - member_ids):
+            client.request("POST", "channels.invite", {"roomId": room_id, "userId": user_id})
+        reconciled[department] = room_id
+
+    obsolete = {"tech-talk", "kudos", "random", "viv-experiments", *aliases.values()}
+    archived = []
+    for name, room in rooms.items():
+        if (name in obsolete or name.startswith("project-")) and room["_id"] not in protected:
+            if not room.get("archived"):
+                client.request("POST", "channels.archive", {"roomId": room["_id"]})
+            archived.append(name)
+    return {"channels": reconciled, "archived": sorted(archived)}
+
+
 def _provision_chat_accounts(client: RocketChatRest, base: str, identities: dict[str, Any],
                              profile: dict[str, Any]) -> dict[str, dict[str, str]]:
     credentials: dict[str, dict[str, str]] = {}
@@ -354,6 +416,7 @@ def _provision_chat_accounts(client: RocketChatRest, base: str, identities: dict
     identities["company"].setdefault("background", {})["rocketchat"] = {
         "assistant_username": username, "assistant_email": email, "assistant_user_id": user_id,
     }
+    _provision_department_channels(client, identities)
     return credentials
 
 

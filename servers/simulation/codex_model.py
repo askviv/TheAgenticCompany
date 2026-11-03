@@ -278,15 +278,8 @@ class CodexCLIModel:
                     calls = [event["item"] for event in events
                              if event.get("type") == "item.completed"
                              and event.get("item", {}).get("type") == "mcp_tool_call"]
-                    diagnostic_codes = (
-                        "invalid_action_target", "invalid_params", "stale_snapshot", "permission_denied",
-                        "existing-profile", "capture_required", "window_not_found", "unsupported_key",
-                        "code-mode host", "disabled", "not supported",
-                    )
                     LOG.info("Employee native CUA turn completed tool_calls=%d tool_statuses=%s item_types=%s",
-                             len(calls), [(item.get("server"), item.get("tool"), item.get("status"),
-                                           [code for code in diagnostic_codes
-                                            if code in json.dumps(item.get("error") or item.get("result") or {}).lower()])
+                             len(calls), [(item.get("server"), item.get("tool"), item.get("status"))
                                           for item in calls],
                              sorted({event.get("item", {}).get("type", "unknown") for event in events
                                      if event.get("type") == "item.completed"}))

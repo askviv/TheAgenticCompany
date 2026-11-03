@@ -1,4 +1,4 @@
-Navigate to the Rocketchat web at http://the-agent-company.com:3000/home
+Navigate to the Rocketchat web at {{ company_tools.rocketchat }}/home
 
 * Ask Jessica Lee what you should do
 

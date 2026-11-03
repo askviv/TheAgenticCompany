@@ -75,10 +75,6 @@
     "summary": "Calculate the average row and column counts across spreadsheets in Data Analysis.",
     "description": "Review every spreadsheet in Documents/Data Analysis. Calculate the average number of rows and the average number of columns across all tables. For workbooks with multiple sheets, include every table on every sheet. Save a reproducible calculation script as data_stats.py.\n\nSend Jessica Lee the results rounded to two decimal places in this format:\nAverage Rows: {average_rows}\nAverage Columns: {average_columns}\n\nAlso tell Jessica that the analysis is finished and that the script is named data_stats.py."
   },
-  "ds-coffee-shop-database-management": {
-    "summary": "Turn the Coffee Shop records into reorder guidance and per-product sales, revenue, and profit details.",
-    "description": "Use the CSV records in Documents/Data Analysis/Coffee Shop to prepare an inventory and sales analysis. Identify products that should be reordered, with product_id, quantity_in_stock, and reorder_point. Also provide per-product sales details with product_id, average_sales, revenue_generated, and profit_generated. Round floating-point values to two decimal places.\n\nComplete the unanswered questions in analysis.txt using the records and your analysis."
-  },
   "ds-find-meeting-spreadsheet": {
     "summary": "Locate the spreadsheet about predicting seed area for Canadian field crops for an upcoming meeting.",
     "description": "Find the Excel spreadsheet in Documents/Data Analysis that contains information about using AI to predict seed area for field crops in Canada. Make the relevant spreadsheet available to the team for its upcoming meeting."
@@ -98,14 +94,6 @@
   "ds-organise-report-sus-data": {
     "summary": "Find filenames that are meaningless, numeric-only, or contain unusual characters, then report each category.",
     "description": "Review filenames in Documents/Data Analysis and list files with these issues. A file may belong to more than one category. Include each filename with its extension.\n\n- Files without Meaningful Names: names with no clear context or interpretability, such as “rxuts 31t3b.xlsx”.\n- Files with All-Numerical Names: names made only of numbers, such as “3030.xlsx”.\n- Files with Unusual Characters: names containing symbols beyond letters, numbers, hyphens, and underscores, such as semicolons, exclamation marks, at signs, hashes, or tildes.\n\nSend Jessica Lee one line per category in this format: “Category: file_name_1.xlsx, file_name_2.xlsx, ...”. Use the exact category titles above."
-  },
-  "ds-predictive-modeling": {
-    "summary": "Use historical stock prices to predict the test period’s daily closing prices and deliver the forecasts.",
-    "description": "Use stock_train_raw.csv as the historical training data to predict daily closing prices for the dates in stock_test.csv. Save the predictions in stock_test_answer.csv with exactly one column named Close Price. Forecast quality is assessed using Mean Squared Error (MSE), Mean Absolute Error (MAE), and R², with priority on maximizing R²."
-  },
-  "ds-sql-exercise": {
-    "summary": "Report product counts, category counts, and the three most expensive Electronics products.",
-    "description": "Use the product data to answer three questions, saving each answer in its own file:\n\n1. Total number of products in task1.txt.\n2. Number of distinct product categories in task2.txt.\n3. The three most expensive products in the Electronics category in task3.txt. For each product, include only its name and price, with prices shown to two decimal places, one product per line."
   },
   "ds-stock-analysis-slides": {
     "summary": "Create board-ready stock analysis slides, supporting charts, cleaned data, and presenter notes.",

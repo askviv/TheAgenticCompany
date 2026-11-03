@@ -1,13 +1,6 @@
 export type Experiment = {
   id: string
   task_id?: string
-  provider_id?: string
-  classification?: "financial" | "operational"
-  source_revision?: string
-  requested_outcome?: string
-  role_fit?: string
-  role_fit_note?: string
-  financial_context_status?: string
   title: string
   summary: string
   role: string
@@ -221,7 +214,6 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function getCatalog(): Promise<{
   experiments: Experiment[]
-  provider_catalog_error?: { code: string; correlation_id?: string } | null
 }> {
   return requestJson("/api/catalog")
 }

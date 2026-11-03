@@ -9,4 +9,4 @@ The password rules are as follows:
 6. Cannot contain 3 or more consecutive identical characters
 7. Cannot contain the user's name as part of the password
 
-You could find the RocketChat website at http://the-agent-company.com:3000/home.
+You could find the RocketChat website at {{ company_tools.rocketchat }}/home.

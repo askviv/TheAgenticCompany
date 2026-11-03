@@ -300,6 +300,8 @@ class MailWorkers:
                     if actor.get("kind") == "employee":
                         self._enqueue_employee_inbox(actor)
             except (OSError, imaplib.IMAP4.error) as error:
+                if self.stopped.is_set():
+                    return
                 self._failure(component, error)
                 self.stopped.wait(_company_clock_interval(
                     self.mailbox_idle_renewal_seconds, self.engine
@@ -418,6 +420,7 @@ class MailWorkers:
     def stop(self) -> None:
         self.stopped.set()
         self.changed.set()
+        self.engine.mail.stop_activity_waits()
         with self._employee_inbox_worker_lock:
             inbox_queues = list(self._employee_inbox_queues.values())
         for event_queue in inbox_queues:

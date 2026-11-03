@@ -245,13 +245,6 @@ function useRefreshKey() {
   return useOutletContext<LayoutContext>().refreshKey
 }
 
-function bankingRoleLabel(roleFit?: string) {
-  if (roleFit === "personal_customer") return "Personal banking"
-  if (roleFit === "mixed_customer") return "Personal + business"
-  if (roleFit === "business_customer") return "Business banking"
-  return null
-}
-
 function EmployeeStreamsPage() {
   const refreshKey = useRefreshKey()
   const [manualRefresh, setManualRefresh] = useState(0)
@@ -261,13 +254,10 @@ function EmployeeStreamsPage() {
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const [fullscreenError, setFullscreenError] = useState<string | null>(null)
   const focusedViewer = useRef<HTMLDivElement>(null)
-  const focusedFrame = useRef<HTMLIFrameElement>(null)
   const desktopsRequest = useRef<Promise<CompanyDesktopEmployee[]> | null>(null)
 
   useEffect(() => {
     if (!focusedId) return
-    const frame = focusedFrame.current
-    let frameWindow: Window | null = null
     let wasFullscreen = Boolean(document.fullscreenElement)
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -279,24 +269,11 @@ function EmployeeStreamsPage() {
       if (wasFullscreen && !document.fullscreenElement) setFocusedId(null)
       wasFullscreen = Boolean(document.fullscreenElement)
     }
-    const attachFrame = () => {
-      frameWindow?.removeEventListener("keydown", closeOnEscape, true)
-      try {
-        frameWindow = frame?.contentWindow ?? null
-        frameWindow?.addEventListener("keydown", closeOnEscape, true)
-      } catch (error) {
-        console.error("Unable to attach the stream keyboard shortcut.", error instanceof Error ? error.name : "UnknownError")
-      }
-    }
     window.addEventListener("keydown", closeOnEscape, true)
     document.addEventListener("fullscreenchange", onFullscreenChange)
-    frame?.addEventListener("load", attachFrame)
-    attachFrame()
     return () => {
       window.removeEventListener("keydown", closeOnEscape, true)
       document.removeEventListener("fullscreenchange", onFullscreenChange)
-      frame?.removeEventListener("load", attachFrame)
-      frameWindow?.removeEventListener("keydown", closeOnEscape, true)
     }
   }, [focusedId])
 
@@ -364,7 +341,9 @@ function EmployeeStreamsPage() {
                     <iframe
                       src={employee.viewing_url}
                       title={`${employee.name} employee desktop`}
-                      allow="fullscreen; autoplay"
+                      inert
+                      tabIndex={-1}
+                      allow="fullscreen; autoplay 'none'; microphone 'none'; camera 'none'"
                       referrerPolicy="no-referrer"
                       className="pointer-events-none size-full border-0"
                     />
@@ -401,12 +380,13 @@ function EmployeeStreamsPage() {
             </div>
             {fullscreenError && <p className="text-sm text-destructive">{fullscreenError}</p>}
             <iframe
-              ref={focusedFrame}
               src={focusedEmployee.viewing_url}
               title={`${focusedEmployee.name} employee desktop focused stream`}
-              allow="fullscreen; autoplay"
+              inert
+              tabIndex={-1}
+              allow="fullscreen; autoplay 'none'; microphone 'none'; camera 'none'"
               referrerPolicy="no-referrer"
-              className="min-h-0 flex-1 rounded-md border bg-black"
+              className="pointer-events-none min-h-0 flex-1 rounded-md border bg-black"
             />
           </div>
         </div>
@@ -830,7 +810,6 @@ function HelpPage() {
 function LibraryPage() {
   const refreshKey = useRefreshKey()
   const [experiments, setExperiments] = useState<Experiment[]>([])
-  const [providerWarning, setProviderWarning] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -855,12 +834,9 @@ function LibraryPage() {
     let active = true
     setLoading(true)
     getCatalog()
-      .then(({ experiments: items, provider_catalog_error }) => {
+      .then(({ experiments: items }) => {
         if (active) {
           setExperiments(items)
-          setProviderWarning(provider_catalog_error
-            ? `The travel, banking and telecom catalogue could not be refreshed (${provider_catalog_error.code}).${provider_catalog_error.correlation_id ? ` Correlation ID: ${provider_catalog_error.correlation_id}.` : ""} Refresh to retry.`
-            : null)
           setError(null)
         }
       })
@@ -882,16 +858,6 @@ function LibraryPage() {
     )
   }, [experiments, search, selectedTypes, selectedBenchmarks])
 
-  // These τ-bench cases share the same customer request but have different
-  // underlying conditions. Keep each original case selectable.
-  const mobileDataVariants = useMemo(() => experiments
-    .filter((experiment) => experiment.provider_id === "tau2-telecom" && experiment.task_id?.startsWith("[mobile_data_issue]"))
-    .sort((a, b) => (a.task_id ?? "").localeCompare(b.task_id ?? "")), [experiments])
-  const mobileVariantNumbers = useMemo(() => new Map(mobileDataVariants.map((item, index) => [item.id, index + 1])), [mobileDataVariants])
-  const matchingIds = new Set(filtered.map((item) => item.id))
-  const matchingMobileVariants = mobileDataVariants.filter((item) => matchingIds.has(item.id))
-  const otherExperiments = filtered.filter((item) => !mobileVariantNumbers.has(item.id))
-
   return (
     <section className="space-y-7">
       <div className="flex flex-col gap-5 border-b pb-6 sm:flex-row sm:items-end sm:justify-between">
@@ -907,8 +873,6 @@ function LibraryPage() {
         </div>
       </div>
       <CodexConnectionCard />
-
-      {providerWarning && <ErrorNotice title="Provider catalogue unavailable" message={providerWarning} />}
 
       <fieldset className="space-y-3">
         <legend className="text-sm font-medium">Benchmark</legend>
@@ -943,36 +907,13 @@ function LibraryPage() {
       {error && <ErrorNotice message={error} title="Library unavailable" />}
       {loading ? <LoadingCards /> : !error && filtered.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {matchingMobileVariants.length > 0 && (
-            <Card className="h-fit">
-              <details>
-                <summary className="cursor-pointer list-none p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  <Badge variant="secondary" className="mb-3">Telecom</Badge>
-                  <CardTitle className="text-base leading-snug">Mobile data problem</CardTitle>
-                  <CardDescription className="mt-3 leading-relaxed">Help a customer whose mobile data is slow or unavailable.</CardDescription>
-                  <p className="mt-4 text-xs text-muted-foreground">{matchingMobileVariants.length} {matchingMobileVariants.length === 1 ? "variant" : "variants"} · Choose a variant</p>
-                </summary>
-                <div className="max-h-96 space-y-1 overflow-y-auto border-t p-3">
-                  {matchingMobileVariants.map((experiment) => (
-                    <Link key={experiment.id} to={`/experiments/${encodeURIComponent(experiment.id)}`}
-                      className="flex items-center justify-between gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                      <span>Variant {mobileVariantNumbers.get(experiment.id)} <span className="text-muted-foreground">· {experiment.role}</span></span>
-                      <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
-                    </Link>
-                  ))}
-                </div>
-              </details>
-            </Card>
-          )}
-          {otherExperiments.map((experiment) => (
+          {filtered.map((experiment) => (
             <Link key={experiment.id} to={`/experiments/${encodeURIComponent(experiment.id)}`} className="group rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <Card className="h-full min-h-52 transition-colors group-hover:ring-primary/30 group-focus-visible:ring-primary">
                 <CardHeader className="gap-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="secondary" className="font-medium">{experiment.role}</Badge>
-                      {experiment.provider_id === "tau2-banking" && bankingRoleLabel(experiment.role_fit) &&
-                        <Badge variant="outline" title={experiment.role_fit_note}>{bankingRoleLabel(experiment.role_fit)}</Badge>}
                     </div>
                     <ArrowUpRight className="size-4 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden="true" />
                   </div>
@@ -1013,12 +954,9 @@ function ExperimentPage() {
     let active = true
     setLoading(true)
     Promise.all([getCatalog(), getSession()])
-      .then(([{ experiments: items, provider_catalog_error }, currentSession]) => {
+      .then(([{ experiments: items }, currentSession]) => {
         if (!active) return
         const selected = items.find((item) => item.id === experimentId) ?? null
-        if (!selected && provider_catalog_error && experimentId.startsWith("tau-provider-")) {
-          throw new Error(`The provider task catalogue is unavailable (${provider_catalog_error.code}). Refresh to retry.`)
-        }
         setExperiment(selected)
         setSession(currentSession)
         setError(null)
@@ -1056,8 +994,6 @@ function ExperimentPage() {
         <div className="flex flex-wrap items-center gap-2"><Badge variant="secondary">{experiment.role}</Badge><span className="text-xs text-muted-foreground">{experiment.dependencies.length} {experiment.dependencies.length === 1 ? "tool" : "tools"}</span></div>
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{experiment.title}</h1>
         <p className="max-w-3xl text-base leading-relaxed text-muted-foreground">{experiment.summary}</p>
-        {(experiment.role_fit_note || experiment.role_fit) && <p className="text-sm text-muted-foreground">{experiment.role_fit_note || `Source context: ${experiment.role_fit?.replaceAll("_", " ")}`}</p>}
-        {experiment.financial_context_status && <p className="text-sm text-muted-foreground">Case information: {experiment.financial_context_status.replaceAll("_", " ")}</p>}
       </div>
       {error && <ErrorNotice message={error} title="Experiment could not be started" />}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">

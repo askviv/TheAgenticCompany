@@ -5,5 +5,5 @@ The screenshot is under Documents/Human Resources Team/Immigration directory on 
 her the current date of filing for her category based on the information provided in the image. If you need any information, please ask her. You can find
 her on RocketChat.
 
-RocketChat link: http://the-agent-company.com:3000
-owncloud link: http://the-agent-company.com:8092/
+RocketChat link: {{ company_tools.rocketchat }}
+owncloud link: {{ company_tools.owncloud }}/

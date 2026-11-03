@@ -906,114 +906,119 @@ class EcommerceNativeActionCheckpoint:
             started_at = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
         identity = self._identity(profile, seed, started_at)
         encoded_identity = json.dumps(identity, sort_keys=True, separators=(",", ":"))
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             prior = connection.execute(
                 "SELECT * FROM ecommerce_native_world_state WHERE singleton=1"
             ).fetchone()
-            if prior is not None:
-                if (
-                    prior["upstream_commit"] != UPSTREAM_COMMIT
-                    or prior["identity_json"] != encoded_identity
-                ):
-                    raise StoreConflict(
-                        "E-Commerce native world bootstrap identity changed"
-                    )
-                return {
-                    "status": "already_initialized",
-                    "store_id": prior["store_id"],
-                    "native_state_ref": self._state_ref(prior["checkpoint_path"]),
-                }
-            environment, opened = initialize_native_store(
-                seed=seed,
-                start_date=identity["started_at"][:10],
-                store_type=identity["store_type"],
-                store_name=identity["company_name"],
-            )
-            path = self._write_checkpoint(environment)
-            connection.execute(
-                """INSERT INTO ecommerce_native_world_state
-                (singleton,checkpoint_path,upstream_commit,store_id,identity_json,company_cursor,updated_at)
-                VALUES(1,?,?,?,?,?,?)""",
-                (
-                    str(path),
-                    UPSTREAM_COMMIT,
-                    opened["store_id"],
-                    encoded_identity,
-                    identity["started_at"],
-                    datetime.now(timezone.utc).isoformat(),
-                ),
-            )
+        if prior is not None:
+            if (
+                prior["upstream_commit"] != UPSTREAM_COMMIT
+                or prior["identity_json"] != encoded_identity
+            ):
+                raise StoreConflict("E-Commerce native world bootstrap identity changed")
             return {
-                "status": "initialized",
-                "store_id": opened["store_id"],
-                "store_type": identity["store_type"],
-                "native_state_ref": self._state_ref(str(path)),
+                "status": "already_initialized",
+                "store_id": prior["store_id"],
+                "native_state_ref": self._state_ref(prior["checkpoint_path"]),
             }
+
+        # Native initialization and checkpoint fsync must not reserve SQLite's
+        # writer. Publication below rechecks identity against a competing start.
+        environment, opened = initialize_native_store(
+            seed=seed,
+            start_date=identity["started_at"][:10],
+            store_type=identity["store_type"],
+            store_name=identity["company_name"],
+        )
+        current, inserted = self._publish_initial_checkpoint(
+            environment, store_id=opened["store_id"], identity=identity,
+            encoded_identity=encoded_identity, require_store_id=False,
+        )
+        result = {
+            "status": "initialized" if inserted else "already_initialized",
+            "store_id": current["store_id"],
+            "native_state_ref": self._state_ref(current["checkpoint_path"]),
+        }
+        if inserted:
+            result["store_type"] = identity["store_type"]
+        return result
 
     def initialize(
         self, environment: Any, *, store_id: str, identity: dict[str, Any]
     ) -> None:
         """Persist an already initialized pinned environment, primarily for fixtures."""
         if not isinstance(environment, EcommerceEnv):
-            raise TypeError(
-                "native checkpoint requires the pinned EcommerceEnv instance"
-            )
+            raise TypeError("native checkpoint requires the pinned EcommerceEnv instance")
         store = environment.stores.get(store_id)
         if store is None or not store.is_open:
-            raise ValueError(
-                "native checkpoint requires the explicitly mapped open company store"
-            )
+            raise ValueError("native checkpoint requires the explicitly mapped open company store")
         encoded_identity = json.dumps(identity, sort_keys=True, separators=(",", ":"))
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             prior = connection.execute(
                 "SELECT * FROM ecommerce_native_world_state WHERE singleton=1"
             ).fetchone()
-            if prior is not None:
-                if (
-                    prior["identity_json"] == encoded_identity
-                    and prior["store_id"] == store_id
-                ):
-                    return
-                raise StoreConflict(
-                    "E-Commerce native state is already initialized with different identity"
-                )
-            path = self._write_checkpoint(environment)
-            connection.execute(
+        if prior is not None:
+            if prior["identity_json"] == encoded_identity and prior["store_id"] == store_id:
+                return
+            raise StoreConflict("E-Commerce native state is already initialized with different identity")
+
+        self._publish_initial_checkpoint(
+            environment, store_id=store_id, identity=identity,
+            encoded_identity=encoded_identity, require_store_id=True,
+        )
+
+    def _publish_initial_checkpoint(
+        self, environment: Any, *, store_id: str, identity: dict[str, Any],
+        encoded_identity: str, require_store_id: bool,
+    ) -> tuple[dict[str, Any], bool]:
+        path = self._write_checkpoint(environment)
+        # Only publication uses the writer. Native initialization and checkpoint
+        # serialization/fsync run before entering this short transaction.
+        with self.store.transaction() as connection:
+            inserted = connection.execute(
                 """INSERT INTO ecommerce_native_world_state
                 (singleton,checkpoint_path,upstream_commit,store_id,identity_json,company_cursor,updated_at)
-                VALUES(1,?,?,?,?,?,?)""",
+                VALUES(1,?,?,?,?,?,?) ON CONFLICT(singleton) DO NOTHING""",
                 (
-                    str(path),
-                    UPSTREAM_COMMIT,
-                    store_id,
-                    encoded_identity,
-                    identity["started_at"],
-                    datetime.now(timezone.utc).isoformat(),
+                    str(path), UPSTREAM_COMMIT, store_id, encoded_identity,
+                    identity["started_at"], datetime.now(timezone.utc).isoformat(),
                 ),
-            )
+            ).rowcount
+            current = dict(connection.execute(
+                "SELECT * FROM ecommerce_native_world_state WHERE singleton=1"
+            ).fetchone())
+        if not inserted:
+            # A competing initializer cannot know this fresh private path and
+            # did not publish it, so deleting this unused candidate is safe.
+            path.unlink(missing_ok=True)
+            if (current["identity_json"] != encoded_identity
+                    or (require_store_id and current["store_id"] != store_id)
+                    or current["upstream_commit"] != UPSTREAM_COMMIT):
+                raise StoreConflict("E-Commerce native state is already initialized with different identity")
+        return current, bool(inserted)
 
     def capture_evaluation_snapshot(self) -> dict[str, Any]:
-        """Capture immutable provider bytes and identity while excluding clock writers."""
+        """Capture immutable checkpoint bytes after closing the state read snapshot."""
         with self.store.transaction(write=False) as connection:
             state = connection.execute(
                 "SELECT * FROM ecommerce_native_world_state WHERE singleton=1"
             ).fetchone()
             if state is None or state["upstream_commit"] != UPSTREAM_COMMIT:
                 raise RuntimeError("pinned E-CommerceBench native world is not initialized")
-            checkpoint_candidate = Path(state["checkpoint_path"])
-            if checkpoint_candidate.is_symlink():
-                raise RuntimeError("E-Commerce native checkpoint may not be a symlink")
-            checkpoint_path = checkpoint_candidate.resolve(strict=True)
-            if not checkpoint_path.is_relative_to(self.directory.resolve()):
-                raise RuntimeError("E-Commerce native checkpoint is outside the configured private store")
-            checkpoint_bytes = checkpoint_path.read_bytes()
-            identity_json = state["identity_json"]
-            identity = json.loads(identity_json)
-            checkpoint_hash = hashlib.sha256(checkpoint_bytes).hexdigest()
-            identity_fingerprint = hashlib.sha256(identity_json.encode("utf-8")).hexdigest()
-            company_time = state["company_cursor"]
-            state_ref = self._state_ref(str(checkpoint_path))
-            store_id = state["store_id"]
+        checkpoint_candidate = Path(state["checkpoint_path"])
+        if checkpoint_candidate.is_symlink():
+            raise RuntimeError("E-Commerce native checkpoint may not be a symlink")
+        checkpoint_path = checkpoint_candidate.resolve(strict=True)
+        if not checkpoint_path.is_relative_to(self.directory.resolve()):
+            raise RuntimeError("E-Commerce native checkpoint is outside the configured private store")
+        checkpoint_bytes = checkpoint_path.read_bytes()
+        identity_json = state["identity_json"]
+        identity = json.loads(identity_json)
+        checkpoint_hash = hashlib.sha256(checkpoint_bytes).hexdigest()
+        identity_fingerprint = hashlib.sha256(identity_json.encode("utf-8")).hexdigest()
+        company_time = state["company_cursor"]
+        state_ref = self._state_ref(str(checkpoint_path))
+        store_id = state["store_id"]
         initialization_request_sha256 = self._evaluation_initialization_request_sha256()
         capture_id = hashlib.sha256(
             f"{UPSTREAM_COMMIT}\0{identity_fingerprint}\0{initialization_request_sha256}\0"
@@ -1249,8 +1254,6 @@ class EcommerceNativeActionCheckpoint:
             if target < previous_cursor:
                 raise ValueError("E-Commerce native company clock cannot run backwards")
             identity = json.loads(state["identity_json"])
-            with open(state["checkpoint_path"], "rb") as checkpoint:
-                environment = pickle.load(checkpoint)
             target_native = target.replace(second=0, microsecond=0, tzinfo=None)
             native_events: list[dict[str, Any]] = []
             money_unit = identity["money_unit"]
@@ -1283,6 +1286,8 @@ class EcommerceNativeActionCheckpoint:
                 ).fetchall()
             }
         # Release the owned read snapshot before advancing or serializing the world.
+        with open(state["checkpoint_path"], "rb") as checkpoint:
+            environment = pickle.load(checkpoint)
         for action_row in action_rows:
             request_action = json.loads(action_row["request_json"])
             action_result = json.loads(action_row["result_json"])

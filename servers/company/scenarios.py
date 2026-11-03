@@ -678,6 +678,9 @@ class RealChatTransport:
                        fixture["employee_mailbox"]["rocketchat_base_url"].rstrip("/") + "/",
                        room, message_id)}
         if fixture.get("mention_account_id"):
+            if not any(mention.get("_id") == fixture["mention_account_id"]
+                       for mention in message.get("mentions", []) if isinstance(mention, dict)):
+                raise RuntimeError("ROCKETCHAT_MENTION_NOT_CONFIRMED")
             receipt["mention_account_id"] = fixture["mention_account_id"]
         return receipt
 

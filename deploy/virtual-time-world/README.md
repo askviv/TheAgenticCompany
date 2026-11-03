@@ -106,8 +106,15 @@ Run it only inside the empty guest after installing the build dependencies.
 hostnames (`domains.owncloud`, `chat`, `plane`, `mail`, `erp`, `midpoint`, and
 `experiments`), `public_ip`, and the explicit shared sandbox password. The
 host installer supplies that profile; it does not invent domains or
-credentials. The bootstrap creates a guest-local root CA and server
-certificate with OpenSSL, installs the root into the guest OS trust store, and
+credentials.
+
+Experiment task instructions and the Company tools links share the JSON file
+selected by `COMPANY_TOOLS_URLS_FILE`. The retained `task.md` instructions use
+Jinja placeholders such as `{{ company_tools.owncloud }}`; the experiment
+catalogue renders them from that mapping. Configure URLs in the mapping rather
+than editing task text. Existing run snapshots and messages are not rewritten.
+
+The bootstrap creates a guest-local root CA and server certificate with OpenSSL, installs the root into the guest OS trust store, and
 renders Caddy configuration from the repository template. Each certificate
 generation is written as a complete directory and activated with one atomic
 symlink rename, so an interrupted first run can resume without a partial trust

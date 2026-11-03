@@ -438,9 +438,16 @@ Employee stream access is controlled in the coordinator runtime JSON:
 
 The default is `true`. Selkies enforces the viewer role on the server: keyboard,
 mouse, clipboard, gamepad, command input and file transfers are blocked for the
-stream credentials. Employee automation uses its private native CUA MCP connection. Set the value to `false` to allow viewer control.
+stream credentials. Employee automation uses its private native CUA MCP connection.
+Set the value to `false` to allow viewer control through the direct stream URL;
+the dashboard's embedded streams remain inert and unfocusable so its viewers
+cannot send mouse or keyboard input to an employee desktop.
+
+Streaming audio and microphone forwarding are disabled with Selkies' native
+`SELKIES_AUDIO_ENABLED=false|locked` setting. Dashboard embeds also deny autoplay.
 Docker environment settings apply when a desktop container is created; existing
-containers must be recreated to apply a changed mode, retaining their profile volumes.
+containers must be recreated to apply changed server settings, retaining their
+profile volumes. This does not affect native CUA input.
 
 Employee desktops use Selkies' native fixed 1920 × 1080 resolution with dynamic
 resize locked off. Grid thumbnails and focused viewers scale the same desktop;

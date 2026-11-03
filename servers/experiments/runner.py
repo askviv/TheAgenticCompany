@@ -27,7 +27,7 @@ class RocketChatClient:
         username: str,
         password: str,
         viv_username: str,
-        channel: str = "viv-experiments",
+        channel: str = "general",
         *,
         timeout: float | None = None,
         session: requests.Session | None = None,
@@ -51,7 +51,7 @@ class RocketChatClient:
             username=os.environ["ROCKETCHAT_USERNAME"],
             password=os.environ["ROCKETCHAT_PASSWORD"],
             viv_username=os.environ["VIV_ROCKETCHAT_USERNAME"],
-            channel=os.getenv("EXPERIMENTS_ROCKETCHAT_CHANNEL", "viv-experiments"),
+            channel=os.getenv("EXPERIMENTS_ROCKETCHAT_CHANNEL", "general"),
         )
 
     def _request(self, method: str, endpoint: str, **kwargs: Any) -> dict[str, Any]:
@@ -166,34 +166,14 @@ class RocketChatClient:
         """Prepare channel membership, then send the initial message in employee Chrome."""
         with self._lock:
             room_id = self._ensure_channel()
-            legacy_message_id = f"exp-{run_id}"
-            legacy_text = (
-                f"@{self.viv_username} **Experiment {run_id}: {title}**\n\n"
-                f"{description}\n\nPlease reply in this thread with your response."
-            )
-            if inputs:
-                legacy_text += "\n\nSource files:\n" + "\n".join(
-                    f"- [{item['name']}]({item['url']})" for item in inputs
-                )
-                legacy_text += "\nUse these source files for the assignment and share your deliverables in this thread."
-            existing = self._get_message(legacy_message_id)
-            if existing is not None:
-                author = existing.get("u") or {}
-                if (existing.get("rid") != room_id or not isinstance(author, dict)
-                        or author.get("_id") != self._user_id or existing.get("msg") != legacy_text):
-                    raise RocketChatError("chat.getMessage", "legacy_message_mismatch")
-                return {
-                    "status": "sent", "room_id": room_id,
-                    "message_id": legacy_message_id, "legacy_api": True,
-                }
             self._ensure_channel_member(room_id, employee_user_id)
             text = (
-                f"**Experiment {run_id}: {title}**\n\n"
+                f"**{title}**\n\n"
                 f"{description}\n\nPlease reply in this thread with your response."
             )
             if inputs:
                 text += "\n\nSource files:\n" + "\n".join(f"- [{item['name']}]({item['url']})" for item in inputs)
-                text += "\nUse these source files for the assignment and share your deliverables in this thread."
+                text += "\nPlease share the completed work in this thread."
             mention_account_id = self._viv_user_id
         return coordinator.dispatch_experiment_chat(
             idempotency_key=str(run_id), role=role, employee_id=employee_id,
@@ -265,7 +245,18 @@ class RocketChatClient:
                     and existing.get("token") == token
                 )
                 if not matches:
-                    raise RocketChatError("integrations.list", "existing_integration_mismatch")
+                    # Preserve subscriptions for already-running requests while
+                    # adding the configured channel for subsequent dispatches.
+                    configured_channels = sorted(set(channel_names) | {f"#{self.channel}"})
+                    self._request(
+                        "PUT", "integrations.update",
+                        json={
+                            "integrationId": existing["_id"], "type": "webhook-outgoing",
+                            "username": self.username, "channel": ",".join(configured_channels),
+                            "scriptEnabled": False, "name": name, "enabled": True,
+                            "event": "sendMessage", "urls": [endpoint], "token": token,
+                        },
+                    )
                 return existing["_id"]
             created = self._request(
                 "POST",

@@ -1504,7 +1504,7 @@ class SimulationEngine:
         if related_document is None:
             return
         reference = related_document.model_dump(mode="json")
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             table = db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='company_record_mappings'"
             ).fetchone()

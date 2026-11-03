@@ -646,6 +646,7 @@ class EmployeeDesktopRuntime:
                 if self.view_only:
                     output.write("SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD=" + credentials["password"] + "\n")
                 output.write("SELKIES_MODE=websockets\n")
+                output.write("SELKIES_AUDIO_ENABLED=false|locked\n")
                 output.write("SELKIES_MANUAL_WIDTH=1920\n")
                 output.write("SELKIES_MANUAL_HEIGHT=1080\n")
                 output.write("SELKIES_ENABLE_RESIZE=false|locked\n")

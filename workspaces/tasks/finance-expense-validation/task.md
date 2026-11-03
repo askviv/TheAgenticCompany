@@ -2,7 +2,7 @@ Review and validate expense categorization for all company transactions to ensur
 
 The company has specific rules for categorizing expenses based on an expense policy. Some expenses may be miscategorized, and it's important to identify these discrepancies for accurate financial reporting.
 
-Navigate to owncloud on http://the-agent-company.com:8092/ and navigate to the folder Documents/Financials/Expenses. Here you will find two files:
+Navigate to owncloud on {{ company_tools.owncloud }}/ and navigate to the folder Documents/Financials/Expenses. Here you will find two files:
 
 1. `expenses.xlsx`: 
 2. `category_rules.txt`

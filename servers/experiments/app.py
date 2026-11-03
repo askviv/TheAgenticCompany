@@ -12,17 +12,17 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, closing
 from datetime import datetime, timezone
 from pathlib import Path
-from textwrap import shorten
 from urllib.parse import parse_qsl, quote, urlsplit
 
 import requests
 import yaml
 from flask import Flask, Response, abort, jsonify, redirect, request, session, url_for, send_file
+from jinja2 import Environment, StrictUndefined
 
 from .runner import RocketChatClient
 from .coordinator import CoordinatorError, SimulationCoordinatorClient
 
-ROLES = {'admin':'Administration','hr':'People','finance':'Finance','ds':'Data','pm':'Product','research':'Research','bm':'Business','ml':'Machine learning'}
+ROLES = {'admin':'Administration','hr':'People','finance':'Finance','ds':'Data','pm':'Product','bm':'Business'}
 COMPANY_TOOLS = (
     ('erpnext', 'ERPNext'),
     ('email', 'Email'),
@@ -85,7 +85,27 @@ SIMULATION_SCENARIOS = {
 }
 
 
-def catalog(root):
+def company_tools_urls(path):
+    """Read the configured company links shared by navigation and task instructions."""
+    mapping = json.loads(Path(path).read_text(encoding='utf-8'))
+    expected = {key for key, _ in COMPANY_TOOLS}
+    if not isinstance(mapping, dict) or set(mapping) != expected:
+        raise ValueError('mapping keys do not match the company tools')
+    for key, value in mapping.items():
+        if not isinstance(value, str) or not value or value != value.strip():
+            raise ValueError(f'invalid URL for {key}')
+        parsed = urlsplit(value)
+        if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError(f'invalid URL for {key}')
+        _ = parsed.port
+    return mapping
+
+
+def catalog(root, company_tools_urls_file=None):
+    mapping_path = (company_tools_urls_file if company_tools_urls_file is not None
+                    else Path(__file__).with_name('company-tools-urls.example.json'))
+    tools = {key: value.rstrip('/') for key, value in company_tools_urls(mapping_path).items()}
+    templates = Environment(autoescape=False, undefined=StrictUndefined, keep_trailing_newline=True)
     result = {}
     briefs = {}
     for brief_file in sorted(Path(__file__).parent.glob('briefs-*.json')):
@@ -94,7 +114,7 @@ def catalog(root):
         task_id = path.parent.name
         if task_id == 'example':
             continue
-        description = path.read_text()
+        description = templates.from_string(path.read_text()).render(company_tools=tools)
         dependencies = yaml.safe_load((path.parent/'dependencies.yml').read_text()) or []
         result[task_id] = dict(id=task_id, title=task_id.removeprefix(task_id.split('-')[0]+'-').replace('-', ' ').capitalize(),
             summary=briefs[task_id]['summary'], description=description,
@@ -108,52 +128,6 @@ def catalog(root):
     retail = json.loads(Path(__file__).with_name('retail-catalog.json').read_text())
     for entry in retail['tasks']:
         result[entry['id']] = {**entry, 'display_description': entry['description']}
-    return result
-
-
-def provider_definitions(payload):
-    """Project the worker's public business catalogue, never its private task data."""
-    providers = {'tau2-airline': 'Travel services', 'tau2-telecom': 'Telecom account',
-                 'tau2-banking': 'Banking portal'}
-    if (not isinstance(payload, dict) or payload.get('schema_version') != 1
-            or not isinstance(payload.get('tasks'), list)
-            or not re.fullmatch(r'[0-9a-f]{40}', str(payload.get('upstream_commit', '')))):
-        raise CoordinatorError('provider-catalog', 'invalid_response')
-    result = {}
-    for entry in payload['tasks']:
-        if (not isinstance(entry, dict) or entry.get('provider_id') not in providers
-                or not isinstance(entry.get('task_id'), str)
-                or not entry['task_id'] or len(entry['task_id']) > 240
-                or entry.get('classification') not in {None,'financial','operational'}
-                or not isinstance(entry.get('description'), str) or not entry['description'].strip()):
-            raise CoordinatorError('provider-catalog', 'invalid_task')
-        provider_id, task_id = entry['provider_id'], entry['task_id']
-        classification = entry.get('classification')
-        role = 'Finance' if classification == 'financial' or (classification is None and provider_id == 'tau2-banking') else 'Operations'
-        experiment_id = f'tau-provider-{uuid.uuid5(uuid.NAMESPACE_URL, provider_id + ":" + task_id)}'
-        if experiment_id in result:
-            raise CoordinatorError('provider-catalog', 'duplicate_task')
-        description = re.sub(r'https?://\S+', '', entry['description']).strip()
-        public_fields={}
-        for field in ('title','summary','requested_outcome','role_fit','role_fit_note','financial_context_status'):
-            if field in entry and entry[field] is not None:
-                if not isinstance(entry[field],str):
-                    raise CoordinatorError('provider-catalog','invalid_business_brief')
-                public_fields[field]=re.sub(r'https?://\S+', '', entry[field]).strip()
-        display=description
-        if public_fields.get('requested_outcome'):
-            display+='\n\nRequested outcome\n'+public_fields['requested_outcome']
-        result[experiment_id] = dict(
-            id=experiment_id, task_id=task_id, provider_id=provider_id,
-            scenario_id='TAU_PROVIDER', title=public_fields.get('title') or shorten(description.split('\n')[0], width=100, placeholder='…'),
-            summary=public_fields.get('summary') or shorten(description, width=240, placeholder='…'), description=description,
-            display_description=display, role=role,
-            kind='simulation',
-            **({'classification':entry['classification']} if entry.get('classification') is not None else {}),
-            dependencies=['Email', providers[provider_id]], benchmarks=['τ-bench', f'τ-bench · {providers[provider_id]}'],
-            source_revision=payload['upstream_commit'],
-            **{key:value for key,value in public_fields.items() if key not in {'title','summary'}},
-        )
     return result
 
 
@@ -221,7 +195,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                                   ('simulation_run_id', 'TEXT'), ('simulated_time', 'TEXT'),
                                   ('activity', "TEXT NOT NULL DEFAULT '[]'"), ('company_id','TEXT'),
                                   ('simulation_experiment_id','TEXT'),('provider_url','TEXT'),('provider_status','TEXT'),
-                                  ('sender_employee_id','TEXT')):
+                                  ('sender_employee_id','TEXT'),('chat_browser_url','TEXT')):
             if name not in columns: c.execute(f'ALTER TABLE runs ADD COLUMN {name} {declaration}')
         c.execute("""UPDATE runs SET status='uncertain',
           error=CASE WHEN kind='simulation' THEN 'The server restarted while dispatching. Retry will reconcile the same experiment ID.'
@@ -238,8 +212,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             if name not in company_columns: c.execute(f'ALTER TABLE company_state ADD COLUMN {name} {declaration}')
         c.execute("INSERT OR IGNORE INTO company_state(singleton,status,updated_at) VALUES(1,'not_started',?)",
                   (datetime.now(timezone.utc).isoformat(),))
-    experiments=catalog(app.config['REPO'])
-    catalogue_lock=threading.RLock()
+    experiments=catalog(app.config['REPO'], app.config['COMPANY_TOOLS_URLS_FILE'])
     compatibility=public_compatibility()
     inputs=json.loads(Path(__file__).with_name('inputs.json').read_text())['tasks']
     rocket=client_factory()
@@ -251,20 +224,8 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         with coordinator_lock:
             if coordinator_instance is None: coordinator_instance=coordinator_factory()
             return coordinator_instance
-    def load_provider_catalogue():
-        definitions = provider_definitions(coordinator().provider_catalog())
-        with catalogue_lock:
-            for key in list(experiments):
-                if experiments[key].get('provider_id'):
-                    del experiments[key]
-            experiments.update(definitions)
-        return definitions
     def definition_for(experiment_id):
-        with catalogue_lock:
-            definition = experiments.get(experiment_id)
-        if definition is None and experiment_id.startswith('tau-provider-'):
-            load_provider_catalogue()
-            definition = experiments.get(experiment_id)
+        definition = experiments.get(experiment_id)
         if definition is None:
             abort(404)
         return definition
@@ -282,7 +243,8 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         data=dict(item);data['messages']=json.loads(data['messages'])
         data['activity']=json.loads(data['activity'])
         data.pop('idempotency_key',None)
-        data['chat_url']=app.config['CHAT_PUBLIC_URL'].rstrip('/')+'/channel/'+quote(os.environ.get('EXPERIMENTS_ROCKETCHAT_CHANNEL','viv-experiments'))+'?msg='+quote(data['message_id']) if data['message_id'] else None
+        data['chat_url']=data.pop('chat_browser_url') if data['message_id'] else None
+        data.pop('chat_browser_url',None)
         return data
     def all_runs():
         with db() as c: return [dict(r) for r in c.execute('SELECT * FROM runs ORDER BY created_at DESC')]
@@ -487,10 +449,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                     role=role,employee_id=employee_id,employee_user_id=employee_user_id,
                     coordinator=coordinator(),
                 )
-                if sent.get('legacy_api') is True:
-                    update(run_id,status='awaiting_viv',room_id=sent['room_id'],
-                           message_id=sent['message_id'],sender_employee_id=None)
-                elif sent.get('status')=='uncertain':
+                if sent.get('status')=='uncertain':
                     update(run_id,status='uncertain',room_id=sent.get('room_id'),
                            message_id=sent.get('message_id'),
                            error='Employee browser send is uncertain. Retry reconciles the same native message without resending.')
@@ -500,7 +459,8 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                             or not isinstance(sent.get('room_id'),str) or not isinstance(sent.get('message_id'),str)):
                         raise CoordinatorError('experiment-chat','invalid_response')
                     update(run_id,status='awaiting_viv',room_id=sent['room_id'],
-                           message_id=sent['message_id'],sender_employee_id=employee_id)
+                           message_id=sent['message_id'],sender_employee_id=employee_id,
+                           chat_browser_url=sent['browser_url'])
             except Exception as error:
                 logging.exception('Experiment dispatch failed run=%s', run_id)
                 update(run_id,status='uncertain',error=f'Could not confirm delivery ({type(error).__name__}). Retry checks the same request before sending again.')
@@ -622,34 +582,14 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def api_session(): return jsonify(csrf_token=session['csrf_token'],idempotency_key=str(uuid.uuid4()))
     @app.get('/api/catalog')
     def api_catalog():
-        error=None
-        try:
-            load_provider_catalogue()
-        except CoordinatorError as failure:
-            error={'code':failure.code,'correlation_id':failure.correlation_id}
-            logging.warning('Provider catalogue unavailable code=%s correlation_id=%s',failure.code,failure.correlation_id)
-        with catalogue_lock:
-            entries=list(experiments.values())
-        return jsonify(experiments=entries,provider_catalog_error=error)
+        return jsonify(experiments=list(experiments.values()))
     @app.get('/api/compatibility')
     def api_compatibility(): return jsonify(compatibility)
     @app.get('/api/company-tools')
     def api_company_tools():
         try:
-            mapping = json.loads(Path(app.config['COMPANY_TOOLS_URLS_FILE']).read_text(encoding='utf-8'))
-            expected = {key for key, _ in COMPANY_TOOLS}
-            if not isinstance(mapping, dict) or set(mapping) != expected:
-                raise ValueError('mapping keys do not match the company tools')
-            links = []
-            for key, name in COMPANY_TOOLS:
-                value = mapping[key]
-                if not isinstance(value, str) or not value or value != value.strip():
-                    raise ValueError(f'invalid URL for {key}')
-                parsed = urlsplit(value)
-                if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
-                    raise ValueError(f'invalid URL for {key}')
-                _ = parsed.port
-                links.append({'id': key, 'name': name, 'url': value})
+            mapping = company_tools_urls(app.config['COMPANY_TOOLS_URLS_FILE'])
+            links = [{'id': key, 'name': name, 'url': mapping[key]} for key, name in COMPANY_TOOLS]
         except (OSError, TypeError, ValueError) as error:
             logging.exception('Company tools URL mapping unavailable (%s)', type(error).__name__)
             return jsonify(error='Company tools URL mapping is unavailable or invalid.'), 503

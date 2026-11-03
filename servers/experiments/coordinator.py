@@ -128,9 +128,6 @@ class SimulationCoordinatorClient:
             },
         )
 
-    def provider_catalog(self) -> dict[str, Any]:
-        return self._request("GET", "/company/provider-experiments/catalog")
-
     def start_provider_experiment(self, provider_id: str, task_id: str, *, idempotency_key: str) -> dict[str, Any]:
         return self._request("POST", "/company/provider-experiments", idempotency_key=idempotency_key,
                              request_timeout=None,

@@ -42,10 +42,10 @@ and Share API mutations, with a private pre-change metadata snapshot.
   personnel, immigration, attendance, and salary material. These folders are
   not proposed for all-staff sharing.
 
-The five task-author assets recorded in [`servers/owncloud/seed-repair/provenance.md`](../../servers/owncloud/seed-repair/provenance.md)
+The four retained task-author assets recorded in [`servers/owncloud/seed-repair/provenance.md`](../../servers/owncloud/seed-repair/provenance.md)
 were independently checked through WebDAV and matched their documented SHA-256
 values: contracts.xlsx (ID 841), revenue_schedule.xlsx (843),
-employee_contracts.xlsx (842), test_image.jpg (844), and category_rules.txt
+employee_contracts.xlsx (842), and category_rules.txt
 (845). The files already exist; no recovery or file copy was needed.
 
 The live OCS JSON shapes were also checked. Group data is a list under

@@ -75,6 +75,7 @@ def main() -> None:
         'ROCKETCHAT_USERNAME': 'theagentcompany',
         'ROCKETCHAT_PASSWORD': profile['sandbox_password'],
         'VIV_ROCKETCHAT_USERNAME': profile.get('viv', {}).get('chat_username', 'viv'),
+        'EXPERIMENTS_ROCKETCHAT_CHANNEL': 'general',
         'CODEX_AUTH_BRIDGE_URL': 'http://10.0.2.2:8143',
         'CODEX_AUTH_BRIDGE_TOKEN_FILE': str(enterprise / 'actors/secrets/codex-inference-token'),
         'REQUESTS_CA_BUNDLE': '/etc/ssl/certs/ca-certificates.crt',

@@ -8,12 +8,16 @@ outbox state, or treat an email sender header as approval authority.
 from __future__ import annotations
 
 import email
+import errno
+import imaplib
 import email.policy
 from email.header import decode_header, make_header
 import json
 from pathlib import Path
 import re
 import smtplib
+import socket
+import threading
 import time
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -248,6 +252,9 @@ class MailuGateway:
         self._transport = RealMailTransport()
         self.employee_desktops = employee_desktops
         self._webmail_sender = webmail_sender
+        self._activity_clients: set[IMAPClient] = set()
+        self._activity_clients_lock = threading.Lock()
+        self._activity_waits_stopped = threading.Event()
 
     def set_employee_desktops(self, manager: Any | None) -> None:
         """Attach the coordinator-owned employee browser runtime after engine setup."""
@@ -1231,39 +1238,74 @@ class MailuGateway:
                     client.idle_done()
 
 
+    def stop_activity_waits(self) -> None:
+        """Wake owned IMAP listeners; their threads retain connection cleanup."""
+        with self._activity_clients_lock:
+            self._activity_waits_stopped.set()
+            clients = tuple(self._activity_clients)
+        failures = []
+        for client in clients:
+            try:
+                # Shutdown wakes both IDLE's native poll and a blocked IMAP read.
+                # Do not close the descriptor or buffered file from this thread:
+                # imaplib.shutdown() closes the file first and can wait on a reader.
+                client.socket().shutdown(socket.SHUT_RDWR)
+            except OSError as error:
+                # The owning context may already have finished its native cleanup.
+                if error.errno not in {errno.EBADF, errno.ENOTCONN}:
+                    failures.append(error)
+        if failures:
+            raise ExceptionGroup("IMAP listener cancellation failed", failures)
+
     def wait_for_activity(self, actor: dict[str, Any], timeout: float = 30) -> bool:
         """Return whether the actor's Mailu INBOX signals activity through IMAP IDLE."""
+        if self._activity_waits_stopped.is_set():
+            return False
         mailbox_actor = self._actor(actor, "mailbox")
         if self._is_viv(mailbox_actor):
             raise ValueError("Viv's smtp4dev inbox does not provide Mailu IMAP IDLE")
         credentials = self._credentials_for(mailbox_actor)
         context = _ActivityContext(timeout=timeout)
-        with IMAPClient(
+        client = IMAPClient(
             self.config.mailu_imap_host,
             port=self.config.mailu_imap_port,
             ssl=True,
             ssl_context=_ssl_context(self.config.tls_ca_file),
             timeout=(None if self.config.smtp_timeout_seconds is None else
                      max(self.config.smtp_timeout_seconds, context.timeout)),
-        ) as client:
-            client.login(credentials.username, credentials.password)
-            client.select_folder("INBOX", readonly=True)
-            client.idle()
-            try:
-                activity = client.idle_check(timeout=context.timeout)
-            except BaseException as error:
+        )
+        with self._activity_clients_lock:
+            stopped = self._activity_waits_stopped.is_set()
+            if not stopped:
+                self._activity_clients.add(client)
+        if stopped:
+            # This connection finished opening after the cancellation snapshot.
+            client.shutdown()
+            return False
+        try:
+            with client:
+                if self._activity_waits_stopped.is_set():
+                    return False
+                client.login(credentials.username, credentials.password)
+                client.select_folder("INBOX", readonly=True)
+                client.idle()
                 try:
-                    client.idle_done()
-                except BaseException as cleanup_error:
-                    error.add_note(f"IMAP IDLE cleanup also failed: {type(cleanup_error).__name__}")
-                raise
-            client.idle_done()
-        return bool(activity)
-
-
-
-
-
+                    activity = client.idle_check(timeout=context.timeout)
+                except BaseException as error:
+                    try:
+                        client.idle_done()
+                    except BaseException as cleanup_error:
+                        error.add_note(f"IMAP IDLE cleanup also failed: {type(cleanup_error).__name__}")
+                    raise
+                client.idle_done()
+            return bool(activity)
+        except (OSError, imaplib.IMAP4.error):
+            if self._activity_waits_stopped.is_set():
+                return False
+            raise
+        finally:
+            with self._activity_clients_lock:
+                self._activity_clients.discard(client)
 
     def _poll_selected(
         self,
