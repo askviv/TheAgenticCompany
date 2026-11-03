@@ -307,3 +307,10 @@ deadlines and evaluator criteria are unchanged.
 Use the standard Ubuntu Docker package and the standard pinned Mailu Dovecot
 image. Kernel-clock behavior comes from the timed Ubuntu VM; container health
 durations and Dovecot proxy timeouts are set by the company Compose helper.
+
+For an existing world, `compact-and-move-images.sh /path/on/ssd` uses native
+libguestfs sparsification and QEMU conversion/comparison with the VM and clock
+supervisor stopped. It preserves company files and virtual disk capacities,
+flattens the boot disk backing chain, and persists an SSD bind mount at the
+existing image path. The original HDD directory is retained only until the
+operator verifies startup, then must be removed. No company reset is performed.

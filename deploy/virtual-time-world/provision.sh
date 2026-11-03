@@ -145,9 +145,9 @@ virt-install --connect "$connection" \
   --name "$WORLD_NAME" --virt-type kvm --machine q35 \
   --memory "$WORLD_MEMORY_MIB" --vcpus "$WORLD_VCPUS" \
   --cpu host-passthrough --os-variant ubuntu24.04 \
-  --disk "path=$WORLD_ROOT/images/world.qcow2,format=qcow2,bus=virtio" \
+  --disk "path=$WORLD_ROOT/images/world.qcow2,format=qcow2,bus=virtio,discard=unmap" \
   --disk "path=$WORLD_ROOT/images/seed.img,format=raw,bus=virtio,readonly=on" \
-  --disk "path=$WORLD_ROOT/images/company-data.qcow2,format=qcow2,bus=virtio" \
+  --disk "path=$WORLD_ROOT/images/company-data.qcow2,format=qcow2,bus=virtio,discard=unmap" \
   --network none \
   --qemu-commandline="-netdev user,id=worldnet,hostfwd=tcp:127.0.0.1:$WORLD_SSH_PORT-:22,hostfwd=tcp:127.0.0.1:18080-:80,hostfwd=tcp:127.0.0.1:18443-:443,hostfwd=tcp:$WORLD_MAIL_BIND_IP:$WORLD_MAIL_SMTP_PORT-:$WORLD_MAIL_SMTP_PORT,hostfwd=tcp:$WORLD_MAIL_BIND_IP:$WORLD_MAIL_SUBMISSION_PORT-:$WORLD_MAIL_SUBMISSION_PORT,hostfwd=tcp:$WORLD_MAIL_BIND_IP:$WORLD_MAIL_IMAPS_PORT-:$WORLD_MAIL_IMAPS_PORT -device virtio-net-pci,netdev=worldnet,bus=pcie.0,addr=0x1e" \
   --channel unix,target.type=virtio,name=org.qemu.guest_agent.0 \
