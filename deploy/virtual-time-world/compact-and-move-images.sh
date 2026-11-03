@@ -40,6 +40,18 @@ for disk in world.qcow2 company-data.qcow2; do
   chown --reference="$images/$disk" "$destination/$disk"
   chmod --reference="$images/$disk" "$destination/$disk"
 done
+# Keep future guest TRIM operations effective after the move.
+python3 - "$name" "$root/config/domain-storage.xml" <<'PYXML'
+import subprocess, sys, xml.etree.ElementTree as ET
+from pathlib import Path
+xml=ET.fromstring(subprocess.check_output(['virsh','dumpxml','--inactive',sys.argv[1]],text=True))
+for disk in xml.findall('./devices/disk'):
+    driver=disk.find('driver')
+    if driver is not None and driver.get('type')=='qcow2':
+        driver.set('discard','unmap')
+p=Path(sys.argv[2]); p.write_bytes(ET.tostring(xml)); p.chmod(0o600)
+subprocess.run(['virsh','define',str(p)],check=True)
+PYXML
 sync
 # Preserve configured image paths with a native persistent bind mount.
 # This keeps kernel, clock controller and provisioning paths consistent.
