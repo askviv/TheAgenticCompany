@@ -65,24 +65,12 @@ def build_evaluation_service(engine: Any, store: SQLiteStore, evidence_directory
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
 
-    def capture(run_id: str, generation: int):
-        if engine.store.is_company_experiment(run_id):
-            with engine._operation_guard("company-clock"):
-                with engine._operation_guard(run_id):
-                    return engine.capture_evaluation_inputs(run_id, generation)
-        with engine._operation_guard(run_id):
-            return engine.capture_evaluation_inputs(run_id, generation)
-
-    def verify(run_id: str, snapshot: Any):
-        with engine._operation_guard(run_id):
-            return engine.verify_evaluation_inputs(run_id, snapshot)
-
     service = EvaluationService(
         store,
         evidence_directory,
-        snapshotter=capture,
+        snapshotter=engine.capture_evaluation_inputs,
         evaluator=lambda run_id, snapshot: engine.evaluate_captured(run_id, snapshot),
-        version_verifier=verify,
+        version_verifier=engine.verify_evaluation_inputs,
         identity_resolver=identity_resolver,
         guard_factory=evaluation_lock,
     )

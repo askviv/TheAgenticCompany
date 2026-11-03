@@ -1,9 +1,9 @@
 [Unit]
-Description=Retry public Mailu TLS synchronization after host and guest startup
+Description=Retry public Mailu TLS synchronization after Caddy renewals
 
 [Timer]
-OnBootSec=30s
-OnUnitInactiveSec=60s
+OnBootSec=1min
+OnUnitInactiveSec=5min
 AccuracySec=1s
 Unit=virtual-time-world-public-mail-tls.service
 

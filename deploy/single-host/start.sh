@@ -2,7 +2,7 @@
 # Start existing initialized TAC state. This does not reset benchmark data.
 set -euo pipefail
 TAC_ROOT=${TAC_ROOT:-/data/theagentcompany}
-GITLAB_PORT=8929 docker compose -p theagentcompany \
+docker compose -p theagentcompany \
   -f "$TAC_ROOT/source/servers/docker-compose.yml" \
   -f "$TAC_ROOT/source/deploy/single-host/apps.override.yml" up -d --pull never
 env -u COMPOSE_FILE docker compose --env-file "$TAC_ROOT/plane/plane-app/plane.env" -p plane-app \

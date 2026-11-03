@@ -7,6 +7,8 @@ Type=simple
 User=root
 WorkingDirectory=/usr/local/lib/virtual-time-world
 Environment=VIRTUAL_TIME_ROOT=/data/theagentcompany/virtual-time-world
+Environment=VIRTUAL_TIME_DOMAIN=tac-virtual-time-world
+Environment=VIRTUAL_TIME_SSH_PORT=22220
 Environment=VIRTUAL_TIME_API_TOKEN_FILE=/data/theagentcompany/virtual-time-world/config/clock-api-token
 Environment=VIRTUAL_TIME_SOURCE_ROOT=/data/theagentcompany/virtual-time-world/company-source
 Environment=PYTHONPATH=/data/theagentcompany/virtual-time-world/company-source

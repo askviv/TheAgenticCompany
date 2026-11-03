@@ -10,8 +10,14 @@ services:
     volumes:
       - ${TAC_ROOT}/source:/repo:ro
       - type: bind
-        source: ${TAC_ROOT}/enterprise/source/deploy/single-host/company-identities.json
-        target: /repo/deploy/single-host/company-identities.json
+        source: ${COMPANY_PROFILE_SOURCE:-${TAC_ROOT}/enterprise/source/deploy/single-host/company-identities.json}
+        target: /run/config/company-identities.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${COMPANY_TOOLS_URLS_SOURCE}
+        target: /run/config/company-tools-urls.json
         read_only: true
         bind:
           create_host_path: false
@@ -25,3 +31,5 @@ services:
     environment:
       SIMULATION_COORDINATOR_URL: ${SIMULATION_COORDINATOR_URL:-http://192.0.2.10:8131}
       SIMULATION_CONTROLLER_TOKEN_FILE: /run/secrets/simulation-controller-token
+      COMPANY_PROFILE_FILE: /run/config/company-identities.json
+      COMPANY_TOOLS_URLS_FILE: /run/config/company-tools-urls.json

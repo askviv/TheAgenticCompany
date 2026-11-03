@@ -13,6 +13,7 @@ from typing import Any, Iterator
 import zlib
 
 from servers.simulation.actor_worker_store import canonical_request_hash
+from servers.simulation.clock_rate import kernel_virtual_time_rate
 
 
 def native_record_digests(agent_db: dict[str, Any], user_db: dict[str, Any] | None) -> dict[str, str]:
@@ -86,9 +87,10 @@ class NativeProviderStore:
             self.path.chmod(0o600)
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        timeout = 30 * kernel_virtual_time_rate()
+        connection = sqlite3.connect(self.path, timeout=timeout, isolation_level=None)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout=30000")
+        connection.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
         return connection
 
     @contextmanager
@@ -431,6 +433,14 @@ class NativeProviderStore:
             separators=(",", ":"), ensure_ascii=False,
         )
         response_json = json.dumps(response, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        baseline_snapshots = None if baseline is None else (
+            self._encode_snapshot(baseline["agent_db"]),
+            self._encode_snapshot(baseline["user_db"]),
+        )
+        conversation_snapshots = None if conversation_baseline is None else (
+            self._encode_snapshot(conversation_baseline["agent_db"]),
+            self._encode_snapshot(conversation_baseline["user_db"]),
+        )
         with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             active = connection.execute(
@@ -444,20 +454,18 @@ class NativeProviderStore:
                 "UPDATE native_provider_state SET agent_db_json=?,user_db_json=?,initialized_task_ids_json=?,state_revision=? "
                 "WHERE provider_id=?", (agent_json, user_json, tasks_json, state_revision, provider_id),
             )
-            if baseline is not None:
+            if baseline_snapshots is not None:
                 connection.execute(
                     "INSERT OR IGNORE INTO native_provider_task_baselines(provider_id,task_id,agent_db_json,user_db_json) "
                     "VALUES(?,?,?,?)", (provider_id, task_id,
-                        self._encode_snapshot(baseline["agent_db"]),
-                        self._encode_snapshot(baseline["user_db"])),
+                        *baseline_snapshots),
                 )
-            if conversation_baseline is not None:
+            if conversation_snapshots is not None:
                 connection.execute(
                     "INSERT OR IGNORE INTO native_provider_conversation_baselines "
                     "(provider_id,conversation_id,task_id,agent_db_json,user_db_json) VALUES(?,?,?,?,?)",
                     (provider_id, conversation_id, task_id,
-                     self._encode_snapshot(conversation_baseline["agent_db"]),
-                     self._encode_snapshot(conversation_baseline["user_db"])),
+                     *conversation_snapshots),
                 )
             connection.execute(
                 "INSERT INTO native_provider_conversations(provider_id,conversation_id,task_id,agent_state_json,trajectory_json,initialization_status,initialization_evidence_json,company_context_json) "

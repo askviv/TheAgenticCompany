@@ -32,6 +32,7 @@ from typing import Any, Callable
 import uuid
 
 from servers.simulation.integration_contracts import ExternalSupplyCondition
+from servers.simulation.clock_rate import kernel_virtual_time_rate
 
 
 UPSTREAM_COMMIT = "9e2f3950b5812c8753de81ede9c68babc024b5c8"
@@ -92,8 +93,9 @@ class _ModelResponseStore:
             self.path.chmod(0o600)
 
     def _connect(self):
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-        connection.execute("PRAGMA busy_timeout=30000")
+        timeout = 30 * kernel_virtual_time_rate()
+        connection = sqlite3.connect(self.path, timeout=timeout, isolation_level=None)
+        connection.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
         return connection
 
     def _initialize(self):

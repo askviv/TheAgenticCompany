@@ -32,8 +32,12 @@ import {
   getActivity,
   getCatalog,
   getCompany,
+  getCompanyClock,
   getCompanyDesktops,
   getCompanyEvaluations,
+  getCompanyTools,
+  getCodexAuthStatus,
+  getCodexDeviceAuthorization,
   getEvaluation,
   getEvaluations,
   getLatestEvaluation,
@@ -46,13 +50,15 @@ import {
   startEvaluation,
   startCompanyEvaluation,
   setBackgroundProviderEnabled,
-  setCompanyClockSpeed,
+  startCodexDeviceAuthorization,
   type ActivityEntry,
   type ActivityMetrics,
   type Company,
   type CompanyDesktopEmployee,
   type CompanyNativeEvaluation,
   type CompanyNativeEvaluationProvider,
+  type CodexAuthStatus,
+  type CompanyToolLink,
   type Experiment,
   type ExperimentRun,
   type ExperimentRunStatus,
@@ -159,14 +165,21 @@ function AppLayout() {
 
   useEffect(() => {
     let active = true
-    getCompany().then((company) => {
-      if (active) setCompanyTime(company.simulated_time ?? null)
-    }).catch((error) => {
-      if (active) setCompanyTime(null)
-      console.error("Unable to load company time.", error instanceof Error ? error.name : "UnknownError")
-    })
-    return () => { active = false }
-  }, [refreshKey])
+    let pending = false
+    const refreshClock = () => {
+      if (pending) return
+      pending = true
+      getCompanyClock().then((clock) => {
+        if (active) setCompanyTime(clock.simulated_time)
+      }).catch((error) => {
+        if (active) setCompanyTime(null)
+        console.error("Unable to load company time.", error instanceof Error ? error.name : "UnknownError")
+      }).finally(() => { pending = false })
+    }
+    refreshClock()
+    const interval = window.setInterval(refreshClock, 1000)
+    return () => { active = false; window.clearInterval(interval) }
+  }, [])
 
   useEffect(() => {
     const source = new EventSource("/api/events")
@@ -232,13 +245,6 @@ function useRefreshKey() {
   return useOutletContext<LayoutContext>().refreshKey
 }
 
-function bankingRoleLabel(roleFit?: string) {
-  if (roleFit === "personal_customer") return "Personal banking"
-  if (roleFit === "mixed_customer") return "Personal + business"
-  if (roleFit === "business_customer") return "Business banking"
-  return null
-}
-
 function EmployeeStreamsPage() {
   const refreshKey = useRefreshKey()
   const [manualRefresh, setManualRefresh] = useState(0)
@@ -248,12 +254,10 @@ function EmployeeStreamsPage() {
   const [focusedId, setFocusedId] = useState<string | null>(null)
   const [fullscreenError, setFullscreenError] = useState<string | null>(null)
   const focusedViewer = useRef<HTMLDivElement>(null)
-  const focusedFrame = useRef<HTMLIFrameElement>(null)
+  const desktopsRequest = useRef<Promise<CompanyDesktopEmployee[]> | null>(null)
 
   useEffect(() => {
     if (!focusedId) return
-    const frame = focusedFrame.current
-    let frameWindow: Window | null = null
     let wasFullscreen = Boolean(document.fullscreenElement)
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -265,30 +269,19 @@ function EmployeeStreamsPage() {
       if (wasFullscreen && !document.fullscreenElement) setFocusedId(null)
       wasFullscreen = Boolean(document.fullscreenElement)
     }
-    const attachFrame = () => {
-      frameWindow?.removeEventListener("keydown", closeOnEscape, true)
-      try {
-        frameWindow = frame?.contentWindow ?? null
-        frameWindow?.addEventListener("keydown", closeOnEscape, true)
-      } catch (error) {
-        console.error("Unable to attach the stream keyboard shortcut.", error instanceof Error ? error.name : "UnknownError")
-      }
-    }
     window.addEventListener("keydown", closeOnEscape, true)
     document.addEventListener("fullscreenchange", onFullscreenChange)
-    frame?.addEventListener("load", attachFrame)
-    attachFrame()
     return () => {
       window.removeEventListener("keydown", closeOnEscape, true)
       document.removeEventListener("fullscreenchange", onFullscreenChange)
-      frame?.removeEventListener("load", attachFrame)
-      frameWindow?.removeEventListener("keydown", closeOnEscape, true)
     }
   }, [focusedId])
 
   useEffect(() => {
     let active = true
-    getCompanyDesktops().then((items) => {
+    const pending = desktopsRequest.current ?? getCompanyDesktops()
+    desktopsRequest.current = pending
+    pending.then((items) => {
       if (!active) return
       setEmployees(items)
       setError(null)
@@ -296,6 +289,7 @@ function EmployeeStreamsPage() {
       if (!active) return
       setError(reason instanceof Error ? reason.message : "Employee desktop streams could not be loaded.")
     }).finally(() => {
+      if (desktopsRequest.current === pending) desktopsRequest.current = null
       if (!active) return
       setLoading(false)
     })
@@ -347,7 +341,9 @@ function EmployeeStreamsPage() {
                     <iframe
                       src={employee.viewing_url}
                       title={`${employee.name} employee desktop`}
-                      allow="fullscreen; autoplay"
+                      inert
+                      tabIndex={-1}
+                      allow="fullscreen; autoplay 'none'; microphone 'none'; camera 'none'"
                       referrerPolicy="no-referrer"
                       className="pointer-events-none size-full border-0"
                     />
@@ -384,12 +380,13 @@ function EmployeeStreamsPage() {
             </div>
             {fullscreenError && <p className="text-sm text-destructive">{fullscreenError}</p>}
             <iframe
-              ref={focusedFrame}
               src={focusedEmployee.viewing_url}
               title={`${focusedEmployee.name} employee desktop focused stream`}
-              allow="fullscreen; autoplay"
+              inert
+              tabIndex={-1}
+              allow="fullscreen; autoplay 'none'; microphone 'none'; camera 'none'"
               referrerPolicy="no-referrer"
-              className="min-h-0 flex-1 rounded-md border bg-black"
+              className="pointer-events-none min-h-0 flex-1 rounded-md border bg-black"
             />
           </div>
         </div>
@@ -409,11 +406,7 @@ function ActivityPage() {
   const [manualRefresh, setManualRefresh] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState("all")
-  const [backgroundControlBusy, setBackgroundControlBusy] = useState<Record<string, boolean>>({})
-  const [backgroundControlErrors, setBackgroundControlErrors] = useState<Record<string, string>>({})
-  const [clockSpeedInput, setClockSpeedInput] = useState("")
-  const [clockSpeedBusy, setClockSpeedBusy] = useState(false)
-  const [clockSpeedError, setClockSpeedError] = useState<string | null>(null)
+
 
   useEffect(() => {
     let active = true
@@ -447,35 +440,6 @@ function ActivityPage() {
     setManualRefresh((current) => current + 1)
   }
 
-  const setBackgroundProvider = async (providerId: "coffeebench" | "ecommercebench", enabled: boolean) => {
-    setBackgroundControlBusy((current) => ({ ...current, [providerId]: true }))
-    setBackgroundControlErrors((current) => ({ ...current, [providerId]: "" }))
-    try {
-      await setBackgroundProviderEnabled(providerId, enabled)
-      setCompany(await getCompany())
-    } catch (reason) {
-      setBackgroundControlErrors((current) => ({ ...current, [providerId]: reason instanceof Error ? reason.message : `${providerId} control could not be confirmed. Refresh to reconcile the requested state.` }))
-    } finally {
-      setBackgroundControlBusy((current) => ({ ...current, [providerId]: false }))
-    }
-  }
-
-  const saveClockSpeed = async () => {
-    const speed = Number(clockSpeedInput)
-    if (!Number.isFinite(speed) || speed <= 0 || (company?.clock_mode === "kernel" && !Number.isInteger(speed))) return
-    setClockSpeedBusy(true)
-    setClockSpeedError(null)
-    try {
-      const confirmedSpeed = await setCompanyClockSpeed(speed)
-      setCompany((current) => current ? { ...current, clock_speed: confirmedSpeed } : current)
-      setClockSpeedInput(String(confirmedSpeed))
-    } catch (reason) {
-      setClockSpeedError(reason instanceof Error ? reason.message : "Company clock speed could not be confirmed. Refresh to retry.")
-    } finally {
-      setClockSpeedBusy(false)
-    }
-  }
-
   const filtered = [...activity]
     .filter((entry) => filter === "all" || entry.type === filter || (filter === "message" && entry.type === "chat") || (filter === "chatter" && (entry.type === "chatter" || (entry.type === "message" && entry.direction === "sent" && Boolean(entry.actor)))))
     .sort((first, second) => second.timestamp.localeCompare(first.timestamp))
@@ -497,69 +461,6 @@ function ActivityPage() {
         </div>
         <Button variant="outline" render={<Link to="/experiments" />}>Browse experiments <ArrowRight /></Button>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Background simulations</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          {([['coffeebench', 'CoffeeBench'], ['ecommercebench', 'E-CommerceBench']] as const).map(([providerId, label]) => {
-            const provider = company?.background?.providers[providerId]
-            const enabled = provider?.enabled
-            const issue = company?.background?.errors[providerId] ?? company?.background?.errors.configuration
-            return <div key={providerId} className="rounded-lg border p-4">
-              <div className="flex items-center justify-between gap-4">
-                <span id={`${providerId}-label`} className="font-medium">{label}</span>
-                <Switch.Root
-                  aria-labelledby={`${providerId}-label`}
-                  checked={enabled === true}
-                  disabled={backgroundControlBusy[providerId] || enabled === undefined || provider?.status === "stopping" || (enabled === false && provider?.in_flight === true)}
-                  onCheckedChange={(checked) => void setBackgroundProvider(providerId, checked)}
-                  className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background shadow-sm transition-transform data-[checked]:translate-x-5" />
-                </Switch.Root>
-              </div>
-              {provider?.status === "starting" && <p className="mt-2 text-sm text-muted-foreground">Starting…</p>}
-              {(provider?.status === "stopping" || (enabled === false && provider?.in_flight)) && <p className="mt-2 text-sm text-muted-foreground">Finishing current work…</p>}
-              {issue && <p className="mt-2 text-sm text-destructive">Needs attention ({issue.code}).</p>}
-              {!issue && provider?.status === "error" && <p className="mt-2 text-sm text-destructive">Needs attention.</p>}
-              {backgroundControlErrors[providerId] && <p className="mt-2 text-sm text-destructive">{backgroundControlErrors[providerId]}</p>}
-            </div>
-          })}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Company clock speed</CardTitle>
-          <CardDescription>{company?.clock_mode === "kernel"
-            ? "All company systems share this clock. At 24×, one company day takes one real hour."
-            : "Business events and deadlines follow company time. At 24×, one company day takes one real hour. Email delivery, security and the five-minute unread handoff use real time."}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <p className="text-sm text-muted-foreground" aria-live="polite">
-            {typeof company?.clock_speed === "number"
-              ? `Current speed: ${company.clock_speed}×.`
-              : "Current speed is not available from the coordinator."}
-          </p>
-          <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={(event) => { event.preventDefault(); void saveClockSpeed() }}>
-            <div className="flex-1 space-y-2">
-              <label htmlFor="company-clock-speed" className="text-sm font-medium">Speed multiplier</label>
-              <Input id="company-clock-speed" type="number" min={company?.clock_mode === "kernel" ? "1" : "0"} step={company?.clock_mode === "kernel" ? "1" : "any"} required value={clockSpeedInput} onChange={(event) => setClockSpeedInput(event.target.value)} aria-describedby="company-clock-speed-help" />
-              <p id="company-clock-speed-help" className="text-xs text-muted-foreground">{company?.clock_mode === "kernel"
-                ? "Choose a whole number greater than zero."
-                : "Enter a number greater than zero. The new rate applies to the shared company clock."}</p>
-            </div>
-            <Button type="submit" disabled={clockSpeedBusy || !Number.isFinite(Number(clockSpeedInput)) || Number(clockSpeedInput) <= 0 || (company?.clock_mode === "kernel" && !Number.isInteger(Number(clockSpeedInput)))}>
-              {clockSpeedBusy && <LoaderCircle className="animate-spin" />}
-              {clockSpeedBusy ? "Setting speed" : "Set speed"}
-            </Button>
-          </form>
-          {clockSpeedError && <ErrorNotice message={clockSpeedError} title="Company clock speed could not be changed" />}
-        </CardContent>
-      </Card>
-
 
       {globalBackgroundErrors.length > 0 && <Alert variant="destructive">
         <CircleAlert />
@@ -608,6 +509,11 @@ function ActivityPage() {
         <div className="space-y-3">
           {filtered.map((entry) => {
             const isEmail = entry.type === "email"
+            const title = entry.title.trim()
+            const content = entry.content?.trim()
+            const summary = entry.summary?.trim()
+            const showContent = Boolean(content && content !== title)
+            const showSummary = Boolean(summary && summary !== title && !(showContent && content?.startsWith(summary)))
             const Icon = isEmail ? Mail : entry.type === "message" || entry.type === "chat" ? MessageCircle : Building2
             return <article key={entry.id} className="rounded-xl border bg-card p-4 sm:p-5">
               <div className="flex items-start gap-3">
@@ -618,8 +524,8 @@ function ActivityPage() {
                     <time className="text-xs text-muted-foreground">{formatDate(entry.timestamp)}</time>
                   </div>
                   {(entry.actor || entry.direction) && <p className="mt-1 text-xs text-muted-foreground">{[entry.actor, entry.direction === "sent" ? "Sent" : entry.direction === "received" ? "Received" : null].filter(Boolean).join(" · ")}</p>}
-                  {entry.summary && <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/85">{entry.summary}</p>}
-                  {entry.content && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 text-sm leading-6">{entry.content}</p>}
+                  {showSummary && summary && <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/85">{formatActivityText(summary)}</p>}
+                  {showContent && content && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 text-sm leading-6">{formatActivityText(content)}</p>}
                   {entry.run_id && <Link className="mt-3 inline-flex items-center gap-1 text-sm text-primary hover:underline" to={`/runs/${encodeURIComponent(entry.run_id)}`}>View experiment <ArrowRight className="size-3.5" /></Link>}
                 </div>
               </div>
@@ -635,6 +541,105 @@ function ActivityPage() {
         </div>
       )}
     </section>
+  )
+}
+
+function CodexConnectionCard() {
+  const [auth, setAuth] = useState<CodexAuthStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [connecting, setConnecting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    getCodexAuthStatus().then((status) => {
+      if (active) {
+        setAuth(status)
+        setError(null)
+      }
+    }).catch((reason) => {
+      if (active) setError(reason instanceof Error ? reason.message : "Codex connection status could not be loaded.")
+    }).finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    const loginId = auth?.login_id
+    if (!loginId || !["starting", "pending"].includes(auth?.state ?? "")) return
+    let active = true
+    let pending = false
+    const refresh = async () => {
+      if (pending) return
+      pending = true
+      try {
+        const status = await getCodexDeviceAuthorization(loginId)
+        if (active) {
+          setAuth(status)
+          setError(null)
+        }
+      } catch (reason) {
+        if (active) setError(reason instanceof Error ? reason.message : "Codex sign-in status could not be retrieved.")
+      } finally {
+        pending = false
+      }
+    }
+    const interval = window.setInterval(() => void refresh(), 3000)
+    return () => { active = false; window.clearInterval(interval) }
+  }, [auth?.login_id, auth?.state])
+
+  const connect = async () => {
+    setConnecting(true)
+    setError(null)
+    try {
+      const status = await startCodexDeviceAuthorization()
+      setAuth(status)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Codex sign-in could not be started.")
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  const pending = auth?.state === "starting" || auth?.state === "pending"
+  const connected = auth?.authenticated === true && !pending
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="font-medium">Codex</p>
+          <p className="text-sm text-muted-foreground">
+            {connected ? "Connected" : pending ? "Complete sign-in on the linked page below." : "Use the company’s Codex account for experiments."}
+          </p>
+        </div>
+        {connected ? <div className="flex shrink-0 items-center gap-3">
+          <Badge variant="secondary">Connected</Badge>
+          <Button size="sm" variant="outline" onClick={() => void connect()} disabled={connecting}>
+            {connecting ? <LoaderCircle className="animate-spin" /> : null}
+            Sign in with another account
+          </Button>
+        </div> : (
+          <Button onClick={() => void connect()} disabled={loading || connecting || pending}>
+            {connecting || pending ? <LoaderCircle className="animate-spin" /> : null}
+            {pending ? "Waiting for approval" : connecting ? "Starting sign-in" : "Connect Codex"}
+          </Button>
+        )}
+      </CardContent>
+      {(error || auth?.error) && <CardContent className="border-t pt-3">
+        {(error || auth?.error) && <ErrorNotice message={error ?? `Codex sign-in failed (${auth?.error}).`} title="Codex connection needs attention" />}
+      </CardContent>}
+      {pending && auth?.user_code && auth.verification_url && <CardContent className="border-t pt-3">
+        <div className="rounded-lg border bg-muted/40 p-4">
+          <p className="text-sm">Open the sign-in page and enter this one-time code:</p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <code className="rounded bg-background px-3 py-2 text-lg font-semibold tracking-wider">{auth.user_code}</code>
+            <a className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline" href={auth.verification_url} target="_blank" rel="noreferrer">
+              Open sign-in page <ExternalLink className="size-3.5" />
+            </a>
+          </div>
+        </div>
+      </CardContent>}
+    </Card>
   )
 }
 
@@ -717,27 +722,33 @@ function SavedNativeEvaluations() {
 }
 
 function HelpPage() {
+  const [companyTools, setCompanyTools] = useState<CompanyToolLink[]>([])
+  const [companyToolsError, setCompanyToolsError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    getCompanyTools().then((tools) => {
+      if (active) setCompanyTools(tools)
+    }).catch(() => {
+      if (active) setCompanyToolsError("The deployment’s Company tools URL mapping is missing or invalid. An operator needs to correct it.")
+    })
+    return () => { active = false }
+  }, [])
+
   return (
     <section className="space-y-7">
       <h1 className="text-2xl font-semibold tracking-tight">Help</h1>
+      <CodexConnectionCard />
       <SavedNativeEvaluations />
       <Card>
         <CardHeader>
           <CardTitle>Company tools</CardTitle>
-          <CardDescription>Open the company’s systems and administration.</CardDescription>
+          <CardDescription>Open the company’s systems and administration using this deployment’s configured addresses.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
-          {[
-            ["ERPNext", "https://erp.company.example.test"],
-            ["Email", "https://mail.company.example.test"],
-            ["Rocket.Chat", "https://chat.company.example.test"],
-            ["ownCloud", "https://owncloud.company.example.test"],
-            ["Plane", "https://plane.company.example.test"],
-            ["GitLab", "https://gitlab.company.example.test"],
-            ["midPoint", "https://midpoint.company.example.test/midpoint/"],
-          ].map(([name, href]) => (
-            <Button key={name} variant="outline" render={<a href={href} target="_blank" rel="noopener noreferrer" />}>
-              {name}<ExternalLink className="size-4" />
+          {companyToolsError ? <ErrorNotice message={companyToolsError} title="Company tools unavailable" /> : companyTools.map((tool) => (
+            <Button key={tool.id} variant="outline" render={<a href={tool.url} target="_blank" rel="noopener noreferrer" />}>
+              {tool.name}<ExternalLink className="size-4" />
             </Button>
           ))}
         </CardContent>
@@ -746,10 +757,75 @@ function HelpPage() {
   )
 }
 
+function BackgroundSimulations() {
+  const refreshKey = useRefreshKey()
+  const [company, setCompany] = useState<Company | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [backgroundControlBusy, setBackgroundControlBusy] = useState<Record<string, boolean>>({})
+  const [backgroundControlErrors, setBackgroundControlErrors] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    let active = true
+    getCompany().then((value) => {
+      if (active) { setCompany(value); setError(null) }
+    }).catch((reason: unknown) => {
+      if (active) setError(reason instanceof Error ? reason.message : "Company status could not be loaded.")
+    })
+    return () => { active = false }
+  }, [refreshKey])
+
+  const setBackgroundProvider = async (providerId: "coffeebench" | "ecommercebench", enabled: boolean) => {
+    setBackgroundControlBusy((current) => ({ ...current, [providerId]: true }))
+    setBackgroundControlErrors((current) => ({ ...current, [providerId]: "" }))
+    try {
+      await setBackgroundProviderEnabled(providerId, enabled)
+      setCompany(await getCompany())
+    } catch (reason) {
+      setBackgroundControlErrors((current) => ({ ...current, [providerId]: reason instanceof Error ? reason.message : `${providerId} control could not be confirmed. Refresh to reconcile the requested state.` }))
+    } finally {
+      setBackgroundControlBusy((current) => ({ ...current, [providerId]: false }))
+    }
+  }
+
+  return <div className="space-y-4">
+    {error && <ErrorNotice message={error} title="Background simulations unavailable" />}
+      <Card>
+        <CardHeader>
+          <CardTitle>Background simulations</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          {([['coffeebench', 'CoffeeBench'], ['ecommercebench', 'E-CommerceBench']] as const).map(([providerId, label]) => {
+            const provider = company?.background?.providers[providerId]
+            const enabled = provider?.enabled
+            const issue = company?.background?.errors[providerId] ?? company?.background?.errors.configuration
+            return <div key={providerId} className="rounded-lg border p-4">
+              <div className="flex items-center justify-between gap-4">
+                <span id={`${providerId}-label`} className="font-medium">{label}</span>
+                <Switch.Root
+                  aria-labelledby={`${providerId}-label`}
+                  checked={enabled === true}
+                  disabled={backgroundControlBusy[providerId] || enabled === undefined || provider?.status === "stopping" || (enabled === false && provider?.in_flight === true)}
+                  onCheckedChange={(checked) => void setBackgroundProvider(providerId, checked)}
+                  className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background shadow-sm transition-transform data-[checked]:translate-x-5" />
+                </Switch.Root>
+              </div>
+              {provider?.status === "starting" && <p className="mt-2 text-sm text-muted-foreground">Starting…</p>}
+              {(provider?.status === "stopping" || (enabled === false && provider?.in_flight)) && <p className="mt-2 text-sm text-muted-foreground">Finishing current work…</p>}
+              {issue && <p className="mt-2 text-sm text-destructive">Needs attention ({issue.code}).</p>}
+              {!issue && provider?.status === "error" && <p className="mt-2 text-sm text-destructive">Needs attention.</p>}
+              {backgroundControlErrors[providerId] && <p className="mt-2 text-sm text-destructive">{backgroundControlErrors[providerId]}</p>}
+            </div>
+          })}
+        </CardContent>
+      </Card>
+  </div>
+}
+
 function LibraryPage() {
   const refreshKey = useRefreshKey()
   const [experiments, setExperiments] = useState<Experiment[]>([])
-  const [providerWarning, setProviderWarning] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -774,12 +850,9 @@ function LibraryPage() {
     let active = true
     setLoading(true)
     getCatalog()
-      .then(({ experiments: items, provider_catalog_error }) => {
+      .then(({ experiments: items }) => {
         if (active) {
           setExperiments(items)
-          setProviderWarning(provider_catalog_error
-            ? `The travel, banking and telecom catalogue could not be refreshed (${provider_catalog_error.code}).${provider_catalog_error.correlation_id ? ` Correlation ID: ${provider_catalog_error.correlation_id}.` : ""} Refresh to retry.`
-            : null)
           setError(null)
         }
       })
@@ -801,16 +874,6 @@ function LibraryPage() {
     )
   }, [experiments, search, selectedTypes, selectedBenchmarks])
 
-  // These τ-bench cases share the same customer request but have different
-  // underlying conditions. Keep each original case selectable.
-  const mobileDataVariants = useMemo(() => experiments
-    .filter((experiment) => experiment.provider_id === "tau2-telecom" && experiment.task_id?.startsWith("[mobile_data_issue]"))
-    .sort((a, b) => (a.task_id ?? "").localeCompare(b.task_id ?? "")), [experiments])
-  const mobileVariantNumbers = useMemo(() => new Map(mobileDataVariants.map((item, index) => [item.id, index + 1])), [mobileDataVariants])
-  const matchingIds = new Set(filtered.map((item) => item.id))
-  const matchingMobileVariants = mobileDataVariants.filter((item) => matchingIds.has(item.id))
-  const otherExperiments = filtered.filter((item) => !mobileVariantNumbers.has(item.id))
-
   return (
     <section className="space-y-7">
       <div className="flex flex-col gap-5 border-b pb-6 sm:flex-row sm:items-end sm:justify-between">
@@ -825,8 +888,7 @@ function LibraryPage() {
           </div>
         </div>
       </div>
-
-      {providerWarning && <ErrorNotice title="Provider catalogue unavailable" message={providerWarning} />}
+      <BackgroundSimulations />
 
       <fieldset className="space-y-3">
         <legend className="text-sm font-medium">Benchmark</legend>
@@ -861,36 +923,13 @@ function LibraryPage() {
       {error && <ErrorNotice message={error} title="Library unavailable" />}
       {loading ? <LoadingCards /> : !error && filtered.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {matchingMobileVariants.length > 0 && (
-            <Card className="h-fit">
-              <details>
-                <summary className="cursor-pointer list-none p-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  <Badge variant="secondary" className="mb-3">Telecom</Badge>
-                  <CardTitle className="text-base leading-snug">Mobile data problem</CardTitle>
-                  <CardDescription className="mt-3 leading-relaxed">Help a customer whose mobile data is slow or unavailable.</CardDescription>
-                  <p className="mt-4 text-xs text-muted-foreground">{matchingMobileVariants.length} {matchingMobileVariants.length === 1 ? "variant" : "variants"} · Choose a variant</p>
-                </summary>
-                <div className="max-h-96 space-y-1 overflow-y-auto border-t p-3">
-                  {matchingMobileVariants.map((experiment) => (
-                    <Link key={experiment.id} to={`/experiments/${encodeURIComponent(experiment.id)}`}
-                      className="flex items-center justify-between gap-3 rounded-md px-3 py-2 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                      <span>Variant {mobileVariantNumbers.get(experiment.id)} <span className="text-muted-foreground">· {experiment.role}</span></span>
-                      <ArrowRight className="size-4 shrink-0" aria-hidden="true" />
-                    </Link>
-                  ))}
-                </div>
-              </details>
-            </Card>
-          )}
-          {otherExperiments.map((experiment) => (
+          {filtered.map((experiment) => (
             <Link key={experiment.id} to={`/experiments/${encodeURIComponent(experiment.id)}`} className="group rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               <Card className="h-full min-h-52 transition-colors group-hover:ring-primary/30 group-focus-visible:ring-primary">
                 <CardHeader className="gap-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex flex-wrap gap-2">
                       <Badge variant="secondary" className="font-medium">{experiment.role}</Badge>
-                      {experiment.provider_id === "tau2-banking" && bankingRoleLabel(experiment.role_fit) &&
-                        <Badge variant="outline" title={experiment.role_fit_note}>{bankingRoleLabel(experiment.role_fit)}</Badge>}
                     </div>
                     <ArrowUpRight className="size-4 text-muted-foreground transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden="true" />
                   </div>
@@ -931,12 +970,9 @@ function ExperimentPage() {
     let active = true
     setLoading(true)
     Promise.all([getCatalog(), getSession()])
-      .then(([{ experiments: items, provider_catalog_error }, currentSession]) => {
+      .then(([{ experiments: items }, currentSession]) => {
         if (!active) return
         const selected = items.find((item) => item.id === experimentId) ?? null
-        if (!selected && provider_catalog_error && experimentId.startsWith("tau-provider-")) {
-          throw new Error(`The provider task catalogue is unavailable (${provider_catalog_error.code}). Refresh to retry.`)
-        }
         setExperiment(selected)
         setSession(currentSession)
         setError(null)
@@ -974,8 +1010,6 @@ function ExperimentPage() {
         <div className="flex flex-wrap items-center gap-2"><Badge variant="secondary">{experiment.role}</Badge><span className="text-xs text-muted-foreground">{experiment.dependencies.length} {experiment.dependencies.length === 1 ? "tool" : "tools"}</span></div>
         <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">{experiment.title}</h1>
         <p className="max-w-3xl text-base leading-relaxed text-muted-foreground">{experiment.summary}</p>
-        {(experiment.role_fit_note || experiment.role_fit) && <p className="text-sm text-muted-foreground">{experiment.role_fit_note || `Source context: ${experiment.role_fit?.replaceAll("_", " ")}`}</p>}
-        {experiment.financial_context_status && <p className="text-sm text-muted-foreground">Case information: {experiment.financial_context_status.replaceAll("_", " ")}</p>}
       </div>
       {error && <ErrorNotice message={error} title="Experiment could not be started" />}
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_18rem]">
@@ -1475,6 +1509,10 @@ function NotFound() {
       <Button render={<Link to="/" />}>Back to activity</Button>
     </div>
   )
+}
+
+function formatActivityText(value: string): string {
+  return value.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\b/g, formatDate)
 }
 
 function formatDate(value: string): string {

@@ -9,9 +9,6 @@
     "ds-fix-table-values-and-missing-answers": [
       { "source": "ref_data.xlsx", "destination": "/workspace/ref_data.xlsx" }
     ],
-    "ds-janusgraph-exercise": [
-      { "source": "employee_diagram.jpg", "destination": "/workspace/employee_diagram.jpg" }
-    ],
     "finance-apply-tax-credit": [
       { "source": "research_wages.csv", "destination": "/workspace/research_wages.csv" }
     ],

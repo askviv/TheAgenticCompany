@@ -42,7 +42,6 @@ Install `curl`, e.g. `sudo apt install -y curl`.
     Starting health checks...
     rocketchat is ready!
     owncloud is ready!
-    gitlab is ready!
     plane is ready!
     All services are up and running!
     ```

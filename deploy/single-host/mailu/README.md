@@ -18,12 +18,15 @@ Create `/data/theagentcompany/mailu/mailu.env` from `.env.example`, replace `SEC
 
 The webmail and admin UI are served by the front container on `127.0.0.1:8112`. The deployed Caddy site for `mail.company.example.test` proxies HTTPS requests to that loopback endpoint. Employee webmail is available at `/webmail/`; administration and the API are under `/admin/` and `/api/`.
 
-The Roundcube image is derived from the pinned Mailu `2024.06.58` image and adds only the TAC correlation plugin. Its startup wrapper appends that plugin to the existing `ROUNDCUBE_PLUGINS` list; when the setting is empty, it retains Mailu's existing default plugin set. Build and restart only the webmail service when changing this plugin:
+Roundcube uses the pinned upstream Mailu `2024.06.58` image directly. Employee messages are composed and sent through Roundcube's native browser UI; delivery confirmation and run correlation use durable outbox state and exact IMAP evidence. Restart only the webmail service when changing its configuration:
 
 ```sh
-docker compose build webmail
 docker compose up -d webmail
 ```
+
+Remove any `tac_correlation` entry from the private Mailu environment file or persisted Roundcube overrides before restarting. The custom plugin files are no longer installed.
+
+The standard compose UI supplies native Message-ID and thread headers, but does not add the simulation's TAC correlation or `Auto-Submitted` headers. The runtime now maps browser-generated Message-IDs in durable outbox state and confirms delivery from exact sent and recipient mailbox evidence. Automated-message classification that depends on `Auto-Submitted` is not represented on this browser path.
 
 This retains the existing webmail data volume and `/overrides` mount. Do not replace or clear `/data/theagentcompany/mailu/overrides/roundcube` during deployment.
 

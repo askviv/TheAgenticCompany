@@ -322,6 +322,14 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         require_role(principal, "controller")
         return company_payload()
 
+    @app.get("/company/clock")
+    async def get_company_clock(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        provider = getattr(engine, "company_time_provider", None)
+        instant = provider() if callable(provider) else (engine.company_state() or {}).get("simulated_time")
+        return {"simulated_time": instant.isoformat() if hasattr(instant, "isoformat") else instant,
+                "clock_mode": getattr(engine, "company_clock_mode", "real")}
+
     @app.get("/company/desktops")
     def list_employee_desktops(principal: Principal = Depends(authenticate)):
         require_role(principal, "controller")
@@ -813,16 +821,6 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         load_run(run_id)
         return engine.list_pending(run_id)
 
-    @app.get("/agents/{actor_id}/inbox")
-    def inbox(
-        actor_id: str, run_id: UUID = Query(...), principal: Principal = Depends(authenticate),
-    ):
-        if principal.role not in ("controller", "agent"):
-            raise HTTPException(status_code=403, detail="Operation is not permitted for this principal")
-        authorize_run(run_id, principal, agent_allowed=True, privileged_roles=("controller",))
-        if principal.role == "agent" and actor_id != principal.actor_id:
-            raise HTTPException(status_code=404, detail="Inbox not found")
-        return engine.inbox(run_id, actor_id)
 
     @app.get("/cases/{case_id}")
     def case(

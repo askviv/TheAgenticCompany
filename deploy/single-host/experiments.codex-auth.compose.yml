@@ -1,0 +1,13 @@
+# Optional overlay for deployments using the host Codex CLI auth bridge.
+services:
+  experiments:
+    environment:
+      CODEX_AUTH_BRIDGE_URL: ${CODEX_AUTH_BRIDGE_URL:-http://10.0.2.2:8143}
+      CODEX_AUTH_BRIDGE_TOKEN_FILE: /run/secrets/codex-auth-bridge-token
+    volumes:
+      - type: bind
+        source: ${TAC_ROOT}/enterprise/actors/secrets/codex-inference-token
+        target: /run/secrets/codex-auth-bridge-token
+        read_only: true
+        bind:
+          create_host_path: false

@@ -88,7 +88,7 @@ def test_mailu_submission_uses_trusted_from_starttls_and_callback_before_send():
 
     with patch("servers.simulation.mail.smtplib.SMTP", return_value=smtp) as smtp_factory:
         receipt = gateway.send(
-            BUYER,
+            SUPPLIER,
             CUSTOMER,
             "Missing delivery",
             "Can you confirm the revised ETA?",
@@ -105,7 +105,7 @@ def test_mailu_submission_uses_trusted_from_starttls_and_callback_before_send():
     smtp_factory.assert_called_once_with(
         "mail.company.example.test", 2587, timeout=20
     )
-    assert smtp.message["From"] == "buyer@example.com"
+    assert smtp.message["From"] == "orders@supplier.example"
     assert smtp.message["To"] == "customer@example.test"
     assert smtp.message["In-Reply-To"] == "<customer-8@example.test>"
     assert smtp.message["References"] == "<customer-8@example.test>"
@@ -114,7 +114,7 @@ def test_mailu_submission_uses_trusted_from_starttls_and_callback_before_send():
     assert smtp.message["X-TAC-Run-ID"] == "run-17"
     assert smtp.message["X-TAC-Generation"] == "3"
     assert receipt["mailbox_uid"] == "42"
-    assert receipt["sender_actor_id"] == "buyer"
+    assert receipt["sender_actor_id"] == "supplier"
     assert receipt["recipient_actor_id"] == "customer"
 
 
@@ -407,7 +407,7 @@ def test_smtp_auth_failure_propagates_before_submission_callback():
     with patch("servers.simulation.mail.smtplib.SMTP", return_value=smtp):
         with pytest.raises(smtplib.SMTPAuthenticationError):
             gateway.send(
-                BUYER,
+                SUPPLIER,
                 CUSTOMER,
                 "subject",
                 "body",
@@ -425,8 +425,8 @@ def test_smtp_credentials_preserve_leading_and_trailing_whitespace():
     events = []
     smtp = FakeSMTP(events)
     credentials = {**CREDENTIALS}
-    credentials["buyer@example.com"] = {
-        "username": " buyer ",
+    credentials["orders@supplier.example"] = {
+        "username": " supplier ",
         "password": "  private password  ",
     }
     gateway = MailuGateway(CONFIG, credentials)
@@ -437,7 +437,7 @@ def test_smtp_credentials_preserve_leading_and_trailing_whitespace():
 
     with patch("servers.simulation.mail.smtplib.SMTP", return_value=smtp):
         gateway.send(
-            BUYER,
+            SUPPLIER,
             CUSTOMER,
             "Missing delivery",
             "Please confirm the delivery date.",
@@ -446,7 +446,7 @@ def test_smtp_credentials_preserve_leading_and_trailing_whitespace():
             3,
         )
 
-    assert smtp.login_args == (" buyer ", "  private password  ")
+    assert smtp.login_args == (" supplier ", "  private password  ")
 
 
 def test_authenticated_relay_username_maps_only_to_configured_viv_actor():
@@ -555,7 +555,7 @@ def test_uncertain_smtp_send_propagates_and_never_attempts_automatic_resubmissio
     with patch("servers.simulation.mail.smtplib.SMTP", return_value=smtp):
         with pytest.raises(ConnectionError, match="after SMTP DATA"):
             gateway.send(
-                BUYER,
+                SUPPLIER,
                 CUSTOMER,
                 "subject",
                 "body",

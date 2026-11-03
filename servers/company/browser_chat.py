@@ -1,43 +1,8 @@
-"""Per-employee Playwright access to the managed Rocket.Chat browser session."""
-
+"""Employee desktop identity resolution shared by native CUA transports."""
 from __future__ import annotations
-
 import json
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Iterator, Protocol
-
-
-class EmployeeBrowserSessionProvider(Protocol):
-    def open_for_employee_email(self, email: str) -> Any:
-        """Return a context manager yielding that employee's Playwright page."""
-
-
-class PlaywrightEmployeeBrowserSessionProvider:
-    """Connect to the employee-specific CDP endpoint supplied by the desktop manager."""
-
-    def __init__(self, desktop_manager_factory: Callable[[], Any] | None = None):
-        self.desktop_manager_factory = desktop_manager_factory or _configured_desktop_manager
-
-    @contextmanager
-    def open_for_employee_email(self, email: str) -> Iterator[Any]:
-        manager = self.desktop_manager_factory()
-        employee_id = employee_id_for_email(manager.company_profile_path, email)
-        with manager.employee_activity(employee_id) as desktop:
-            endpoint = desktop.get("cdp_endpoint") if isinstance(desktop, dict) else None
-            if not isinstance(endpoint, str) or not endpoint.startswith(("ws://", "wss://")):
-                raise RuntimeError("EMPLOYEE_BROWSER_ENDPOINT_UNAVAILABLE")
-
-            from playwright.sync_api import sync_playwright
-
-            with sync_playwright() as playwright:
-                browser = playwright.chromium.connect_over_cdp(endpoint)
-                contexts = browser.contexts
-                context = contexts[0] if contexts else browser.new_context()
-                pages = context.pages
-                page = pages[0] if pages else context.new_page()
-                yield page
-
+from typing import Any
 
 def _configured_desktop_manager() -> Any:
     # Importing runtime config is deliberately lazy: email-only scenarios do not

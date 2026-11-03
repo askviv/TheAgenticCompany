@@ -121,6 +121,7 @@ def read_remote_inference_token(path: Path) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--model', default='gpt-6-luna', help='Configured Codex model for both actor workers')
     parser.add_argument("--inference-url", help="opt into the host Codex inference endpoint")
     parser.add_argument("--inference-token-file", type=Path,
                         help="private model-provider bearer token to copy into guest actor secrets")
@@ -164,6 +165,7 @@ def main() -> int:
                         ACTORS / "cache/coffeebench")
 
     config = json.loads(CONFIG.read_text(encoding="utf-8"))
+    config['background_model_id'] = args.model
     workers = config.setdefault("actor_workers", {})
     if not isinstance(workers, dict):
         raise ValueError("runtime.json actor_workers must be an object")
@@ -181,12 +183,12 @@ def main() -> int:
     customer_env = {
         "TAU2_CUSTOMER_JOB_DB": str(ACTORS / "state/customer/turns.sqlite"),
         "TAU2_ACTOR_BEARER_TOKEN": customer_token,
-        "TAU2_CUSTOMER_MODEL": "gpt-6-luna",
+        "TAU2_CUSTOMER_MODEL": args.model,
     }
     supplier_env = {
         "ACTOR_WORKER_DATABASE_PATH": str(ACTORS / "state/supplier/turns.sqlite"),
         "ACTOR_WORKER_BEARER_SECRET": supplier_token,
-        "CODEX_MODEL": "gpt-6-luna",
+        "CODEX_MODEL": args.model,
     }
     if remote_inference:
         customer_env.update({

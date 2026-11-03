@@ -10,14 +10,8 @@ curl -X POST http://the-agent-company.com:2999/api/reset-rocketchat
 # Restart and Reset Plane to default. It may take 2~3 minutes
 curl -X POST http://the-agent-company.com:2999/api/reset-plane
 
-# Restart and Reset gitlab to default. It may take 5 minutes
-curl -X POST http://the-agent-company.com:2999/api/reset-gitlab
-
 # Restart and Reset ownCloud to default. It may take ~1 minute
 curl -X POST http://the-agent-company.com:2999/api/reset-owncloud
-
-# health check gitlab
-curl http://the-agent-company.com:2999/api/healthcheck/gitlab
 
 # health check owncloud
 curl http://the-agent-company.com:2999/api/healthcheck/owncloud

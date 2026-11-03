@@ -52,8 +52,6 @@ passwords use a resource-scoped ownCloud policy; central employee passwords
 and the global password policy remain unchanged. New users have native ownCloud
 home directories and no fabricated employee group or share memberships. The
 shared operator account and its existing group/share state are preserved.
-Individual GitLab employee accounts remain unavailable; the shared GitLab root
-account is not treated as an employee account. See
 `owncloud-provisioning-verification.json` (private operational report)
 and `owncloud-inventory-verification.json` (private operational report).
 
@@ -77,8 +75,7 @@ python3 deploy/single-host/midpoint/adopt-accounts.py --output /private/path/ado
 The helper links only exact inventoried immutable IDs, checks current ownership,
 and reads native links back. It never assigns resources or creates target accounts.
 The latest repeat added zero links. The ownCloud provisioning record includes
-each returned immutable UID and MidPoint shadow OID. GitLab still has no reviewed
-individual employee mappings.
+each returned immutable UID and MidPoint shadow OID.
 
 The custom bundles implement only the scoped updates listed above. They reject changes to account IDs, usernames, roles, authentication, and Mailu mailbox addresses. The reviewed Rocket.Chat, Mailu, and ownCloud bundles are installed in the running midPoint container, and their Resource objects are imported. Installed bundle hashes are recorded in `deploy/single-host/midpoint/connectors/deployment-verification.json`. Native resource tests and read-only post-deployment checks passed.
 No account reconciliation job is scheduled: the built-in Recompute all users task

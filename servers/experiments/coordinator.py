@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import re
-import threading
 from typing import Any
 from urllib.parse import quote, urljoin
 
@@ -35,9 +34,8 @@ class SimulationCoordinatorClient:
         self.base_url = base_url.rstrip("/") + "/"
         self.token = token
         self.timeout = timeout
-        self.session = session or requests.Session()
+        self.session = session
         self.session_factory = session_factory
-        self._lock=threading.RLock()
 
     @classmethod
     def from_env(cls) -> "SimulationCoordinatorClient":
@@ -53,25 +51,17 @@ class SimulationCoordinatorClient:
 
     def _request(self, method: str, endpoint: str, *, idempotency_key: str | None = None,
                  request_timeout: float | None | object = _DEFAULT_TIMEOUT,
-                 independent_session: bool = False,
                  **kwargs: Any) -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {self.token}"}
         if idempotency_key:
             headers["Idempotency-Key"] = idempotency_key
-        request_session = self.session_factory() if independent_session else self.session
+        request_session = self.session if self.session is not None else self.session_factory()
         timeout = self.timeout if request_timeout is _DEFAULT_TIMEOUT else request_timeout
         try:
-            if independent_session:
-                response = request_session.request(
-                    method, urljoin(self.base_url, endpoint.lstrip("/")), headers=headers,
-                    timeout=timeout, **kwargs,
-                )
-            else:
-                with self._lock:
-                    response = request_session.request(
-                        method, urljoin(self.base_url, endpoint.lstrip("/")), headers=headers,
-                        timeout=timeout, **kwargs,
-                    )
+            response = request_session.request(
+                method, urljoin(self.base_url, endpoint.lstrip("/")), headers=headers,
+                timeout=timeout, **kwargs,
+            )
             response.raise_for_status()
             payload = response.json()
         except requests.Timeout as error:
@@ -87,13 +77,21 @@ class SimulationCoordinatorClient:
                 if isinstance(candidate,str) and re.fullmatch(
                     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",candidate):
                     correlation_id=candidate
-            raise CoordinatorError(endpoint, f"http_{status}",correlation_id) from error
+            code = f"http_{status}"
+            if error.response is not None:
+                try:
+                    detail = error.response.json().get("detail")
+                except (ValueError, AttributeError):
+                    detail = None
+                if isinstance(detail, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,95}", detail):
+                    code = detail
+            raise CoordinatorError(endpoint, code,correlation_id) from error
         except requests.RequestException as error:
             raise CoordinatorError(endpoint, "transport_error") from error
         except ValueError as error:
             raise CoordinatorError(endpoint, "invalid_response") from error
         finally:
-            if independent_session:
+            if self.session is None:
                 request_session.close()
         if not isinstance(payload, dict):
             raise CoordinatorError(endpoint, "invalid_response")
@@ -104,21 +102,21 @@ class SimulationCoordinatorClient:
 
     def company_desktops(self) -> dict[str, Any]:
         return self._request(
-            "GET", "/company/desktops", request_timeout=None, independent_session=True,
+            "GET", "/company/desktops", request_timeout=None,
         )
 
     def start_company_desktop(self, employee_id: str, *, idempotency_key: str) -> dict[str, Any]:
         return self._request(
             "POST", "/company/desktops/start",
             idempotency_key=idempotency_key, request_timeout=None,
-            independent_session=True, json={"employee_id": employee_id},
+            json={"employee_id": employee_id},
         )
 
     def stop_company_desktop(self, employee_id: str, *, idempotency_key: str) -> dict[str, Any]:
         return self._request(
             "POST", "/company/desktops/stop",
             idempotency_key=idempotency_key, request_timeout=None,
-            independent_session=True, json={"employee_id": employee_id},
+            json={"employee_id": employee_id},
         )
 
     def dispatch_experiment_chat(
@@ -128,7 +126,7 @@ class SimulationCoordinatorClient:
         return self._request(
             "POST", "/company/experiment-chat/dispatch",
             idempotency_key=idempotency_key, request_timeout=None,
-            independent_session=True,
+
             json={
                 "role": role,
                 "employee_id": employee_id,
@@ -138,12 +136,9 @@ class SimulationCoordinatorClient:
             },
         )
 
-    def provider_catalog(self) -> dict[str, Any]:
-        return self._request("GET", "/company/provider-experiments/catalog")
-
     def start_provider_experiment(self, provider_id: str, task_id: str, *, idempotency_key: str) -> dict[str, Any]:
         return self._request("POST", "/company/provider-experiments", idempotency_key=idempotency_key,
-                             request_timeout=None, independent_session=True,
+                             request_timeout=None,
                              json={"provider_id": provider_id, "task_id": task_id})
 
     def provider_experiment(self, experiment_id: str) -> dict[str, Any]:
@@ -167,6 +162,9 @@ class SimulationCoordinatorClient:
             "POST", f"/company/evaluations/{quote(provider_id, safe='')}",
             idempotency_key=idempotency_key, json={},
         )
+
+    def company_clock(self) -> dict[str, Any]:
+        return self._request("GET", "/company/clock")
 
     def company_evaluations(self, provider_id: str) -> dict[str, Any]:
         return self._request("GET", f"/company/evaluations/{quote(provider_id, safe='')}")
@@ -195,7 +193,7 @@ class SimulationCoordinatorClient:
         payload = {"scenario_id": scenario_id}
         if task_id is not None: payload["task_id"] = task_id
         return self._request("POST", "/company/experiments", idempotency_key=idempotency_key,
-                             request_timeout=None, independent_session=True, json=payload)
+                             request_timeout=None, json=payload)
 
     def start_evaluation(self, run_id: str, *, idempotency_key: str) -> dict[str, Any]:
         return self._request(

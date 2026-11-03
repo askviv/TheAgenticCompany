@@ -22,13 +22,6 @@ https://plane.company.example.test {
     import tac_tls
     reverse_proxy 127.0.0.1:8091
 }
-https://gitlab.company.example.test {
-    import tac_tls
-    reverse_proxy 127.0.0.1:8929 {
-        header_up X-Forwarded-Ssl on
-    }
-}
-
 https://mail.company.example.test {
     import tac_tls
     reverse_proxy 127.0.0.1:8112
@@ -49,5 +42,16 @@ https://midpoint.company.example.test {
 
 https://experiments.company.example.test {
     import tac_tls
-    reverse_proxy 127.0.0.1:8110
+    handle /employee-desktops/* {
+        reverse_proxy https://127.0.0.1:18443 {
+            header_up Host {host}
+            transport http {
+                tls_server_name experiments.company.example.test
+                tls_trust_pool file /data/theagentcompany/company-clock-tls/root-ca.crt
+            }
+        }
+    }
+    handle {
+        reverse_proxy 127.0.0.1:8110
+    }
 }

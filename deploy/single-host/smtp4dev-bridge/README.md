@@ -1,4 +1,7 @@
-# Local Viv mail bridge
+# Local assistant mail bridge
+
+For configuration, both mail directions, and the current Docker-based local setup,
+see [Local email setup](../../../docs/LOCAL_EMAIL.md).
 
 The shared smtp4dev UI belongs to the local Kubernetes platform and is available at http://127.0.0.1:9167. This bridge uses the same `app.kubernetes.io/name=smtp4dev` service in the explicit `docker-desktop` context. It discovers its namespace after restarts; it never edits or replaces that service. The native reply relay needs only the additional Mailu hostname mapping described below.
 
@@ -25,3 +28,11 @@ The script reads the private credential file on the host and updates smtp4dev's 
 Mailu skips only greylisting for the specific Mac gateway IP `192.168.0.118/32`; sender-domain checks, other antispam checks, and recipient/external-delivery restrictions stay active. This is required because smtp4dev is a simulator rather than a durable retrying MTA. Change the scoped IP rule if the Mac's LAN address changes.
 
 To stop this bridge, boot out both `org.example.tac-smtp4dev-*` user LaunchAgents and disable/stop `tac-smtp4dev.socket` and `tac-smtp4dev.service` on the host. To remove automatic replies, use smtp4dev's settings to clear the company relay host and expression. Do not delete messages, Mailu volumes, or the shared smtp4dev service. Restore the host-alias field only if it still matches this overlay; preserve other aliases added subsequently.
+
+For an existing local Docker mailbox, use direct forwarding instead of the Kubernetes listener:
+
+```sh
+python3 install-mac.py --ssh-key /path/to/key --mini company@192.0.2.10 --direct --smtp-port 9170 --api-port 9167
+```
+
+Use `--label-prefix` to reconcile the label prefix of an already-installed bridge. Direct mode removes that bridge's Kubernetes forward LaunchAgent. It does not create or replace the mailbox service.

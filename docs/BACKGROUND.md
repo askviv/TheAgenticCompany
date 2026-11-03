@@ -29,7 +29,6 @@ We have decided with the following environment:
 
 ### Server-side services:
 - Internal documentation - wiki, or static pages
-- Gitlab - code and for project management, etc.  
 - Office suite, cloud drive - Owncloud
 
 

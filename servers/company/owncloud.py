@@ -60,7 +60,7 @@ class OwnCloudShareLedger:
             )""")
 
     def get(self, company_id: str, managed_key: str) -> dict[str, Any] | None:
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             row = connection.execute(
                 "SELECT * FROM owncloud_managed_shares WHERE company_id=? AND managed_key=?",
                 (company_id, managed_key),

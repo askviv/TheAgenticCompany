@@ -1,13 +1,6 @@
 export type Experiment = {
   id: string
   task_id?: string
-  provider_id?: string
-  classification?: "financial" | "operational"
-  source_revision?: string
-  requested_outcome?: string
-  role_fit?: string
-  role_fit_note?: string
-  financial_context_status?: string
   title: string
   summary: string
   role: string
@@ -36,6 +29,8 @@ export type CompatibilityCatalogue = {
   }[]
   source_revisions: { name: string; revision: string }[]
 }
+
+export type CompanyToolLink = { id: string; name: string; url: string }
 
 export type ExperimentRunStatus =
   | "initializing"
@@ -139,6 +134,16 @@ export type CompanyNativeEvaluationProvider = {
 }
 
 export type Session = { csrf_token: string; idempotency_key: string }
+export type CodexAuthStatus = {
+  authenticated?: boolean
+  auth_method?: string | null
+  state: "authenticated" | "unauthenticated" | "starting" | "pending" | "completed" | "failed" | "expired"
+  login_id?: string | null
+  user_code?: string | null
+  verification_url?: string | null
+  expires_at?: string | null
+  error?: string | null
+}
 type RunResponse = { run_id: string; url: string }
 
 export type Company = {
@@ -209,7 +214,6 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function getCatalog(): Promise<{
   experiments: Experiment[]
-  provider_catalog_error?: { code: string; correlation_id?: string } | null
 }> {
   return requestJson("/api/catalog")
 }
@@ -218,8 +222,30 @@ export async function getCompatibilityCatalogue(): Promise<CompatibilityCatalogu
   return requestJson<CompatibilityCatalogue>("/api/compatibility")
 }
 
+export async function getCompanyTools(): Promise<CompanyToolLink[]> {
+  const result = await requestJson<{ tools: CompanyToolLink[] }>("/api/company-tools")
+  return result.tools
+}
+
 export async function getSession(): Promise<Session> {
   return requestJson<Session>("/api/session")
+}
+
+export async function getCodexAuthStatus(): Promise<CodexAuthStatus> {
+  return requestJson<CodexAuthStatus>("/api/company/model-auth/status")
+}
+
+export async function startCodexDeviceAuthorization(): Promise<CodexAuthStatus> {
+  const session = await getSession()
+  return requestJson<CodexAuthStatus>("/api/company/model-auth/device/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ csrf_token: session.csrf_token }),
+  })
+}
+
+export async function getCodexDeviceAuthorization(loginId: string): Promise<CodexAuthStatus> {
+  return requestJson<CodexAuthStatus>(`/api/company/model-auth/device/${encodeURIComponent(loginId)}`)
 }
 
 export async function getRuns(): Promise<ExperimentRun[]> {
@@ -399,4 +425,8 @@ export async function retryRun(runId: string): Promise<RunResponse> {
   return postForm(`/runs/${encodeURIComponent(runId)}/retry`, {
     csrf_token: session.csrf_token,
   })
+}
+
+export async function getCompanyClock(): Promise<{ simulated_time: string | null; clock_mode: string }> {
+  return requestJson<{ simulated_time: string | null; clock_mode: string }>("/api/company/clock")
 }

@@ -9,4 +9,4 @@ Answer each question with a short phrase and separate answers by lines.
 Write the responses to `/workspace/answer.docx` for ease of future revision.
 
 Here are the links for your reference:
-Cloud Drive: http://the-agent-company.com:8092
+Cloud Drive: {{ company_tools.owncloud }}

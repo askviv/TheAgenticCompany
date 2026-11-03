@@ -1,6 +1,6 @@
 # Viv experiment library
 
-Open the HTTPS dashboard at `https://experiments.company.example.test/experiments`. The private-LAN HTTP endpoint remains available for vetted author-file downloads. The React frontend uses shadcn/ui, Vite, and Tailwind. The library lists 105 non-coding workplace assignments and six financial company scenarios (A1–E1 and S01). Workplace cards retain reviewed copy from `briefs-*.json`; financial scenario details describe their objectives and evaluation criteria. Starting a financial scenario adds a case to the persistent shared company, so multiple cases can run against the same company records and actors. The company has one shared simulated clock. Workplace assignments still create independent Rocket.Chat threads, tracked across container restarts with webhook and server-sent-event updates.
+Open the HTTPS dashboard at `https://experiments.company.example.test/experiments`. The private-LAN HTTP endpoint remains available for vetted author-file downloads. The React frontend uses shadcn/ui, Vite, and Tailwind. The library lists 79 business workplace assignments and six financial company scenarios (A1–E1 and S01). Workplace cards retain reviewed copy from `briefs-*.json`; financial scenario details describe their objectives and evaluation criteria. Starting a financial scenario adds a case to the persistent shared company, so multiple cases can run against the same company records and actors. The company has one shared simulated clock. Workplace assignments still create independent Rocket.Chat threads, tracked across container restarts with webhook and server-sent-event updates.
 
 These are normal requests to the existing Viv chat integration. The launcher does not implement a Viv responder or start/reset assignment containers. Runs share the current company services and data; concurrent tasks can change the same records/files. `Awaiting Viv` means delivery is confirmed; `Viv replied` means a message was received from that exact account, not that the assignment passed. Automated benchmark judging and isolated environment resets remain in the existing CLI tools and scoring is unchanged. A queued/sending run interrupted by restart becomes uncertain; retry reconciles its deterministic message ID before sending. Duplicate submissions of the same form reuse the same run.
 
@@ -23,7 +23,41 @@ Persistent data: `/data/theagentcompany/experiments-data/experiments.sqlite` (an
 - `ROCKETCHAT_PUBLIC_URL=https://chat.company.example.test`.
 - `ROCKETCHAT_USERNAME`, `ROCKETCHAT_PASSWORD`: existing benchmark operator account with channel/integration permissions.
 - `VIV_ROCKETCHAT_USERNAME=viv`.
-- Optional `EXPERIMENTS_ROCKETCHAT_CHANNEL` (default `viv-experiments`), `EXPERIMENTS_PUBLIC_URL` (default `http://192.0.2.10:8110`).
+- Optional `EXPERIMENTS_ROCKETCHAT_CHANNEL` (default `general`), `EXPERIMENTS_PUBLIC_URL` (required for source-file links; use the deployment’s public dashboard URL).
+
+To expose the dashboard’s Codex connection control, include the optional
+`deploy/single-host/experiments.codex-auth.compose.yml` overlay when starting
+the Experiments service. It mounts the actor bootstrap’s private
+`enterprise/actors/secrets/codex-inference-token` read-only and sets
+`CODEX_AUTH_BRIDGE_TOKEN_FILE` to its container path. The file is the internal
+service bearer shared with the host Codex bridge; it is not an OpenAI API key
+or a user’s Codex login. `CODEX_AUTH_BRIDGE_URL` defaults to
+`http://10.0.2.2:8143` and may be overridden in the Compose environment. The
+dashboard’s Connect Codex action starts device sign-in for the company account;
+no existing CLI login is required. Without this overlay the dashboard remains
+available and the Codex connection control reports that its bridge is
+unconfigured.
+
+Use the overlay with the normal Compose file:
+
+```sh
+docker compose --env-file deploy/single-host/host.env -p tac-experiments \
+  -f deploy/single-host/experiments.compose.yml \
+  -f deploy/single-host/experiments.codex-auth.compose.yml up -d --pull never
+```
+
+Company tools links are deployment-specific. Copy
+`servers/experiments/company-tools-urls.example.json` to a private file outside
+the repository (default `/data/theagentcompany/enterprise/secrets/company-tools-urls.json`),
+replace the six reserved example URLs with this deployment’s application URLs,
+and set `COMPANY_TOOLS_URLS_SOURCE` in `deploy/single-host/host.env` if the file
+is stored elsewhere. Compose mounts that file read-only at
+`/run/config/company-tools-urls.json`; the API reads it when the Help page asks
+for links. The JSON keys must be `erpnext`, `email`, `rocketchat`, `owncloud`,
+`plane` and `midpoint`, each with an HTTP or HTTPS URL. Missing or
+invalid mappings produce a clear Company tools unavailable message in the UI.
+The committed example contains only generic `.example.test` addresses and is
+not the deployed mapping.
 
 Financial scenarios use these Compose settings (defaults shown):
 
@@ -57,7 +91,7 @@ curl --fail http://127.0.0.1:8110/api/health
 
 The dashboard is available at `https://experiments.company.example.test/experiments` and the trusted LAN URL remains available for author-file downloads. Verify the sign-in screen and static bundle after the health check. Do not run an evaluation as a deployment smoke check: that creates a durable evaluation record. If the coordinator or its evaluation API changed, deploy its reviewed image separately before enabling the new proxy flow.
 
-The idempotent integration setup creates `TACExperimentTracking` for `#viv-experiments`, event `sendMessage`, posting to `http://192.0.2.10:8110/api/chat-events`. It checks any existing integration matches rather than creating a second one. The secret is never returned. Changing the channel/URL/secret requires updating that integration as well.
+The idempotent integration setup creates `TACExperimentTracking` for `#general`, event `sendMessage`, posting to `http://192.0.2.10:8110/api/chat-events`. It reconciles the existing named integration instead of creating a second one, preserving channel subscriptions for requests already in progress. The secret is never returned.
 
 Stop/start just the webpage without resetting company data:
 
@@ -82,3 +116,5 @@ JSON is separately bound read-only from the canonical enterprise source path.
 This keeps the dashboard name/identity metadata aligned with the coordinator
 without replacing the preserved task files. Recreate the dashboard container
 after an atomic identity-file replacement so Docker binds the current file.
+
+`COMPANY_PROFILE_SOURCE` selects the existing company identity/role JSON for the dashboard. It is mounted read-only and passed as `COMPANY_PROFILE_FILE`; use the same file as the coordinator’s `company_profile_file`.

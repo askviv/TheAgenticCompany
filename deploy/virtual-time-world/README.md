@@ -1,5 +1,63 @@
 # Isolated company VM
 
+## Fresh platform command
+
+`up.sh` creates a new Ubuntu VM, installs the repository source and standard
+Docker/Compose packages, bootstraps a fresh company from the supplied profile,
+builds and activates the timed-kernel candidate, and starts the clock
+supervisor. A normal run resumes only a world created by this command. It refuses
+to adopt an unmarked VM or disk at the selected world path.
+
+Create a private deployment profile from
+[`deployment-profile.example.json`](deployment-profile.example.json), replace
+the example domains, public IP, Viv integration details, and shared sandbox
+password with the deployment's values, then run:
+
+```sh
+sudo install -d -m 0700 /data/theagentcompany/virtual-time-world/config
+sudo install -m 0600 /path/to/deployment-profile.json \
+  /data/theagentcompany/virtual-time-world/config/deployment-profile.json
+sudo deploy/virtual-time-world/up.sh
+```
+
+When deliberately replacing the selected world's VM and guest storage, use the
+same profile with `sudo deploy/virtual-time-world/up.sh --fresh`.
+
+The profile pins an exact Codex CLI npm version and model. The script installs
+that standard CLI and prepares the private host inference bridge; the dashboard
+provides the Codex device-auth flow. No Codex login session or application
+credentials are embedded in the repository. Fresh guest Compose files are
+resolved under `/etc/company-workplace/compose`; the company target uses those
+files with `--pull never --no-build`. The timed clock starts at 24× after the
+services have been initialized at the stock rate. `clock_rate` is configurable
+in the profile and defaults to 24. The complete platform defaults to a 12 GiB
+guest with two vCPUs; `WORLD_MEMORY_MIB` and `WORLD_VCPUS` can override those
+resource settings.
+
+The host `tac-https.service` fronts all seven profile domains with public TLS.
+Provide `public_tls.cert_file` and `public_tls.key_file` together when using an
+existing deployment certificate; otherwise Caddy obtains certificates through
+ACME, which requires each hostname to resolve to this host and inbound TCP 80
+and 443 to reach it. The guest CA is copied only as an upstream trust root.
+QEMU forwards guest HTTP/HTTPS to host loopback ports 18080/18443 and forwards
+Mailu SMTP, submission, and IMAPS on the configured `mail_ports` to the
+profile's local `public_ip`. The defaults are 2525, 2587, and 2993; ensure those
+ports are available and configure external DNS/firewalls for the selected
+protocol ports. Guest company processes use the private-CA Mailu front on local
+ports 12587/12993. The public Mailu front uses the same public certificate as
+host Caddy: the host path/timer helper copies the validated Caddy-managed or
+profile-supplied certificate into the guest and starts the standard pinned
+Mailu nginx front. The public front is independent of internal company startup,
+so ACME issuance can finish asynchronously while the private front serves the
+company services.
+
+Running the command again starts the clock/API and ensures the guest company
+target, Compose projects, and HTTPS frontend are active. To rebuild the selected
+world from empty VM/application storage, run `up.sh --fresh`; it destroys and
+removes only that world's VM, guest disks, clock anchor, and generated bootstrap
+metadata. It retains the private deployment profile and any certificate/key
+files referenced by that profile. It does not create backups.
+
 This provisions an Ubuntu 24.04 guest directly on the Linux host. Existing
 company services and data directories are not mounted into it. Docker Compose
 runs inside the guest, sharing its kernel clock.
@@ -14,10 +72,10 @@ sudo bash deploy/virtual-time-world/provision.sh
 
 The provisioner verifies the Ubuntu image checksum, preserves an existing
 domain or disk, generates an SSH key on the host, and uses QEMU user networking
-with SSH forwarded only on host localhost. It does not enable domain autostart
-or change existing application addresses. It starts with one vCPU and 2 GiB
-RAM while the original deployment remains running. Resource settings can be
-provided through `WORLD_VCPUS`, `WORLD_MEMORY_MIB`, `WORLD_DISK_SIZE` and
+with SSH and web traffic forwarded on host localhost. Mail protocols are
+forwarded on the profile's local public IP. It does not enable domain autostart
+or change existing application addresses. Resource settings can be provided
+through `WORLD_VCPUS`, `WORLD_MEMORY_MIB`, `WORLD_DISK_SIZE` and
 `WORLD_SSH_PORT`. A separate guest-owned `company-data.qcow2` defaults to 250 GiB (`WORLD_DATA_DISK_SIZE`); cloud-init formats only a blank data disk, mounts its ext4 label at `/data`, and stores Docker and containerd data there. Docker uses native kernel port forwarding (`userland-proxy: false`) to avoid accelerating a separate proxy process startup deadline. Persistent artifacts live under `WORLD_ROOT` (default
 `/data/theagentcompany/virtual-time-world`).
 
@@ -41,51 +99,82 @@ needed for Docker. The builder installs the candidate alongside the stock
 kernel and creates its initramfs, without changing the current boot selection.
 Run it only inside the empty guest after installing the build dependencies.
 
-## Guest Caddy and employee browser trust
+## Fresh workplace bootstrap and employee browser trust
 
-The guest HTTPS front keeps the existing eight application hostnames and the
-employee desktop's experiments hostname on the guest Caddy admin socket
-`/run/tac-https/admin.sock`. The generic Caddyfile and systemd unit are in
-`guest/`. At cutover, the host-side public Caddy remains the external TLS
-endpoint; its employee desktop path forwards to guest port 443 through the
-host-loopback QEMU forward on 18443. The guest Caddy uses the existing
-long-valid company-clock leaf certificate and private key. The host's public
-Let's Encrypt certificate remains the external certificate. Its leaf/key pair is also synchronized to the guest's externally published Mailu front; a separate internal Mailu front uses the long-valid company certificate on loopback and Docker's host gateway.
+`guest/bootstrap_workplace.py` reads the private profile at
+`/etc/company-workplace/deployment-profile.json`. It requires the seven service
+hostnames (`domains.owncloud`, `chat`, `plane`, `mail`, `erp`, `midpoint`, and
+`experiments`), `public_ip`, and the explicit shared sandbox password. The
+host installer supplies that profile; it does not invent domains or
+credentials.
 
-The cutover Caddyfile is staged privately at
-`$WORLD_ROOT/config/guest-company-clock-Caddyfile` with mode 0600. It is made
-from the current public Caddy routes, changes the guest listener to
-`0.0.0.0`, points the ERP backend at guest loopback 8130, and uses guest-local
-certificate paths `/etc/company-clock-tls/fullchain.pem` and
-`/etc/company-clock-tls/server.key`. Keep this host-specific file out of the
-repository. Copy the leaf certificate and key to those paths in the guest;
-keep the CA signing key on the host. Install the root certificate at
-`/etc/company-clock-tls/root-ca.crt`; the guest coordinator reads it to mount
-into employee browser containers. Caddy reads only the leaf chain and key.
+Experiment task instructions and the Company tools links share the JSON file
+selected by `COMPANY_TOOLS_URLS_FILE`. The retained `task.md` instructions use
+Jinja placeholders such as `{{ company_tools.owncloud }}`; the experiment
+catalogue renders them from that mapping. Configure URLs in the mapping rather
+than editing task text. Existing run snapshots and messages are not rewritten.
 
-Install `guest/client-trust.env` as `/etc/company-clock-tls/client-trust.env` after adding the public company root to the guest OS trust store with `update-ca-certificates`. The final native-service EnvironmentFile prevents older private environment files from overriding that trust. Set `mail.tls_ca_file` in the coordinator runtime JSON to `/etc/company-clock-tls/root-ca.crt` for IMAP/SMTP.
+The bootstrap creates a guest-local root CA and server certificate with OpenSSL, installs the root into the guest OS trust store, and
+renders Caddy configuration from the repository template. Each certificate
+generation is written as a complete directory and activated with one atomic
+symlink rename, so an interrupted first run can resume without a partial trust
+set. The CA key remains root-only at `/etc/company-clock-tls/root-ca.key`; the
+coordinator and employee browser trust the certificate at
+`/etc/company-clock-tls/root-ca.crt`. Caddy reads
+`/etc/company-clock-tls/fullchain.pem` and `/etc/company-clock-tls/server.key`.
 
-Guest containers that call the company HTTPS names should map those names to
-Docker's `host-gateway`; the guest Caddy listens on all guest interfaces and
-terminates those TLS requests. Use the Compose `extra_hosts` pattern already
-used by the base deployment, with the eight `TAC_CLOCK_*_HOST` variables mapped
-to `host-gateway`. Native guest processes can resolve the same names to
-`127.0.0.1` in the guest `/etc/hosts`. The external host DNS records remain
-unchanged.
+The bootstrap resolves fresh ownCloud/Rocket.Chat, Plane and midPoint Compose
+projects into `/etc/company-workplace/compose`, starts them at the stock 1×
+guest rate for initialization, and initializes midPoint against new storage.
+It uses the supplied TAC seed images and upstream application images; Plane
+storage uses the upstream MinIO image instead of a locally built image. Fresh
+application and service secrets persist under `/etc/company-workplace/secrets`
+with owner-only permissions. It extracts the Rocket.Chat database and Plane
+PostgreSQL, Redis, and upload archives from the pinned
+`ghcr.io/theagentcompany/servers-api-server:1.0.0` seed image and restores them
+into new Compose-owned volumes; it does not adopt an old application volume.
+The stock Bitnami MongoDB service receives
+`MONGODB_EXTRA_FLAGS=--setParameter ttlMonitorEnabled=false` so MongoDB's TTL
+monitor does not age out seeded company records while guest time runs faster.
+The separate `bootstrap_fresh_company.py` component provisions Mailu, ERPNext
+and the coordinator from the same profile. After those services are ready,
+`bootstrap_fresh_identity.py` imports the three native MidPoint resources,
+discovers seeded Rocket.Chat and Mailu accounts, creates the 17 company users
+and ownCloud projections, links the accounts, then applies the selected
+department access policy with the existing ownCloud API helpers. The persistent
+company target starts the resolved JSON projects from
+`/etc/company-workplace/compose`.
+The same fresh identity stage reconciles the seeded employee Rocket.Chat
+passwords to `sandbox_password`, verifies each account's REST ID against the
+source identity map, provisions the Viv account using `viv.chat_username`
+(default `viv`) and `viv.email`, and writes the private
+`employee-chat-credentials.json` consumed by the coordinator.
+
+Guest Caddy serves the configured company domains and exposes the existing
+admin socket at `/run/tac-https/admin.sock`. Install its unit as
+`tac-https.service` so the existing target and desktop route manager use the
+same lifecycle. The host's public Caddy remains the external TLS endpoint; the
+guest CA is for guest services and trusted internal clients. Set
+`mail.tls_ca_file` in coordinator runtime configuration to
+`/etc/company-clock-tls/root-ca.crt` for IMAP/SMTP. Guest containers that call
+company HTTPS names map those names to Docker's `host-gateway`; native guest
+processes resolve them through guest-local loopback. External host DNS records
+remain unchanged.
 
 Employee desktop Chrome needs the guest root CA in its persistent NSS profile.
 Set `employee_desktop_ca_file` to `/etc/company-clock-tls/root-ca.crt` and
-`employee_desktop_image` to the built Selkies image in the private runtime JSON. The existing employee desktop Dockerfile installs `libnss3-tools`, which supplies `certutil`; build it with the coordinator bootstrap or `docker build` before loading its exact image into the guest. This also configures independently scheduled issue
-handoffs. `EMPLOYEE_DESKTOP_CA_FILE` and `EMPLOYEE_DESKTOP_IMAGE` remain optional
-process overrides. The runtime mounts the root read-only and imports it
-into Chrome's NSS database. Do not set a desktop fake-time clock file or inject
+`employee_desktop_image` to the upstream pinned Selkies desktop image in the
+private runtime JSON. Coordinator Ubuntu needs `libnss3-tools` (`certutil`) to
+prepare a persistent per-employee NSS database on the host; the runtime mounts
+that database at Chrome's standard NSS path. This also configures independently
+scheduled issue handoffs. `EMPLOYEE_DESKTOP_CA_FILE` and
+`EMPLOYEE_DESKTOP_IMAGE` remain optional process overrides. Do not set a desktop fake-time clock file or inject
 `LD_PRELOAD`/`FAKETIME`; the guest kernel provides the accelerated clock.
 
-Install `guest/tac-company-clock-caddy.service` only after the guest cert files,
-private Caddyfile, and environment file are in place. The service validates
-the guest Caddyfile at start and exposes the same Unix admin socket used by the
-desktop route manager. The host public Caddy employee-desktop forward is a
-separate cutover change and is not part of this preparation.
+The guest Caddy service is installed and started by `up.sh` after the fresh
+certificate, Caddyfile, and workplace services are ready. It exposes the Unix
+admin socket used by the desktop route manager. The host Caddy frontend routes
+each configured public hostname through the guest HTTPS forward.
 
 ## Host clock control
 
@@ -129,13 +218,8 @@ duration. Abrupt host loss resumes from the last durable anchor; elapsed time
 since that anchor is not guaranteed. Host clock rollback is refused rather than
 rewinding guest time. Errors are reported without forced shutdown or kill.
 
-Initialize exactly once before starting clock control. For the empty proof VM,
-stop the stock guest, then `initialize --host-now --rate 24` explicitly seeds
-it from host UTC. For a real
-migration, supply the captured company clock instead with
-`initialize --epoch-ns <company-epoch-nanoseconds> --host-epoch-ns <paired-host-epoch-nanoseconds> --rate <rate>`; the controller
-never substitutes host UTC for a missing company epoch and never overwrites an
-existing anchor. The offline rate is the rate used while the VM is powered off.
+`up.sh` initializes a new world's clock anchor from host UTC exactly once. The
+offline rate is the rate used while the VM is powered off.
 If the host loses power during a runtime rate change, `start` stays blocked
 until `monitor` observes the live rate or `resolve-pending-rate --rate <rate> --epoch-ns <observed-guest-epoch> --host-epoch-ns <paired-host-epoch>`
 records operator evidence for the stopped VM's applied rate and actual time.
@@ -144,38 +228,13 @@ Run `monitor` as a
 host service or supervised process while the candidate VM is active to retain
 the five-second checkpoints across controller CLI invocations.
 
-For host and guest reboot supervision, install `clock_control.py` at
-`/usr/local/lib/virtual-time-world/clock_control.py`, install
-`agentic-company.target` in the guest, and install
-`virtual-time-world-clock.service` into the host's systemd unit directory. The
-base target starts Docker only, which supports an empty proof VM. For the company
-migration, install `agentic-company.target.d/services.conf` with the existing
-company unit files, `agentic-company-compose.service`, and
-`company-compose-stop.py` at `/usr/local/lib/virtual-time-world/company-compose-stop`
-so they are pulled in only after clock synchronization. Resolved migration Compose JSON stays under
-`$WORLD_ROOT/config/migration-compose`; its pre-network-change checkpoint stays
-under `$WORLD_ROOT/config/migration-compose-original`. The guest unit runs each
-project with `docker compose up --pull never`. On stop it drains stateful mail,
-Mailu admin, ERP frontend, and Plane worker processes, then runs
-`docker compose stop --timeout -1`; it never removes containers or volumes. The
-stateless experiments and controller services use Compose's init process to
-forward shutdown signals.
-Provisioning disables Docker's multi-user startup so applications wait for
-clock readiness.
-The company target uses systemd's `Upholds=` dependency to recover company
-units after a failed startup dependency, while leaving the kernel clock running.
-After `daemon-reload`, enable and start `virtual-time-world-clock.service`. Its
-`run` action starts the prepared VM when stopped, synchronizes the guest clock,
-queues the company target with systemd's nonblocking start operation, and
-monitors the clock while active. A failed start request is logged and retried;
-the acknowledgement means only that systemd accepted the request, not that the
-applications are healthy. An unexpected guest
-shutdown exits with failure so systemd restarts it from a fresh epoch derived
-from the durable anchor. The libvirt domain's reboot action is `destroy`,
-ensuring a guest reboot reaches the host supervisor instead of reusing the old
-kernel command line. systemd's `ExecStop` requests graceful shutdown; the unit
-disables SIGKILL fallback. Install and enable the unit only after candidate
-preparation and explicit clock initialization.
+`up.sh` installs the clock controller, systemd units, guest target and Compose
+helper. The supervisor synchronizes guest time before starting
+`agentic-company.target`, then monitors the VM. The target includes the standard
+Docker/Compose projects and native company services. A normal service shutdown
+drains application processes and stops Compose projects without removing their
+containers or volumes. Docker's multi-user startup is disabled so applications
+wait for clock readiness.
 
 The controller requires the prepared candidate to include both the durable
 epoch and runtime-rate kernel patches, and `CONFIG_RTC_HCTOSYS` disabled. It checks the
@@ -216,22 +275,51 @@ Kernel builds and manual clock/device observations are infrastructure work.
 Do not launch company experiments, benchmark episodes or Viv evaluations as
 part of this stage.
 
-## Migration boundary
+## Runtime cadence
 
-Company data stays on guest-owned block storage. Do not use host directory
-shares for company data: the host would generate their filesystem timestamps.
-Do not point two writable deployments at one database directory. Move data only
-after the guest clock/timers work and a coordinated, consistent final snapshot
-can be taken. Preserve the current deployment and its volumes for rollback.
+The coordinator runtime JSON exposes `sqlite_busy_timeout_seconds` (existing default: 30). Keep that unscaled base value; every simulation SQLite connection multiplies it by the active kernel rate. At 24×, the resulting 720 guest seconds retain a 30-real-second allowance for durable storage contention. This changes resource waiting, not the guest clock or benchmark deadlines. Health reads use a read connection, and displayed company time comes directly from the guest kernel; delayed record processing does not freeze the clock.
 
-The host retains real time and handles external model authentication, transport
-boundaries and the confirmed five-real-minute unread-email handoff. External
-inboxes still record their own real arrival time. Internal company services use
-guest time. When migrating the coordinator, set its extra business-clock rate
-to one so the guest clock is not accelerated twice.
+Clock speed is deployment configuration. Install `clock.env.example` as `$WORLD_ROOT/config/clock.env`, set `WORLD_CLOCK_RATE`, and run `sudo systemctl reload virtual-time-world-clock.service` to apply it without stopping the VM. The service uses this rate when starting a stopped VM; recovery of an already-running VM retains its durable confirmed clock state. The dashboard displays company time and has no speed editor.
 
-For an existing company, follow the [migration runbook](../../docs/enterprise-simulation/virtual-time-migration.md). A plain `docker compose up` starts application containers; VM creation, kernel preparation and the coordinated data migration are separate operator steps.
+Keep `mailbox_idle_renewal_seconds` at its existing 30-second base value. In kernel-clock mode the runtime multiplies it by the current kernel rate, keeping IMAP IDLE renewal at 30 real seconds. New-mail notifications still wake immediately. Transport heartbeat and reconnect intervals use the same rate at connection setup.
 
-The coordinator runtime JSON exposes `sqlite_busy_timeout_seconds` (existing default: 30). At 24×, use 720 guest seconds to retain a 30-real-second allowance for durable storage contention. This changes resource waiting, not the guest clock or benchmark deadlines. Health reads use a read connection, and displayed company time comes directly from the guest kernel; delayed record processing does not freeze the clock.
+Keep `company_clock_observation_seconds` at its existing one-second base value; the runtime multiplies it by the active kernel rate so database checkpoints and event-queue scans run once per real second. This is a processing cadence, not a second clock: the header and business timestamps use the guest kernel, and queued events retain their scheduled timestamps. It avoids performing 24 checkpoint writes per real second on slower persistent storage.
+
+Docker health probes are infrastructure observations, not business events. The
+company Compose helper saves each image or container's baseline healthcheck and
+scales its intervals, timeouts, and startup grace by the live kernel rate. It
+applies the resulting fields through ordinary Compose configuration. In the
+guest, after creating the company containers, run:
+
+```sh
+sudo python3 deploy/virtual-time-world/prepare-healthcheck-cadence.py \
+  --config-dir /etc/company-workplace/compose
+```
+
+Install the helper at `/usr/local/lib/virtual-time-world/prepare-healthcheck-cadence.py` in the guest. The company Compose unit runs it before startup; it reads the same kernel rate for Docker healthchecks, native service timeouts, the Mailu Dovecot proxy timeout, and the issue timer, with no separate cadence-rate configuration. After changing the rate, rerun it and apply the prepared Compose configurations to update their healthchecks.
+
+The helper captures native effective health metadata privately, retains its
+commands and retries, and scales health durations from their saved baselines.
+It also scales native service timeouts and the issue timer from their saved
+baselines. Repeated runs use the saved baseline rather than multiplying again.
+The helper reads the active kernel rate by default (or
+accepts the same rate explicitly with `--rate`), saves the native
+`tac-company-issues.timer` monotonic interval privately, and installs a systemd
+drop-in scaled from that saved baseline. Repeated runs do not multiply the
+previous drop-in value. Recreate the affected containers through Compose to
+apply their health configuration, preserving volumes. This prevents
+accelerated health polling from saturating storage; business clocks, issue
+deadlines and evaluator criteria are unchanged.
+
+Use the standard Ubuntu Docker package and the standard pinned Mailu Dovecot
+image. Kernel-clock behavior comes from the timed Ubuntu VM; container health
+durations and Dovecot proxy timeouts are set by the company Compose helper.
+
+For an existing world, `compact-and-move-images.sh /path/on/ssd` uses native
+libguestfs sparsification and QEMU conversion/comparison with the VM and clock
+supervisor stopped. It preserves company files and virtual disk capacities,
+flattens the boot disk backing chain, and persists an SSD bind mount at the
+existing image path. The original HDD directory is retained only until the
+operator verifies startup, then must be removed. No company reset is performed.
 
 Architecture-specific kernel entry points and Apple Silicon/UTM limitations are documented in the [build guide](../../docs/enterprise-simulation/architecture-builds.md).

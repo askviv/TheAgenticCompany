@@ -18,7 +18,6 @@ import argparse
 import email
 import email.policy
 import hashlib
-import fcntl
 import json
 import logging
 import mimetypes
@@ -37,6 +36,8 @@ from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsplit
 
 import requests
+
+from servers.simulation.clock_rate import kernel_virtual_time_rate
 
 
 STEP_EMAIL_DELIVERED = "EMAIL_DELIVERED"
@@ -597,124 +598,29 @@ class RealMailTransport:
         with client:
             client.login(credentials["username"], credentials["password"])
             on_send_started()
-            client.send_message(message)
+            refused = client.send_message(message)
+            if refused:
+                raise smtplib.SMTPRecipientsRefused(refused)
 
-    def confirm_smtp4dev(self, fixture: dict[str, Any], message_id: str) -> dict[str, str] | None:
-        """Use smtp4dev's documented message search and detail API, matching Message-ID exactly."""
-        base = fixture["smtp4dev_base_url"].rstrip("/") + "/"
-        verify: bool | str = fixture["employee_mailbox"].get("tls_ca_file") or True
-        listing = requests.get(urljoin(base, "api/Messages"),
-                               params={"searchTerms": fixture["subject"], "page": 1, "pageSize": 100},
-                               timeout=15, verify=verify)
-        listing.raise_for_status()
-        first_page = listing.json()
-        summaries = list(first_page.get("results") or [])
-        page_count = int(first_page.get("pageCount") or 1)
-        for page in range(2, page_count + 1):
-            listing = requests.get(urljoin(base, "api/Messages"),
-                                   params={"searchTerms": fixture["subject"], "page": page, "pageSize": 100},
-                                   timeout=15, verify=verify)
-            listing.raise_for_status()
-            summaries.extend(listing.json().get("results") or [])
-        for summary in summaries:
-            message_uuid = summary.get("id")
-            if not isinstance(message_uuid, str):
-                continue
-            detail_response = requests.get(urljoin(base, f"api/Messages/{message_uuid}"), timeout=15, verify=verify)
-            detail_response.raise_for_status()
-            detail = detail_response.json()
-            if any(str(header.get("name", "")).casefold() == "message-id"
-                   and str(header.get("value", "")).strip() == message_id
-                   for header in detail.get("headers") or []):
-                # The running UI's router exposes this explicit mailbox/folder/message route.
-                mailbox = quote(fixture.get("smtp4dev_mailbox_name", "Default"), safe="")
-                webmail_url = (fixture["smtp4dev_base_url"].rstrip("/")
-                               + f"/#/messages/mailbox/{mailbox}/folder/INBOX/message/{quote(message_uuid, safe='')}")
-                return {"mailbox_uid": message_uuid, "reference": f"smtp4dev message {message_uuid}",
-                        "webmail_url": webmail_url}
-        return None
 
 
 class RealChatTransport:
-    """Send through an employee's Rocket.Chat browser and verify its DDP receipt."""
+    """CUA UI submission with native Rocket.Chat read-only receipt verification."""
 
-    def __init__(self, session: requests.Session | None = None, browser_session_provider: Any = None):
+    def __init__(self, session: requests.Session | None = None):
         self.session = session or requests.Session()
-        self.browser_session_provider = browser_session_provider
 
-    def _browser_provider(self):
-        if self.browser_session_provider is None:
-            from .browser_chat import PlaywrightEmployeeBrowserSessionProvider
+    def _cua_transport(self):
+        from .cua_chat import CuaChatTransport
+        from .browser_chat import _configured_desktop_manager
+        return CuaChatTransport(_configured_desktop_manager(), self.session)
 
-            self.browser_session_provider = PlaywrightEmployeeBrowserSessionProvider()
-        return self.browser_session_provider
+    def post(self, fixture, credentials, attempt_id, **callbacks):
+        return self._cua_transport().post(fixture, credentials, attempt_id, **callbacks)
 
-    @staticmethod
-    def _message_from_frame(frame: Any) -> list[dict[str, Any]]:
-        if isinstance(frame, bytes):
-            try:
-                frame = frame.decode("utf-8")
-            except UnicodeDecodeError:
-                return []
-        if isinstance(frame, str):
-            try:
-                frame = json.loads(frame)
-            except ValueError:
-                return []
-        found: list[dict[str, Any]] = []
-        pending = [frame]
-        while pending:
-            value = pending.pop()
-            if isinstance(value, dict):
-                found.append(value)
-                pending.extend(value.values())
-            elif isinstance(value, list):
-                pending.extend(value)
-        return found
-
-    @staticmethod
-    def _ddp_frame(frame: Any) -> dict[str, Any] | None:
-        if isinstance(frame, bytes):
-            try:
-                frame = frame.decode("utf-8")
-            except UnicodeDecodeError:
-                return None
-        if isinstance(frame, str):
-            try:
-                frame = json.loads(frame)
-            except ValueError:
-                return None
-        return frame if isinstance(frame, dict) else None
-
-    def _ddp_send_requests(self, frames: list[Any], room_id: str,
-                           message_text: str) -> list[dict[str, str]]:
-        requests_found = []
-        for raw_frame in frames:
-            frame = self._ddp_frame(raw_frame)
-            if not frame or frame.get("msg") != "method" or frame.get("method") != "sendMessage":
-                continue
-            message_ids = [value.get("_id") for value in self._message_from_frame(frame.get("params"))
-                           if value.get("rid") == room_id and value.get("msg") == message_text
-                           and isinstance(value.get("_id"), str) and value.get("_id")]
-            if len(message_ids) == 1 and isinstance(frame.get("id"), str) and frame["id"]:
-                requests_found.append({"rpc_id": frame["id"], "message_id": message_ids[0]})
-        # Identical matching send calls are ambiguous and cannot identify this attempt.
-        return requests_found
-
-    def _ddp_send_acknowledged(self, frames: list[Any], rpc_id: str,
-                               message_id: str) -> bool:
-        for raw_frame in frames:
-            frame = self._ddp_frame(raw_frame)
-            if (not frame or frame.get("msg") != "result" or frame.get("id") != rpc_id
-                    or "error" in frame or "result" not in frame):
-                continue
-            result = frame["result"]
-            acknowledged_id = result if isinstance(result, str) else None
-            if isinstance(result, dict):
-                acknowledged_id = result.get("_id") or result.get("messageId")
-            if acknowledged_id is None or acknowledged_id == message_id:
-                return True
-        return False
+    def confirm_message(self, fixture, credentials, message_id, message_text, submission_started_at):
+        return self._cua_transport().confirm_message(
+            fixture, credentials, message_id, message_text, submission_started_at)
 
     @staticmethod
     def _browser_room_url(base: str, room: dict[str, Any]) -> str:
@@ -724,36 +630,6 @@ class RealChatTransport:
         parts = urlsplit(message_url)
         return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
-    @staticmethod
-    def _is_chat_websocket(socket: Any, base: str) -> bool:
-        parsed, origin = urlsplit(socket.url), urlsplit(base)
-        return parsed.netloc == origin.netloc and parsed.path.endswith("/websocket")
-
-    def _active_chat_websocket(self, page: Any, sockets: list[Any],
-                               socket_states: dict[int, dict[str, Any]], base: str) -> Any:
-        while True:
-            candidates = [socket for socket in sockets
-                          if self._is_chat_websocket(socket, base) and not socket.is_closed()]
-            if candidates:
-                socket = candidates[-1]
-            else:
-                page.wait_for_event(
-                    "websocket", predicate=lambda candidate: self._is_chat_websocket(candidate, base),
-                    timeout=0,
-                )
-                continue
-
-            state = socket_states[id(socket)]
-            if state["connected"]:
-                return socket
-            try:
-                # The listener installed on the page event buffers this frame even
-                # if it arrives while React is making the composer visible.
-                socket.wait_for_event("framereceived", timeout=0)
-            except Exception as error:
-                if socket.is_closed():
-                    continue
-                raise
 
     def _room(self, base: str, headers: dict[str, str], room_id: str) -> dict[str, Any]:
         response = self.session.get(urljoin(base, "api/v1/rooms.info"), headers=headers,
@@ -764,39 +640,6 @@ class RealChatTransport:
             raise RuntimeError("ROCKETCHAT_ROOM_LOOKUP_MISMATCH")
         return room
 
-    def _browser_auth(self, page: Any, base: str, credentials: dict[str, str], expected_user_id: str) -> dict[str, str]:
-        page.goto(base, wait_until="domcontentloaded", timeout=0)
-        auth = page.evaluate("""() => ({
-          token: localStorage.getItem('Meteor.loginToken'),
-          userId: localStorage.getItem('Meteor.userId')
-        })""")
-        if not isinstance(auth, dict) or not auth.get("token") or not auth.get("userId"):
-            password = page.locator('input[type="password"]')
-            username = page.locator('input[name="username"], input[name="email"], input[type="email"]')
-            username.first.wait_for(state="visible", timeout=0)
-            password.wait_for(state="visible", timeout=0)
-            username.first.fill(credentials["username"], timeout=0)
-            password.fill(credentials["password"], timeout=0)
-            submit = page.locator('button[type="submit"]')
-            submit.first.wait_for(state="visible", timeout=0)
-            submit.first.click(timeout=0)
-            page.wait_for_function(
-                "() => !!localStorage.getItem('Meteor.loginToken') && !!localStorage.getItem('Meteor.userId')",
-                timeout=0,
-            )
-            auth = page.evaluate("""() => ({
-              token: localStorage.getItem('Meteor.loginToken'),
-              userId: localStorage.getItem('Meteor.userId')
-            })""")
-        token, user_id = auth.get("token"), auth.get("userId")
-        if not isinstance(token, str) or not token or not isinstance(user_id, str) or not user_id:
-            raise RuntimeError("ROCKETCHAT_BROWSER_AUTHENTICATION_UNAVAILABLE")
-        headers = {"X-Auth-Token": token, "X-User-Id": user_id}
-        response = self.session.get(urljoin(base, "api/v1/me"), headers=headers, timeout=15)
-        response.raise_for_status()
-        if (response.json().get("_id") != expected_user_id or user_id != expected_user_id):
-            raise RuntimeError("ROCKETCHAT_AUTHOR_MISMATCH")
-        return headers
 
     @staticmethod
     def _verified_message(value: Any, *, message_id: str, room_id: str,
@@ -808,9 +651,16 @@ class RealChatTransport:
             raise RuntimeError("ROCKETCHAT_MESSAGE_ROOM_MISMATCH")
         if not isinstance(author, dict) or author.get("_id") != author_id:
             raise RuntimeError("ROCKETCHAT_MESSAGE_AUTHOR_MISMATCH")
-        if value.get("msg") != message_text:
+        actual_text = value.get("msg")
+        if message_text.startswith("@") and isinstance(actual_text, str):
+            # Native mention completion may add a separator space. Keep the
+            # account token and the entire remaining assignment unchanged.
+            actual_text = actual_text.split(maxsplit=1)
+            message_text = message_text.split(maxsplit=1)
+        if actual_text != message_text:
             raise RuntimeError("ROCKETCHAT_MESSAGE_TEXT_MISMATCH")
         return value
+
 
     def _message_by_id(self, base: str, headers: dict[str, str], message_id: str,
                        room_id: str, author_id: str, message_text: str) -> dict[str, Any] | None:
@@ -823,6 +673,7 @@ class RealChatTransport:
         return self._verified_message(message, message_id=message_id, room_id=room_id,
                                       author_id=author_id, message_text=message_text)
 
+
     def _receipt(self, fixture: dict[str, Any], room: dict[str, Any],
                  message: dict[str, Any]) -> dict[str, str | None]:
         room_id = fixture["employee_mailbox"]["rocketchat_room_id"]
@@ -833,8 +684,12 @@ class RealChatTransport:
                        fixture["employee_mailbox"]["rocketchat_base_url"].rstrip("/") + "/",
                        room, message_id)}
         if fixture.get("mention_account_id"):
+            if not any(mention.get("_id") == fixture["mention_account_id"]
+                       for mention in message.get("mentions", []) if isinstance(mention, dict)):
+                raise RuntimeError("ROCKETCHAT_MENTION_NOT_CONFIRMED")
             receipt["mention_account_id"] = fixture["mention_account_id"]
         return receipt
+
 
     def _mention_text(self, fixture: dict[str, Any], headers: dict[str, str]) -> str | None:
         account_id = fixture.get("mention_account_id")
@@ -852,128 +707,6 @@ class RealChatTransport:
             raise RuntimeError("ROCKETCHAT_MENTION_USERNAME_MISSING")
         return "@" + username
 
-    def post(self, fixture: dict[str, Any], credentials: dict[str, str], attempt_id: str,
-             *, on_submission_started: Any = None,
-             on_message_id_captured: Any = None,
-             on_effective_message_text: Any = None) -> dict[str, str | None]:
-        _safe_ref(attempt_id, "chat attempt reference")
-        box = fixture["employee_mailbox"]
-        base = box["rocketchat_base_url"].rstrip("/") + "/"
-        expected_author = box["rocketchat_expected_user_id"]
-        with self._browser_provider().open_for_employee_email(box["address"]) as page:
-            sockets = []
-            socket_states: dict[int, dict[str, Any]] = {}
-
-            def track_socket(socket: Any) -> None:
-                sockets.append(socket)
-                state: dict[str, Any] = {"connected": False, "frames": [], "sent_frames": []}
-                socket_states[id(socket)] = state
-
-                def track_frame(frame: Any) -> None:
-                    state["frames"].append(frame)
-                    if any(message.get("msg") == "connected"
-                           for message in self._message_from_frame(frame)):
-                        state["connected"] = True
-
-                socket.on("framereceived", track_frame)
-                socket.on("framesent", lambda frame: state["sent_frames"].append(frame))
-
-            page.on("websocket", track_socket)
-            headers = self._browser_auth(page, base, credentials, expected_author)
-            room_id = box["rocketchat_room_id"]
-            room = self._room(base, headers, room_id)
-            mention = self._mention_text(fixture, headers)
-            message_text = (mention + " " if mention else "") + fixture["chat_message"]
-            if on_effective_message_text is not None:
-                on_effective_message_text(message_text)
-            page.goto(self._browser_room_url(base, room), wait_until="domcontentloaded", timeout=0)
-            composer = page.locator(
-                'textarea[aria-label="Message"], textarea.rc-message-box__textarea, '
-                'textarea[placeholder*="message" i], [contenteditable="true"][role="textbox"]'
-            ).first
-            composer.wait_for(state="visible", timeout=0)
-            if not composer.is_visible():
-                raise RuntimeError("ROCKETCHAT_MESSAGE_COMPOSER_UNAVAILABLE")
-            socket = self._active_chat_websocket(page, sockets, socket_states, base)
-            socket_state = socket_states[id(socket)]
-            sent_frames = socket_state["sent_frames"]
-            received_frames = socket_state["frames"]
-            message_text = message_text.replace("\r\n", "\n").replace("\r", "\n")
-            composer.fill("", timeout=0)
-            lines = message_text.split("\n")
-            for index, line in enumerate(lines):
-                if line:
-                    composer.press_sequentially(line, delay=150, timeout=0)
-                if index < len(lines) - 1:
-                    # Rocket.Chat documents Shift+Enter as a line break; plain
-                    # Enter remains reserved for the final submit action.
-                    composer.press("Shift+Enter", timeout=0)
-            if on_submission_started is not None:
-                on_submission_started()
-            # Drop room-history events buffered during page load. Attribution below
-            # still requires the ID observed in this click's outgoing DDP method.
-            sent_frames.clear()
-            received_frames.clear()
-            composer.press("Enter", timeout=0)
-
-            native_message = None
-            while True:
-                requests_found = self._ddp_send_requests(sent_frames, room_id, message_text)
-                if len(requests_found) > 1:
-                    raise RuntimeError("ROCKETCHAT_BROWSER_SEND_OUTCOME_UNCERTAIN")
-                if requests_found:
-                    send_request = requests_found[0]
-                    for raw_frame in received_frames:
-                        for candidate in self._message_from_frame(raw_frame):
-                            author = candidate.get("u") or {}
-                            if (candidate.get("_id") == send_request["message_id"]
-                                    and candidate.get("rid") == room_id
-                                    and isinstance(author, dict) and author.get("_id") == expected_author
-                                    and candidate.get("msg") == message_text):
-                                native_message = candidate
-                                break
-                        if native_message is not None:
-                            break
-                    acknowledged = self._ddp_send_acknowledged(
-                        received_frames, send_request["rpc_id"], send_request["message_id"])
-                else:
-                    acknowledged = False
-                if native_message is not None and acknowledged:
-                    break
-                try:
-                    # Listener buffering plus Playwright's event wait avoids polling
-                    # and leaves the acknowledged send pending until frames arrive.
-                    socket.wait_for_event("framereceived", timeout=0)
-                except Exception as error:
-                    raise RuntimeError("ROCKETCHAT_BROWSER_SEND_OUTCOME_UNCERTAIN") from error
-            native_id = native_message["_id"]
-            if on_message_id_captured is not None:
-                on_message_id_captured(native_id)
-            confirmed = self._message_by_id(base, headers, native_id, room_id,
-                                            expected_author, message_text)
-            if confirmed is None:
-                raise RuntimeError("ROCKETCHAT_MESSAGE_API_NOT_CONFIRMED")
-            return self._receipt(fixture, room, confirmed)
-
-    def confirm_message(self, fixture: dict[str, Any], credentials: dict[str, str],
-                        message_id: str | None, message_text: str,
-        submission_started_at: str | None) -> dict[str, str | None] | None:
-        """Read-only recovery check; uncertain browser sends are never resent."""
-        box = fixture["employee_mailbox"]
-        base = box["rocketchat_base_url"].rstrip("/") + "/"
-        author_id = box["rocketchat_expected_user_id"]
-        with self._browser_provider().open_for_employee_email(box["address"]) as page:
-            headers = self._browser_auth(page, base, credentials, author_id)
-            room_id = box["rocketchat_room_id"]
-            room = self._room(base, headers, room_id)
-            if message_id:
-                message = self._message_by_id(base, headers, message_id, room_id, author_id, message_text)
-            else:
-                # Text/time matches can identify an older identical message. Without
-                # the browser-generated DDP ID persisted before failure, recovery is
-                # deliberately inconclusive and the attempt is never resent.
-                return None
-            return self._receipt(fixture, room, message) if message else None
 
 class ScenarioStore:
     def __init__(self, database: Path):
@@ -1046,9 +779,8 @@ class ScenarioStore:
                     if row["actors"] == "{}":
                         connection.execute("UPDATE scenario_runs SET actors=? WHERE id=? AND actors='{}'", (actors_json, row["id"]))
                     return str(row["id"])
-        run_id = str(uuid.uuid4())
-        now = _now()
-        with self.transaction() as connection:
+            run_id = str(uuid.uuid4())
+            now = _now()
             connection.execute(
                 "INSERT INTO scenario_runs(id,scenario_id,fixture_version,environment_version,fixture_hash,actors,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
                 (run_id, fixture["scenario_id"], fixture["fixture_version"], fixture["environment_version"], fixture_hash, actors_json, "RUNNING", now, now),
@@ -1070,7 +802,7 @@ class ScenarioStore:
                                (_now(), run_id, owner))
 
     def step(self, run_id: str, step_key: str) -> dict[str, Any] | None:
-        with self.transaction() as connection:
+        with closing(self.connection()) as connection:
             row = connection.execute("SELECT * FROM scenario_steps WHERE run_id=? AND step_key=?", (run_id, step_key)).fetchone()
             return _scenario_step_dict(row) if row else None
 
@@ -1088,8 +820,8 @@ class ScenarioStore:
         with self.transaction() as connection:
             connection.execute(
                 "INSERT INTO scenario_steps(run_id,step_key,step,status,external_id,submission_started_at,delivery_method,submission_started,mailbox_uid,mailbox_uidvalidity,webmail_url,reference,content_hash,error_type,room_id,thread_id,browser_url,mention_account_id,file_references_json,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
-                "ON CONFLICT(run_id,step_key) DO UPDATE SET step=excluded.step,status=excluded.status,external_id=excluded.external_id,submission_started_at=COALESCE(excluded.submission_started_at,scenario_steps.submission_started_at),delivery_method=COALESCE(excluded.delivery_method,scenario_steps.delivery_method),submission_started=MAX(excluded.submission_started,scenario_steps.submission_started),mailbox_uid=excluded.mailbox_uid,mailbox_uidvalidity=excluded.mailbox_uidvalidity,webmail_url=excluded.webmail_url,reference=excluded.reference,content_hash=excluded.content_hash,error_type=excluded.error_type,room_id=COALESCE(excluded.room_id,scenario_steps.room_id),thread_id=COALESCE(excluded.thread_id,scenario_steps.thread_id),browser_url=COALESCE(excluded.browser_url,scenario_steps.browser_url),mention_account_id=COALESCE(excluded.mention_account_id,scenario_steps.mention_account_id),file_references_json=excluded.file_references_json,updated_at=excluded.updated_at",
-                (run_id, step_key, step, status, external_id, submission_started_at, delivery_method, int(submission_started), mailbox_uid, mailbox_uidvalidity, webmail_url, reference, content_hash, error_type, room_id, thread_id, browser_url, mention_account_id, file_references_json, _now()),
+                "ON CONFLICT(run_id,step_key) DO UPDATE SET step=excluded.step,status=excluded.status,external_id=excluded.external_id,submission_started_at=COALESCE(excluded.submission_started_at,scenario_steps.submission_started_at),delivery_method=COALESCE(excluded.delivery_method,scenario_steps.delivery_method),submission_started=MAX(excluded.submission_started,scenario_steps.submission_started),mailbox_uid=excluded.mailbox_uid,mailbox_uidvalidity=excluded.mailbox_uidvalidity,webmail_url=excluded.webmail_url,reference=excluded.reference,content_hash=excluded.content_hash,error_type=excluded.error_type,room_id=COALESCE(excluded.room_id,scenario_steps.room_id),thread_id=COALESCE(excluded.thread_id,scenario_steps.thread_id),browser_url=COALESCE(excluded.browser_url,scenario_steps.browser_url),mention_account_id=COALESCE(excluded.mention_account_id,scenario_steps.mention_account_id),file_references_json=excluded.file_references_json,updated_at=excluded.updated_at WHERE scenario_steps.status NOT IN (?,?,?)",
+                (run_id, step_key, step, status, external_id, submission_started_at, delivery_method, int(submission_started), mailbox_uid, mailbox_uidvalidity, webmail_url, reference, content_hash, error_type, room_id, thread_id, browser_url, mention_account_id, file_references_json, _now(), STEP_EMAIL_DELIVERED, STEP_EMAIL_FORWARDED, STEP_CHAT_POSTED),
             )
             connection.execute("UPDATE scenario_runs SET updated_at=? WHERE id=?", (_now(), run_id))
 
@@ -1097,7 +829,7 @@ class ScenarioStore:
         started_at = _now()
         with self.transaction() as connection:
             changed = connection.execute(
-                "UPDATE scenario_steps SET submission_started=1,submission_started_at=COALESCE(submission_started_at,?),updated_at=? WHERE run_id=? AND step_key=?",
+                "UPDATE scenario_steps SET submission_started=1,submission_started_at=COALESCE(submission_started_at,?),updated_at=? WHERE run_id=? AND step_key=? AND submission_started=0",
                 (started_at, started_at, run_id, step_key),
             ).rowcount
             if changed != 1:
@@ -1105,10 +837,10 @@ class ScenarioStore:
 
     def finish(self, run_id: str, status: str) -> None:
         with self.transaction() as connection:
-            connection.execute("UPDATE scenario_runs SET status=?,updated_at=? WHERE id=?", (status, _now(), run_id))
+            connection.execute("UPDATE scenario_runs SET status=?,updated_at=? WHERE id=? AND status!='COMPLETED'", (status, _now(), run_id))
 
     def inspect(self, run_id: str | None = None) -> list[dict[str, Any]]:
-        with self.transaction() as connection:
+        with closing(self.connection()) as connection:
             if run_id:
                 runs = connection.execute("SELECT * FROM scenario_runs WHERE id=?", (run_id,)).fetchall()
             else:
@@ -1218,78 +950,25 @@ def _forward(
         bool(current["submission_started"]) or current["delivery_method"] is None
     )
     if needs_reconciliation:
-        # Reconcile smtp4dev by Message-ID before any retry; SMTP itself is not idempotent.
-        try:
-            found = _confirm_smtp4dev_until(mail, fixture, forward_id)
-        except Exception as error:
-            store.record(run_id, key, STEP_FAILED, STEP_FAILED, external_id=forward_id,
-                         delivery_method="SMTP_SUBMISSION", submission_started=True,
-                         reference="configured-viv-route",
-                         content_hash=digest, error_type=type(error).__name__,
-                         file_references=file_references)
-            raise RuntimeError("Forwarding delivery needs smtp4dev reconciliation") from error
-        if found:
-            store.record(run_id, key, STEP_EMAIL_FORWARDED, STEP_EMAIL_FORWARDED, external_id=forward_id,
-                         delivery_method="SMTP_SUBMISSION", submission_started=True,
-                         mailbox_uid=found["mailbox_uid"], webmail_url=found.get("webmail_url"),
-                         reference=found["reference"], content_hash=digest,
-                         file_references=file_references)
-            return
-        store.record(run_id, key, STEP_FAILED, STEP_FAILED, external_id=forward_id,
-                     delivery_method="SMTP_SUBMISSION", submission_started=True,
-                     reference="configured-viv-route",
-                     content_hash=digest, error_type="Smtp4devMessageNotFound",
-                     file_references=file_references)
-        raise RuntimeError("Forwarding SMTP outcome is uncertain; smtp4dev did not confirm the Message-ID")
+        raise RuntimeError("Forwarding SMTP acceptance is uncertain; do not resend without acceptance evidence")
     store.record(run_id, key, STEP_EMAIL_FORWARDED, "IN_PROGRESS", external_id=forward_id,
                  delivery_method="SMTP_SUBMISSION", reference="configured-viv-route", content_hash=digest,
                  file_references=file_references)
     try:
         mail.forward_message(fixture, credentials, message, digest,
                              lambda: store.mark_submission_started(run_id, key))
-        confirmed = _confirm_smtp4dev_until(mail, fixture, forward_id)
     except Exception as error:
         store.record(run_id, key, STEP_FAILED, STEP_FAILED, external_id=forward_id,
                      delivery_method="SMTP_SUBMISSION", reference="configured-viv-route",
                      content_hash=digest, error_type=type(error).__name__,
                      file_references=file_references)
         raise RuntimeError("Forwarding SMTP outcome is uncertain; reconcile before retry") from error
-    if not confirmed:
-        store.record(run_id, key, STEP_FAILED, STEP_FAILED, external_id=forward_id,
-                     delivery_method="SMTP_SUBMISSION", submission_started=True,
-                     reference="configured-viv-route",
-                     content_hash=digest, error_type="Smtp4devMessageNotFound",
-                     file_references=file_references)
-        raise RuntimeError("Forwarding SMTP outcome is uncertain; smtp4dev did not confirm the Message-ID")
     store.record(run_id, key, STEP_EMAIL_FORWARDED, STEP_EMAIL_FORWARDED, external_id=forward_id,
                  delivery_method="SMTP_SUBMISSION", submission_started=True,
-                 mailbox_uid=confirmed["mailbox_uid"],
-                 webmail_url=confirmed.get("webmail_url"),
-                 reference=confirmed["reference"], content_hash=digest,
+                 reference="SMTP accepted", content_hash=digest,
                  file_references=file_references)
 
 
-def _confirm_smtp4dev_until(mail: Any, fixture: dict[str, Any], message_id: str) -> dict[str, str] | None:
-    """Bounded API condition check for smtp4dev's captured message receipt."""
-    deadline = time.monotonic() + float(fixture.get("confirm_timeout_seconds", 30))
-    while True:
-        found = mail.confirm_smtp4dev(fixture, message_id)
-        if found:
-            return found
-        if time.monotonic() >= deadline:
-            return None
-
-
-@contextmanager
-def _exclusive_execution_lock(database: Path):
-    lock_path = Path(str(database) + ".scenario.lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with closing(lock_path.open("a+b")) as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _error_type_chain(error: BaseException) -> list[str]:
@@ -1317,133 +996,132 @@ def run_scenario(fixture_path: str | Path, credentials_path: str | Path, databas
     chat = chat_transport or RealChatTransport() if fixture.get("post_chat") else None
     store = ScenarioStore(Path(database))
     fixture_hash = _fixture_hash(fixture, owncloud_files)
-    with _exclusive_execution_lock(Path(database)):
-        run_id = store.get_or_create_run(fixture, fixture_hash, run_id, new_run)
-        owner = str(uuid.uuid4())
-        store.claim(run_id, owner, fixture_hash)
-        try:
-            _deliver_inbound(
-                store, run_id, fixture, credentials["mail"], mail, owncloud_files
-            )
-            if fixture.get("forward_to_viv"):
-                _forward(store, run_id, fixture, credentials["mail"], mail, owncloud_files)
-            if fixture.get("post_chat"):
-                chat_attempt_id = "scenario-" + _hash((run_id + ":chat").encode())[:32]
-                mail_step = store.step(run_id, "mail-delivery")
-                chat_fixture = dict(fixture)
-                chat_fixture["chat_message"] = _chat_text_with_mail_reference(fixture["chat_message"], mail_step or {})
-                chat_hash = _hash(chat_fixture["chat_message"].encode())
-                current = store.step(run_id, "chat-post")
-                if not current or current["status"] != STEP_CHAT_POSTED:
-                    file_references = [reference.public_dict() for reference, _payload in owncloud_files]
-                    may_have_submitted = bool(current and current["submission_started"]) or bool(
-                        current and current["delivery_method"] == "ROCKETCHAT_API")
-                    if may_have_submitted:
+    run_id = store.get_or_create_run(fixture, fixture_hash, run_id, new_run)
+    owner = str(uuid.uuid4())
+    store.claim(run_id, owner, fixture_hash)
+    try:
+        _deliver_inbound(
+            store, run_id, fixture, credentials["mail"], mail, owncloud_files
+        )
+        if fixture.get("forward_to_viv"):
+            _forward(store, run_id, fixture, credentials["mail"], mail, owncloud_files)
+        if fixture.get("post_chat"):
+            chat_attempt_id = "scenario-" + _hash((run_id + ":chat").encode())[:32]
+            mail_step = store.step(run_id, "mail-delivery")
+            chat_fixture = dict(fixture)
+            chat_fixture["chat_message"] = _chat_text_with_mail_reference(fixture["chat_message"], mail_step or {})
+            chat_hash = _hash(chat_fixture["chat_message"].encode())
+            current = store.step(run_id, "chat-post")
+            if not current or current["status"] != STEP_CHAT_POSTED:
+                file_references = [reference.public_dict() for reference, _payload in owncloud_files]
+                may_have_submitted = bool(current and current["submission_started"]) or bool(
+                    current and current["delivery_method"] == "ROCKETCHAT_API")
+                if may_have_submitted:
+                    store.record(run_id, "chat-post", STEP_FAILED, STEP_FAILED,
+                                 external_id=current.get("external_id"),
+                                 delivery_method=current.get("delivery_method") or "ROCKETCHAT_BROWSER",
+                                 submission_started=bool(current["submission_started"]),
+                                 submission_started_at=current.get("submission_started_at"),
+                                 room_id=fixture["employee_mailbox"]["rocketchat_room_id"],
+                                 mention_account_id=fixture.get("mention_account_id"),
+                                 reference="employee-rocketchat", content_hash=chat_hash,
+                                 error_type="ChatBrowserOutcomeUncertain",
+                                 file_references=file_references)
+                    try:
+                        receipt = chat.confirm_message(
+                            chat_fixture, credentials["chat"], current.get("external_id"),
+                            chat_fixture["chat_message"], current.get("submission_started_at"),
+                        )
+                    except Exception as error:
+                        latest = store.step(run_id, "chat-post") or current
                         store.record(run_id, "chat-post", STEP_FAILED, STEP_FAILED,
-                                     external_id=current.get("external_id"),
-                                     delivery_method=current.get("delivery_method") or "ROCKETCHAT_BROWSER",
-                                     submission_started=bool(current["submission_started"]),
-                                     submission_started_at=current.get("submission_started_at"),
-                                     room_id=fixture["employee_mailbox"]["rocketchat_room_id"],
-                                     mention_account_id=fixture.get("mention_account_id"),
-                                     reference="employee-rocketchat", content_hash=chat_hash,
-                                     error_type="ChatBrowserOutcomeUncertain",
+                                     external_id=latest.get("external_id"),
+                                     delivery_method=latest.get("delivery_method"),
+                                     submission_started=bool(latest["submission_started"]),
+                                     submission_started_at=latest.get("submission_started_at"),
+                                     content_hash=chat_hash, error_type=type(error).__name__,
                                      file_references=file_references)
-                        try:
-                            receipt = chat.confirm_message(
-                                chat_fixture, credentials["chat"], current.get("external_id"),
-                                chat_fixture["chat_message"], current.get("submission_started_at"),
-                            )
-                        except Exception as error:
-                            latest = store.step(run_id, "chat-post") or current
-                            store.record(run_id, "chat-post", STEP_FAILED, STEP_FAILED,
-                                         external_id=latest.get("external_id"),
-                                         delivery_method=latest.get("delivery_method"),
-                                         submission_started=bool(latest["submission_started"]),
-                                         submission_started_at=latest.get("submission_started_at"),
-                                         content_hash=chat_hash, error_type=type(error).__name__,
-                                         file_references=file_references)
-                            raise RuntimeError("Rocket.Chat browser send needs read-only reconciliation") from error
-                        if not receipt:
-                            latest = store.step(run_id, "chat-post") or current
-                            store.record(run_id, "chat-post", STEP_FAILED, STEP_FAILED,
-                                         external_id=latest.get("external_id"),
-                                         delivery_method=latest.get("delivery_method"),
-                                         submission_started=bool(latest["submission_started"]),
-                                         submission_started_at=latest.get("submission_started_at"),
-                                         content_hash=chat_hash, error_type="ChatBrowserMessageNotFound",
-                                         file_references=file_references)
-                            raise RuntimeError("Rocket.Chat browser send outcome is uncertain; it was not resent")
-                        store.record(run_id, "chat-post", STEP_CHAT_POSTED, STEP_CHAT_POSTED,
-                                     external_id=receipt["message_id"], delivery_method="ROCKETCHAT_BROWSER",
-                                     submission_started=True,
-                                     submission_started_at=current.get("submission_started_at"),
-                                     room_id=receipt["room_id"], thread_id=receipt.get("thread_id"),
-                                     browser_url=receipt.get("browser_url"),
-                                     mention_account_id=receipt.get("mention_account_id"),
-                                     reference="employee-rocketchat", content_hash=chat_hash,
+                        raise RuntimeError("Rocket.Chat browser send needs read-only reconciliation") from error
+                    if not receipt:
+                        latest = store.step(run_id, "chat-post") or current
+                        store.record(run_id, "chat-post", STEP_FAILED, STEP_FAILED,
+                                     external_id=latest.get("external_id"),
+                                     delivery_method=latest.get("delivery_method"),
+                                     submission_started=bool(latest["submission_started"]),
+                                     submission_started_at=latest.get("submission_started_at"),
+                                     content_hash=chat_hash, error_type="ChatBrowserMessageNotFound",
                                      file_references=file_references)
-                    else:
+                        raise RuntimeError("Rocket.Chat browser send outcome is uncertain; it was not resent")
+                    store.record(run_id, "chat-post", STEP_CHAT_POSTED, STEP_CHAT_POSTED,
+                                 external_id=receipt["message_id"], delivery_method="ROCKETCHAT_BROWSER",
+                                 submission_started=True,
+                                 submission_started_at=current.get("submission_started_at"),
+                                 room_id=receipt["room_id"], thread_id=receipt.get("thread_id"),
+                                 browser_url=receipt.get("browser_url"),
+                                 mention_account_id=receipt.get("mention_account_id"),
+                                 reference="employee-rocketchat", content_hash=chat_hash,
+                                 file_references=file_references)
+                else:
+                    store.record(run_id, "chat-post", STEP_CHAT_POSTED, "IN_PROGRESS",
+                                 delivery_method="ROCKETCHAT_BROWSER",
+                                 room_id=fixture["employee_mailbox"]["rocketchat_room_id"],
+                                 mention_account_id=fixture.get("mention_account_id"),
+                                 reference="employee-rocketchat", content_hash=chat_hash,
+                                 file_references=file_references)
+
+                    def mark_chat_submission_started() -> None:
+                        store.mark_submission_started(run_id, "chat-post")
+
+                    def record_native_message_id(message_id: str) -> None:
+                        latest = store.step(run_id, "chat-post")
                         store.record(run_id, "chat-post", STEP_CHAT_POSTED, "IN_PROGRESS",
-                                     delivery_method="ROCKETCHAT_BROWSER",
+                                     external_id=message_id, delivery_method="ROCKETCHAT_BROWSER",
+                                     submission_started=True,
+                                     submission_started_at=(latest or {}).get("submission_started_at"),
                                      room_id=fixture["employee_mailbox"]["rocketchat_room_id"],
                                      mention_account_id=fixture.get("mention_account_id"),
                                      reference="employee-rocketchat", content_hash=chat_hash,
                                      file_references=file_references)
 
-                        def mark_chat_submission_started() -> None:
-                            store.mark_submission_started(run_id, "chat-post")
-
-                        def record_native_message_id(message_id: str) -> None:
-                            latest = store.step(run_id, "chat-post")
-                            store.record(run_id, "chat-post", STEP_CHAT_POSTED, "IN_PROGRESS",
-                                         external_id=message_id, delivery_method="ROCKETCHAT_BROWSER",
-                                         submission_started=True,
-                                         submission_started_at=(latest or {}).get("submission_started_at"),
-                                         room_id=fixture["employee_mailbox"]["rocketchat_room_id"],
-                                         mention_account_id=fixture.get("mention_account_id"),
-                                         reference="employee-rocketchat", content_hash=chat_hash,
-                                         file_references=file_references)
-
-                        try:
-                            receipt = chat.post(
-                                chat_fixture, credentials["chat"], chat_attempt_id,
-                                on_submission_started=mark_chat_submission_started,
-                                on_message_id_captured=record_native_message_id,
-                            )
-                        except Exception as error:
-                            latest = store.step(run_id, "chat-post") or {}
-                            store.record(run_id, "chat-post", STEP_FAILED, STEP_FAILED,
-                                         external_id=latest.get("external_id"),
-                                         delivery_method="ROCKETCHAT_BROWSER",
-                                         submission_started=bool(latest.get("submission_started")),
-                                         submission_started_at=latest.get("submission_started_at"),
-                                         room_id=fixture["employee_mailbox"]["rocketchat_room_id"],
-                                         mention_account_id=fixture.get("mention_account_id"),
-                                         reference="employee-rocketchat", content_hash=chat_hash,
-                                         error_type=type(error).__name__,
-                                         file_references=file_references)
-                            raise RuntimeError("Rocket.Chat browser post was not confirmed") from error
-                        store.record(run_id, "chat-post", STEP_CHAT_POSTED, STEP_CHAT_POSTED,
-                                     external_id=receipt["message_id"], delivery_method="ROCKETCHAT_BROWSER",
-                                     submission_started=True,
-                                     submission_started_at=(store.step(run_id, "chat-post") or {}).get("submission_started_at"),
-                                     room_id=receipt["room_id"], thread_id=receipt.get("thread_id"),
-                                     browser_url=receipt.get("browser_url"),
-                                     mention_account_id=receipt.get("mention_account_id"),
+                    try:
+                        receipt = chat.post(
+                            chat_fixture, credentials["chat"], chat_attempt_id,
+                            on_submission_started=mark_chat_submission_started,
+                            on_message_id_captured=record_native_message_id,
+                        )
+                    except Exception as error:
+                        latest = store.step(run_id, "chat-post") or {}
+                        store.record(run_id, "chat-post", STEP_FAILED, STEP_FAILED,
+                                     external_id=latest.get("external_id"),
+                                     delivery_method="ROCKETCHAT_BROWSER",
+                                     submission_started=bool(latest.get("submission_started")),
+                                     submission_started_at=latest.get("submission_started_at"),
+                                     room_id=fixture["employee_mailbox"]["rocketchat_room_id"],
+                                     mention_account_id=fixture.get("mention_account_id"),
                                      reference="employee-rocketchat", content_hash=chat_hash,
+                                     error_type=type(error).__name__,
                                      file_references=file_references)
-            store.finish(run_id, "COMPLETED")
-        except Exception as error:
-            store.finish(run_id, "FAILED")
-            chain = _error_type_chain(error)
-            logging.error("Scenario failed run_id=%s exception_types=%s", run_id, ">".join(chain))
-            result = store.inspect(run_id)[0]
-            result["run_error_types"] = chain
-            return result
-        finally:
-            store.release(run_id, owner)
-        return store.inspect(run_id)[0]
+                        raise RuntimeError("Rocket.Chat browser post was not confirmed") from error
+                    store.record(run_id, "chat-post", STEP_CHAT_POSTED, STEP_CHAT_POSTED,
+                                 external_id=receipt["message_id"], delivery_method="ROCKETCHAT_BROWSER",
+                                 submission_started=True,
+                                 submission_started_at=(store.step(run_id, "chat-post") or {}).get("submission_started_at"),
+                                 room_id=receipt["room_id"], thread_id=receipt.get("thread_id"),
+                                 browser_url=receipt.get("browser_url"),
+                                 mention_account_id=receipt.get("mention_account_id"),
+                                 reference="employee-rocketchat", content_hash=chat_hash,
+                                 file_references=file_references)
+        store.finish(run_id, "COMPLETED")
+    except Exception as error:
+        store.finish(run_id, "FAILED")
+        chain = _error_type_chain(error)
+        logging.error("Scenario failed run_id=%s exception_types=%s", run_id, ">".join(chain))
+        result = store.inspect(run_id)[0]
+        result["run_error_types"] = chain
+        return result
+    finally:
+        store.release(run_id, owner)
+    return store.inspect(run_id)[0]
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -2,17 +2,15 @@ SHELL = /bin/bash
 
 HOSTNAME?=localhost
 FILE_SERVER_PORT?=8081
-GITLAB_PORT?=8929
 PLANE_DOCKER_FILE_PATH=./plane/plane-app/docker-compose.yaml
 PLANE_DOCKER_ENV_PATH=./plane/plane-app/plane.env
 
-.PHONY: init start-all stop-all start-file-server stop-file-server start-gitlab stop-gitlab rebuild-gitlab reset-gitlab \
+.PHONY: init start-all stop-all start-file-server stop-file-server \
 		start-owncloud stop-owncloud reset-owncloud \
 		start-rocketchat stop-rocketchat rm-rocketchat rm-rocketchat-volume reset-rocketchat backup-rocketchat
 
 init:
 	$(eval export HOSTNAME)
-	$(eval export GITLAB_PORT)
 	@echo "Initialization done."
 
 start-all: init
@@ -25,45 +23,6 @@ stop-all: init
 	docker compose -p theagentcompany down
 	make rm-rocketchat-volume
 	make stop-api-server
-
-# GitLab
-start-gitlab: init
-	docker compose -p theagentcompany up gitlab -d
-
-stop-gitlab:
-	docker compose -p theagentcompany stop gitlab
-
-# rebuild destroys the gitlab image and start from scratch
-# useful when you have new data to bake into the image
-# Note: this will take at least 10 hours to build since we have quite a few
-# large repositories to bake into the image
-rebuild-gitlab: init
-	@echo "stopping existing gitlab instance..."
-	docker compose -p theagentcompany stop gitlab
-	@echo "remove gitlab container..."
-	docker compose -p theagentcompany rm gitlab
-	@if docker image inspect servers-gitlab >/dev/null 2>&1; then \
-		echo "Image servers-gitlab exists. Removing..."; \
-		docker image rm servers-gitlab; \
-	else \
-		echo "Image servers-gitlab does not exist. Skipping removal."; \
-	fi
-	@echo "rebuild gitlab from clean state..."
-	@echo "Before building, please make sure you have modified docker-compose.yml according to the instructions in the comments."
-	docker compose -p theagentcompany build --no-cache gitlab
-
-# reset stops the gitlab container, destroys and starts again
-# any changes to gitlab will disappear, and the container will start
-# in a clean state (with pre-populated data)
-reset-gitlab: init
-	@echo "stopping existing gitlab instance..."
-	docker compose -p theagentcompany stop gitlab
-	@echo "remove gitlab container..."
-	docker compose -p theagentcompany rm -f gitlab
-	@echo "start gitlab and wait for its healthcheck..."
-	docker compose -p theagentcompany up --wait --wait-timeout 900 -d gitlab
-	@echo "renew expired benchmark root-token..."
-	docker compose -p theagentcompany exec -T gitlab gitlab-rails runner 'token = User.find_by!(username: "root").personal_access_tokens.find_by!(name: "root-token"); token.update!(expires_at: 365.days.from_now) if token.expired?'
 
 # RocketChat
 start-rocketchat: init
@@ -185,7 +144,6 @@ pull-image:
 	docker pull ghcr.io/theagentcompany/servers-api-server:1.0.0
 	docker pull ghcr.io/theagentcompany/servers-rocketchat-npc-data-population:1.0.0
 	docker pull ghcr.io/theagentcompany/servers-owncloud:1.0.0
-	docker pull ghcr.io/theagentcompany/servers-gitlab:1.0.0
 	docker pull ghcr.io/theagentcompany/servers-plane-admin:1.0.0
 	docker pull ghcr.io/theagentcompany/servers-plane-frontend:1.0.0
 	docker pull ghcr.io/theagentcompany/servers-plane-backend:1.0.0
@@ -230,7 +188,7 @@ health-check:
 	@echo "api-server is running on port 2999!"
 
 	@echo "Starting health checks..."
-	@for service in rocketchat owncloud gitlab plane; do \
+	@for service in rocketchat owncloud plane; do \
 		until curl -s -o /dev/null -w "%{http_code}" localhost:2999/api/healthcheck/$$service | grep -q "200"; do \
 			echo "Waiting for $$service to be ready..."; \
 			sleep 10; \

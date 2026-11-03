@@ -90,6 +90,8 @@ class CaddyEmployeeDesktopProxy:
             else:
                 existing = found
                 self._validate_existing_route(existing, employee_id)
+                if existing == route:
+                    return f"https://{self.authority}{self.subfolder_for(employee_id)}"
                 path = f"/id/{quote(route_id, safe='')}"
                 status, _, _ = self._request("PATCH", path, self._headers(etag), self._json(route))
             if status == 412:
@@ -98,6 +100,27 @@ class CaddyEmployeeDesktopProxy:
             if status < 200 or status >= 300:
                 raise EmployeeDesktopProxyError(f"Caddy rejected employee route update (HTTP {status})")
             return f"https://{self.authority}{self.subfolder_for(employee_id)}"
+
+    def existing_url_for(self, employee_id: str, expected_container_ip: str) -> str | None:
+        """Return the URL only when the registered route still targets this employee container."""
+        self._validate_employee_id(employee_id)
+        expected_ip = self._validate_container_ip(expected_container_ip)
+        servers, _ = self._get_servers()
+        self._ensure_hostname(servers)
+        server_name = self._find_server(servers)
+        route = self._find_route(servers[server_name], self._route_id(employee_id))
+        if route is None:
+            return None
+        if not self._validate_existing_route(route, employee_id, expected_ip):
+            return None
+        handler = route["handle"][0]
+        authorization = (handler.get("headers", {}).get("request", {})
+                         .get("set", {}).get("Authorization"))
+        if (not isinstance(authorization, list) or len(authorization) != 1
+                or not isinstance(authorization[0], str)
+                or not authorization[0].startswith("Basic ")):
+            raise EmployeeDesktopProxyError("existing Caddy employee route is missing its upstream authorization")
+        return f"https://{self.authority}{self.subfolder_for(employee_id)}"
 
     def host_mappings(self) -> list[tuple[str, str]]:
         """Map exact Caddy-hosted names to the listener address reachable by Docker.
@@ -395,7 +418,9 @@ class CaddyEmployeeDesktopProxy:
                     return found
         return None
 
-    def _validate_existing_route(self, route: dict[str, Any], employee_id: str) -> None:
+    def _validate_existing_route(
+        self, route: dict[str, Any], employee_id: str, expected_container_ip: str | None = None,
+    ) -> bool:
         expected_prefix = self.subfolder_for(employee_id).rstrip("/")
         matchers = route.get("match")
         handlers = route.get("handle")
@@ -417,6 +442,8 @@ class CaddyEmployeeDesktopProxy:
             valid_port = False
         if not valid_port:
             raise EmployeeDesktopProxyError("existing Caddy employee route upstream is not a valid desktop container address")
+        upstream_ip = self._validate_container_ip(parsed.hostname)
+        return expected_container_ip is None or upstream_ip == expected_container_ip
 
     @staticmethod
     def _validate_container_ip(value: str) -> str:

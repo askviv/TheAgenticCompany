@@ -99,10 +99,6 @@
     "summary": "Use the provided filing-date chart to identify Priya Sharma’s category date and clarify missing details with her.",
     "description": "Review the filing-date chart in Human Resources/Immigration. Identify the date of filing for Priya Sharma’s category and country of birth, using information she provides if needed. Tell Priya the applicable date."
   },
-  "hr-internal-tooling-slides": {
-    "summary": "Create an onboarding presentation about TAC and its main tools, then share it with the HR Manager for review.",
-    "description": "Create Internal_Tooling_Training.pptx in Human Resources. Include a title slide and a TAC Overview based on TAC_overview.md. Cover Rocket.Chat and its default, departmental, and project channels; GitLab’s collaboration, planning, and issue features and company repositories; the folders under Documents in OwnCloud; and Plane’s project features and analytics. Use clean business-style slides with readable text. Share the presentation with the HR Manager identified in Personnell_File.odt."
-  },
   "hr-make-slides-introduce-leadership": {
     "summary": "Prepare a five-slide leadership introduction for prospective investors and notify the HR Manager when it is ready.",
     "description": "Use the Rocket.Chat directory to identify the CTO, Sales Director, Marketing Manager, Finance Director, and HR Manager. Create leadership_intro.pptx with one slide per leader, in that order, including each person’s name, position, and introduction. Tell the HR Manager when the deck is ready."

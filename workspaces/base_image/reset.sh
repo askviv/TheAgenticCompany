@@ -50,7 +50,7 @@ wait_for_services() {
 }
 
 # Check and reset each service
-for service in rocketchat plane gitlab owncloud; do
+for service in rocketchat plane owncloud; do
     if grep -q "$service" /utils/dependencies.yml; then
         echo "Resetting $service..."
         curl \

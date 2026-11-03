@@ -155,10 +155,27 @@ class CompanyFeedbackRuntime:
                 private_payload_json TEXT NOT NULL,
                 status TEXT NOT NULL CHECK(status IN ('pending','submitting','uncertain','delivered')),
                 submission_started INTEGER NOT NULL DEFAULT 0 CHECK(submission_started IN (0,1)),
+                submission_started_at TEXT,
+                sent_uidvalidity TEXT,
+                sent_uid_next INTEGER,
+                native_message_id TEXT,
                 error_type TEXT,
                 receipt_json TEXT,
                 updated_at TEXT NOT NULL
             )""")
+            outbox_columns = {row[1] for row in db.execute(
+                "PRAGMA table_info(company_native_message_outbox)"
+            )}
+            for name, declaration in (
+                ("submission_started_at", "TEXT"), ("sent_uidvalidity", "TEXT"),
+                ("sent_uid_next", "INTEGER"), ("native_message_id", "TEXT"),
+            ):
+                if name not in outbox_columns:
+                    db.execute(f"ALTER TABLE company_native_message_outbox ADD COLUMN {name} {declaration}")
+            db.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS company_native_outbox_native_message_id_idx "
+                "ON company_native_message_outbox(native_message_id) WHERE native_message_id IS NOT NULL"
+            )
             db.execute("""CREATE TABLE IF NOT EXISTS company_coffee_mail_cursors(
                 mapping_id TEXT NOT NULL,
                 mailbox_actor_id TEXT NOT NULL,
@@ -276,7 +293,7 @@ class CompanyFeedbackRuntime:
         self.observe_mail()
 
     def _refresh_evidence(self):
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             prior = db.execute(
                 "SELECT result_json FROM company_feedback_runtime_reports WHERE provider='native_evidence_cursor'"
             ).fetchone()
@@ -432,7 +449,7 @@ class CompanyFeedbackRuntime:
             )
 
     def report(self, experiment_id=None):
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             lifecycle = {
                 row["provider"]: json.loads(row["result_json"])
                 for row in db.execute(
@@ -957,7 +974,7 @@ class CompanyFeedbackRuntime:
         return {"source_gaps": native.get("source_gaps", []), "evaluation": evaluation}
 
     def _link_issue_threads(self):
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             if not db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='company_issue_handoffs'"
             ).fetchone():
@@ -981,7 +998,7 @@ class CompanyFeedbackRuntime:
                         self.pipeline.link_message(mapping.mapping_id, message_id)
 
     def _mail_evidence_exists(self, message_id, scope="mail"):
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             return (
                 db.execute(
                     "SELECT 1 FROM company_evidence WHERE evidence_id=?",
@@ -1065,7 +1082,7 @@ class CompanyFeedbackRuntime:
         # The background provider may acknowledge its cursor once source events
         # are durably handed off. Replay only private outbox rows that have not
         # reached a recipient receipt, reconstructing from the frozen payload.
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             pending_rows = [dict(row) for row in db.execute(
                 "SELECT * FROM company_native_message_outbox WHERE status IN ('pending','submitting','uncertain') ORDER BY source_event_id"
             )]
@@ -1100,7 +1117,7 @@ class CompanyFeedbackRuntime:
         # Source events are the write-ahead input. If planning failed before an
         # SMTP outbox row existed, retry that exact persisted event on the next
         # mail wake. Delivered outbox rows are terminal and are never resubmitted.
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             saved_outbox_rows = [dict(row) for row in db.execute(
                 "SELECT * FROM company_native_message_outbox ORDER BY source_event_id"
             )]
@@ -1140,7 +1157,7 @@ class CompanyFeedbackRuntime:
                 )
         # Keep financial-attribution gaps visible after the source message has
         # been delivered; an empty new tick must not erase unresolved history.
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             delivered_unmapped = [dict(row) for row in db.execute(
                 "SELECT source_event_id,message_id,private_payload_json FROM company_native_message_outbox "
                 "WHERE status='delivered' AND mapping_id IS NULL ORDER BY source_event_id"
@@ -1288,7 +1305,7 @@ class CompanyFeedbackRuntime:
             # only when actor direction and source references identify one.
             if not source_refs:
                 return None
-            with self.store.transaction() as db:
+            with self.store.transaction(write=False) as db:
                 rows = [dict(row) for row in db.execute(
                     "SELECT a.native_actor_id,a.native_recipient_id,a.native_refs_json,a.mail_receipt_json,o.message_id "
                     "FROM company_coffee_thread_actions a JOIN company_native_message_outbox o "
@@ -1305,7 +1322,7 @@ class CompanyFeedbackRuntime:
                 ):
                     matches.append(row["message_id"])
             return matches[0] if len(set(matches)) == 1 else None
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             actions = [dict(row) for row in db.execute(
                 "SELECT evidence_id,translation_json,receipt_json FROM company_feedback_actions "
                 "WHERE mapping_id=? AND stage='reconciled' ORDER BY rowid", (mapping.mapping_id,),
@@ -1440,21 +1457,69 @@ class CompanyFeedbackRuntime:
                                 "UPDATE company_native_message_outbox SET mapping_id=?,updated_at=? WHERE source_event_id=?",
                                 (plan["mapping_id"], now, plan["source_id"]),
                             )
+            native_message_id = row["native_message_id"] if row is not None else None
             if status in {"submitting", "uncertain"}:
+                if native_message_id is None:
+                    native_message_id = self._mail_gateway.employee_sent_message_id(
+                        plan["sender"], plan["recipient"], payload["subject"], payload["body"],
+                        payload["in_reply_to"], row["submission_started_at"],
+                        sent_uidvalidity=row["sent_uidvalidity"],
+                        sent_uid_next=row["sent_uid_next"],
+                        business_time=payload.get("occurred_at"),
+                    )
+                    if native_message_id is not None:
+                        if not re.fullmatch(r"<[^<>\s]+>", native_message_id):
+                            raise ValueError("native Message-ID must be an RFC message identifier")
+                        with self.store.transaction() as db:
+                            db.execute(
+                                "UPDATE company_native_message_outbox SET native_message_id=? "
+                                "WHERE source_event_id=? AND native_message_id IS NULL",
+                                (native_message_id, plan["source_id"]),
+                            )
+                            persisted = db.execute(
+                                "SELECT native_message_id FROM company_native_message_outbox WHERE source_event_id=?",
+                                (plan["source_id"],),
+                            ).fetchone()
+                            if persisted is None or persisted["native_message_id"] != native_message_id:
+                                raise RuntimeError("native Message-ID mapping changed during Coffee mail recovery")
                 receipt = self._mail_gateway.find_receipt(
-                    plan["recipient"], plan["message_id"], payload["subject"],
+                    plan["recipient"], native_message_id or plan["message_id"], payload["subject"],
                     plan["run_id"], plan["generation"],
+                    native_message=native_message_id is not None,
                 )
                 if receipt is None:
                     raise MailDeliveryUnconfirmed("native Coffee message submission remains unconfirmed")
             elif status == "pending":
-                def submission_started():
+                def submission_started(sent_uidvalidity: str | None = None,
+                                       sent_uid_next: int | None = None):
+                    started_at = datetime.now(timezone.utc).isoformat()
+                    with self.store.transaction() as db:
+                        changed = db.execute(
+                            "UPDATE company_native_message_outbox SET status='submitting',submission_started=1,"
+                            "submission_started_at=?,sent_uidvalidity=?,sent_uid_next=?,updated_at=? "
+                            "WHERE source_event_id=? AND status='pending' AND submission_started=0",
+                            (started_at, sent_uidvalidity, sent_uid_next, started_at, plan["source_id"]),
+                        ).rowcount
+                        if changed != 1:
+                            raise RuntimeError("Coffee mail outbox submission boundary was not claimed")
+
+                def native_id_captured(message_id: str) -> None:
+                    nonlocal native_message_id
+                    if not re.fullmatch(r"<[^<>\s]+>", message_id):
+                        raise ValueError("native Message-ID must be an RFC message identifier")
                     with self.store.transaction() as db:
                         db.execute(
-                            "UPDATE company_native_message_outbox SET status='submitting',submission_started=1,updated_at=? "
-                            "WHERE source_event_id=? AND status='pending' AND submission_started=0",
-                            (datetime.now(timezone.utc).isoformat(), plan["source_id"]),
+                            "UPDATE company_native_message_outbox SET native_message_id=? "
+                            "WHERE source_event_id=? AND native_message_id IS NULL AND submission_started=1",
+                            (message_id, plan["source_id"]),
                         )
+                        persisted = db.execute(
+                            "SELECT native_message_id FROM company_native_message_outbox WHERE source_event_id=?",
+                            (plan["source_id"],),
+                        ).fetchone()
+                        if persisted is None or persisted["native_message_id"] != message_id:
+                            raise RuntimeError("native Message-ID mapping changed during Coffee mail submission")
+                    native_message_id = message_id
                 try:
                     receipt = self._mail_gateway.send(
                         plan["sender"], plan["recipient"], payload["subject"], payload["body"],
@@ -1462,7 +1527,10 @@ class CompanyFeedbackRuntime:
                         in_reply_to=payload["in_reply_to"],
                         business_time=payload.get("occurred_at"),
                         on_submission_started=submission_started,
+                        on_submission_snapshot=submission_started,
+                        on_native_message_id=native_id_captured,
                     )
+                    native_message_id = native_message_id or receipt.get("message_id")
                 except Exception as error:
                     with self.store.transaction() as db:
                         claimed = db.execute(
@@ -1477,7 +1545,7 @@ class CompanyFeedbackRuntime:
                         )
                     raise
             elif status == "delivered":
-                with self.store.transaction() as db:
+                with self.store.transaction(write=False) as db:
                     row = db.execute(
                         "SELECT receipt_json FROM company_native_message_outbox WHERE source_event_id=?",
                         (plan["source_id"],),
@@ -1486,13 +1554,13 @@ class CompanyFeedbackRuntime:
             else:
                 raise ValueError("CoffeeBench native email outbox has an invalid state")
             delivery = self._mail_gateway.inspect_issue_notification(
-                plan["recipient"], payload["message_id"]
+                plan["recipient"], native_message_id or payload["message_id"]
             )
             if delivery is None:
                 raise MailDeliveryUnconfirmed("native Coffee message has no confirmed Mailu recipient receipt")
             document = {
                 **plan["native_message"],
-                "message_id": payload["message_id"],
+                "message_id": native_message_id or payload["message_id"],
                 "subject": payload["subject"],
                 "body": payload["body"],
                 "from_actor_id": plan["sender"]["actor_id"],
@@ -1515,11 +1583,11 @@ class CompanyFeedbackRuntime:
                     event="email_reply", actor=plan["sender"]["actor_id"],
                     occurred_at=delivery["received_at"], company_time=plan["occurred_at"],
                     document=document, evidence_refs=[delivery["reference"]],
-                    message_id=payload["message_id"], recipient_actor_id=plan["recipient"]["actor_id"],
+                    message_id=native_message_id or payload["message_id"], recipient_actor_id=plan["recipient"]["actor_id"],
                     in_reply_to=payload["in_reply_to"],
                 )
                 self.pipeline.capture(evidence)
-                self.pipeline.link_message(plan["mapping_id"], payload["message_id"])
+                self.pipeline.link_message(plan["mapping_id"], native_message_id or payload["message_id"])
             with self.store.transaction() as db:
                 db.execute(
                     "UPDATE company_native_message_outbox SET status='delivered',error_type=NULL,receipt_json=?,updated_at=? "
@@ -1717,7 +1785,7 @@ class CompanyFeedbackRuntime:
             ):
                 failures.append({"mapping_id": mapping.mapping_id, "error_type": "CoffeeMailRouteInvalid"})
                 continue
-            with self.store.transaction() as db:
+            with self.store.transaction(write=False) as db:
                 cursor = db.execute(
                     "SELECT uidvalidity,after_uid FROM company_coffee_mail_cursors "
                     "WHERE mapping_id=? AND mailbox_actor_id=?",
@@ -1818,7 +1886,7 @@ class CompanyFeedbackRuntime:
         from .mail import MailReceiptMismatch
         from .company_feedback import encoded
 
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             rows = [dict(row) for row in db.execute(
                 "SELECT * FROM company_native_message_outbox "
                 "WHERE status='delivered' AND mapping_id IS NULL ORDER BY source_event_id"
@@ -1845,7 +1913,7 @@ class CompanyFeedbackRuntime:
                 mailbox = actor_by_id.get(counterparty.get("actor_id"))
                 if not mailbox or mailbox.get("kind") != "counterparty":
                     raise MailReceiptMismatch("native Coffee thread counterparty mailbox is unavailable")
-                with self.store.transaction() as db:
+                with self.store.transaction(write=False) as db:
                     cursor = db.execute(
                         "SELECT uidvalidity,after_uid FROM company_coffee_mail_cursors WHERE mapping_id=? AND mailbox_actor_id=?",
                         ("conversation:" + source_event_id, mailbox["actor_id"]),
@@ -1966,7 +2034,7 @@ class CompanyFeedbackRuntime:
     def _observe_issue_mail(self):
         from email.utils import parseaddr
 
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             if not db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='company_issue_handoffs'"
             ).fetchone():

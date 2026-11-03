@@ -4,4 +4,4 @@ Then, check the list of questions below the table, put in the answers in the cor
 
 Correct the Excel, write down your answer to the question and save to `/workspace/corrected_other_corp_area_totals.xlsx`
 
-For your reference, the cloud drive link is http://the-agent-company.com:8092
+For your reference, the cloud drive link is {{ company_tools.owncloud }}

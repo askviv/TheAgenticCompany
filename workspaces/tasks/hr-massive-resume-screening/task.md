@@ -4,9 +4,9 @@ that are good fits for this position. LLM knowledge is not required but helpful.
 Experience with OpenHands is a must. There's no other requirement on degree or
 years of experience.
 
-You can find all resumes on owncloud (http://the-agent-company.com:8092/). Navigate to
+You can find all resumes on owncloud ({{ company_tools.owncloud }}/). Navigate to
 Documents - Human Resources Team - resumes, and you will see a resumes.zip file.
 
-Finally, goto RocketChat (http://the-agent-company.com:3000/) and tell
+Finally, goto RocketChat ({{ company_tools.rocketchat }}/) and tell
 Chen Xinyi if you find any qualified candidates. If you do, tell her the candidates'
 names.

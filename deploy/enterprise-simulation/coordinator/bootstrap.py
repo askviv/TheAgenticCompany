@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -27,10 +26,8 @@ MAIL_API = "http://127.0.0.1:8112/api/v1"
 MAIL_DOMAIN = "example.com"
 MAIL_HOST = "mail.company.example.test"
 MAIL_SMTP_PORT = 2587
-SELKIES_BASE_IMAGE = "ghcr.io/selkies-project/selkies/desktop:2.1.0-ubuntu26.04"
-EMPLOYEE_DESKTOP_IMAGE = "tac-selkies-desktop:2.1.0-ubuntu26.04-socat1"
-EMPLOYEE_DESKTOP_DOCKERFILE = Path("deploy/enterprise-simulation/coordinator/employee-desktop/Dockerfile")
-EMPLOYEE_DESKTOP_DOCKERFILE_LABEL = "com.theagentcompany.employee-desktop.dockerfile-sha256"
+SELKIES_BASE_IMAGE = "ghcr.io/selkies-project/selkies/desktop:2.1.0-ubuntu26.04@sha256:558fb9d6d97697f8861022bc2594e930e0bb669025360e87022b86155e1aec2e"
+EMPLOYEE_DESKTOP_IMAGE = SELKIES_BASE_IMAGE
 ACTORS = [
     {"actor_id": "viv", "email": "agent@agent.example.test", "kind": "agent"},
     {"actor_id": "requester", "email": "sarahjohnson@example.com", "kind": "employee"},
@@ -49,8 +46,8 @@ VIV_RELAY_ACCOUNT_KEY = "viv_reply_relay"
 VIV_RELAY_ACCOUNT_EMAIL = "viv_reply_relay@example.com"
 VIV_PUBLIC_EMAIL = "agent@agent.example.test"
 PRESERVED_RUNTIME_SETTINGS = frozenset({
-    "actor_workers", "background_model_id", "company_clock_rate", "company_background_enabled",
-    "shared_company_clock_enabled", "shared_company_clock_file", "shared_company_clock_state",
+    "actor_workers", "background_model_id", "company_background_enabled",
+    "shared_company_clock_file", "shared_company_clock_state",
     "company_issues_enabled", "erp_base_url", "erp_public_url", "issue_config_path",
     "employee_chat_credentials_file", "rocketchat_base_url",
     "retail_operator_users", "workers_enabled",
@@ -238,6 +235,7 @@ def provision_counterparties(
     *,
     ca_file: Path | None,
     counterparties: dict[str, tuple[str, str]] | None = None,
+    sandbox_password: str = "theagentcompany",
 ) -> dict[str, dict[str, str]]:
     path = mail_root / "enterprise-counterparty-credentials.json"
     records = private_json(path) if path.exists() else {"schema_version": 1, "accounts": {}}
@@ -272,7 +270,7 @@ def provision_counterparties(
             mail = {
                 "address": address,
                 "username": address,
-                "password": "theagentcompany",
+                "password": sandbox_password,
                 "status": "pending",
             }
             accounts[key] = {"mail": mail}
@@ -319,7 +317,8 @@ def coffee_mail_directory(company_profile: dict) -> tuple[dict[str, tuple[str, s
         display_name = record.get("display_name")
         if (
             actor_id != f"coffee_{native_id}"
-            or email != f"coffee-{native_id}@{MAIL_DOMAIN}"
+            or not isinstance(email, str) or email.rsplit("@", 1)[0] != f"coffee-{native_id}"
+            or email.count("@") != 1 or not email.rsplit("@", 1)[1]
             or not isinstance(display_name, str)
             or not display_name
             or record.get("kind") != "counterparty"
@@ -383,7 +382,8 @@ def external_provider_mail_directory(company_profile: dict) -> tuple[dict[str, t
         }[provider_id]
         if (
             actor_id != expected
-            or email != f"{expected}@{MAIL_DOMAIN}"
+            or not isinstance(email, str) or email.rsplit("@", 1)[0] != expected
+            or email.count("@") != 1 or not email.rsplit("@", 1)[1]
             or not isinstance(display_name, str) or not display_name
             or record.get("kind") != "counterparty"
         ):
@@ -458,53 +458,11 @@ def verify_source(source: Path) -> None:
 
 
 def ensure_employee_desktop_image(source: Path) -> str:
-    """Build the pinned local Selkies derivative once per Dockerfile revision.
-
-    This only inspects/builds an image; it does not restart or replace running
-    containers or touch any other Docker services.
-    """
-    dockerfile = source / EMPLOYEE_DESKTOP_DOCKERFILE
-    dockerfile_digest = hashlib.sha256(dockerfile.read_bytes()).hexdigest()
-    inspect_command = [
-        "docker", "image", "inspect", EMPLOYEE_DESKTOP_IMAGE,
-        "--format", "{{json .Config.Labels}}",
-    ]
-
-    def matching_revision() -> bool:
-        result = subprocess.run(inspect_command, check=False, capture_output=True, text=True)
-        if result.returncode != 0:
-            return False
-        try:
-            labels = json.loads(result.stdout)
-        except json.JSONDecodeError as error:
-            raise RuntimeError("Docker returned invalid employee desktop image labels") from error
-        return (isinstance(labels, dict)
-                and labels.get(EMPLOYEE_DESKTOP_DOCKERFILE_LABEL) == dockerfile_digest
-                and labels.get("org.opencontainers.image.base.name") == SELKIES_BASE_IMAGE)
-
-    if matching_revision():
-        return EMPLOYEE_DESKTOP_IMAGE
+    """Pull the versioned upstream Selkies desktop image used by employees."""
     try:
-        subprocess.run(["docker", "info"], check=True, capture_output=True, text=True)
+        subprocess.run(["docker", "pull", EMPLOYEE_DESKTOP_IMAGE], check=True)
     except (OSError, subprocess.CalledProcessError) as error:
-        raise RuntimeError("Docker daemon is unavailable; the employee desktop image is required") from error
-
-    build_command = [
-        "docker", "build", "--pull",
-        "--build-arg", f"SELKIES_BASE_IMAGE={SELKIES_BASE_IMAGE}",
-        "--build-arg", f"EMPLOYEE_DESKTOP_DOCKERFILE_SHA256={dockerfile_digest}",
-        "--file", str(dockerfile),
-        "--tag", EMPLOYEE_DESKTOP_IMAGE,
-        str(dockerfile.parent),
-    ]
-    try:
-        # Leave build progress/errors visible to the operator; the context has
-        # only the Dockerfile and the build args contain no credentials.
-        subprocess.run(build_command, check=True)
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise RuntimeError("Could not build the pinned Selkies employee desktop image") from error
-    if not matching_revision():
-        raise RuntimeError("Docker build completed without the expected employee desktop image labels")
+        raise RuntimeError("Could not pull the pinned Selkies employee desktop image") from error
     return EMPLOYEE_DESKTOP_IMAGE
 
 
@@ -522,7 +480,7 @@ def prepare_optional_employee_desktop_image(source: Path) -> str | None:
         return None
 
 
-def private_erp_compose(source: Path, destination: Path) -> Path:
+def private_erp_compose(source: Path, destination: Path, company_profile: Path | None = None) -> Path:
     template = source / "deploy/enterprise-simulation/erpnext/compose.yml"
     if destination.exists():
         try:
@@ -561,7 +519,7 @@ def private_erp_compose(source: Path, destination: Path) -> Path:
             "site-admin": {
                 "/opt/erpnext-admin": source / "deploy/enterprise-simulation/erpnext/admin",
                 "/opt/erpnext-contracts/integration_contracts.py": source / "servers/simulation/integration_contracts.py",
-                "/opt/company-identities.json": source / "deploy/single-host/company-identities.json",
+                "/opt/company-identities.json": company_profile or (source / "deploy/single-host/company-identities.json"),
                 "/opt/erpnext_adapter.py": source / "servers/simulation/erpnext.py",
             },
         }
@@ -618,19 +576,52 @@ def preserve_runtime_settings(runtime_config: dict, previous_config: dict | None
 
 
 def main() -> int:
+    global MAIL_DOMAIN, MAIL_HOST, MAIL_SMTP_PORT, VIV_RELAY_ACCOUNT_EMAIL, VIV_PUBLIC_EMAIL
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--employee-cua-model", default="gpt-6.1-terra")
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--source", type=Path, default=SOURCE)
     parser.add_argument("--mail-root", type=Path, default=MAIL_ROOT)
     parser.add_argument("--mail-api", default=MAIL_API)
     parser.add_argument("--mailu-admin-container", default="theagentcompany-mailu-admin-1")
     parser.add_argument("--python", default="python3.12")
-    parser.add_argument("--host", default="192.0.2.10")
+    parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--agent-base-url", default="http://127.0.0.1:8131")
     parser.add_argument("--port", type=int, default=8131)
-    parser.add_argument("--provider-portal-public-url", default="http://192.0.2.10:8132")
+    parser.add_argument("--provider-portal-public-url", default="http://127.0.0.1:8132")
     parser.add_argument("--tls-ca-file", type=Path, help="Optional CA trust bundle; defaults to the host trust store")
     parser.add_argument("--company-binding", type=Path, help="Private JSON binding for the existing company ERP site; preserved on later bootstrap runs")
+    parser.add_argument("--mail-domain", default=MAIL_DOMAIN)
+    parser.add_argument("--mail-host", default=MAIL_HOST)
+    parser.add_argument("--mail-smtp-port", type=int, default=MAIL_SMTP_PORT)
+    parser.add_argument("--mail-imap-port", type=int, default=2993)
+    parser.add_argument("--mail-webmail-url", default="https://mail.company.example.test/webmail/")
+    parser.add_argument("--erp-base-url", default="http://192.0.2.10:8130")
+    parser.add_argument("--chat-url", default="https://chat.company.example.test")
+    parser.add_argument("--viv-api-url", default="http://127.0.0.1:19157")
+    parser.add_argument("--viv-smtp-host", default="127.0.0.1")
+    parser.add_argument("--viv-smtp-port", type=int, default=19125)
+    parser.add_argument("--viv-email", default=VIV_PUBLIC_EMAIL)
+    parser.add_argument("--company-profile", type=Path)
+    parser.add_argument("--viv-mailbox-name", default="Default")
+    sandbox_password_group = parser.add_mutually_exclusive_group()
+    sandbox_password_group.add_argument("--sandbox-password")
+    sandbox_password_group.add_argument("--sandbox-password-file", type=Path)
     args = parser.parse_args()
+    sandbox_password = (args.sandbox_password if args.sandbox_password is not None
+                       else "theagentcompany")
+    if args.sandbox_password_file is not None:
+        if stat.S_IMODE(args.sandbox_password_file.stat().st_mode) != 0o600:
+            raise PermissionError("Sandbox password file must be mode 0600")
+        sandbox_password = args.sandbox_password_file.read_text(encoding="utf-8").rstrip("\r\n")
+        if not sandbox_password:
+            raise ValueError("Sandbox password file is empty")
+    MAIL_DOMAIN = args.mail_domain
+    MAIL_HOST = args.mail_host
+    MAIL_SMTP_PORT = args.mail_smtp_port
+    VIV_PUBLIC_EMAIL = args.viv_email
+    VIV_RELAY_ACCOUNT_EMAIL = f"{VIV_RELAY_ACCOUNT_KEY}@{MAIL_DOMAIN}"
+    ACTORS[0]["email"] = VIV_PUBLIC_EMAIL
 
     if os.name != "posix" or os.geteuid() != 0:
         raise PermissionError("Run coordinator bootstrap as the host administrator")
@@ -645,16 +636,19 @@ def main() -> int:
     python_info = subprocess.run([args.python, "--version"], check=True, capture_output=True, text=True)
     if "3.12" not in python_info.stdout + python_info.stderr:
         raise RuntimeError("Coordinator runtime requires the workplace's Python 3.12 environment")
-    employee_desktop_image = prepare_optional_employee_desktop_image(source)
-    if employee_desktop_image is not None:
-        print(f"Employee desktop image ready: {employee_desktop_image}")
+    cua_driver = root / "tools/cua-driver/bin/cua-driver"
+    subprocess.run([args.python, str(source / "deploy/enterprise-simulation/coordinator/install-cua-driver.py"),
+                    "--destination", str(cua_driver)], check=True)
+    employee_desktop_image = ensure_employee_desktop_image(source)
+    print(f"Employee desktop image ready: {employee_desktop_image}")
 
     mail_env = mail_root / "mailu.env"
     client = MailuClient(args.mail_api, env_value(mail_env, "API_TOKEN"))
     if not client.has_domain(MAIL_DOMAIN):
         raise RuntimeError(f"Mailu domain {MAIL_DOMAIN} is not configured; refusing to create or change domains")
 
-    company_identity_profile = json.loads((source / "deploy/single-host/company-identities.json").read_text())
+    company_profile_path = args.company_profile or (source / "deploy/single-host/company-identities.json")
+    company_identity_profile = json.loads(company_profile_path.read_text())
     company_profile = company_identity_profile["company"]
     employee_actors = managed_employee_actors(company_identity_profile)
     managed_actors = [*ACTORS, *employee_actors]
@@ -683,12 +677,13 @@ def main() -> int:
         raise ValueError("Configured Mailu actors must have unique IDs")
     counterparties = {**COUNTERPARTIES, **coffee_accounts, **provider_accounts}
     counterparty_credentials = provision_counterparties(
-        client, mail_root, ca_file=args.tls_ca_file, counterparties=counterparties
+        client, mail_root, ca_file=args.tls_ca_file, counterparties=counterparties,
+        sandbox_password=sandbox_password,
     )
     all_credentials = {**employee_credentials, **counterparty_credentials}
     viv_actor = next(actor for actor in actors if actor["actor_id"] == "viv")
-    if viv_actor["email"] != VIV_PUBLIC_EMAIL:
-        raise ValueError("Viv actor does not match the configured company address")
+    if viv_actor["email"].casefold() != VIV_PUBLIC_EMAIL.casefold():
+        raise ValueError("Viv actor does not match the configured company profile")
     all_credentials[VIV_PUBLIC_EMAIL] = viv_relay_credentials(mail_root)
     for actor in actors:
         if actor["actor_id"] != "viv" and actor["email"] not in all_credentials:
@@ -711,7 +706,7 @@ def main() -> int:
     principal_data = principals(principals_path)
     write_private_json(principals_path, principal_data)
     agent_token = next(token for token, record in principal_data.items() if record["role"] == "agent")
-    write_private_json(agent_path, {"base_url": f"http://{args.host}:{args.port}", "bearer_token": agent_token})
+    write_private_json(agent_path, {"base_url": args.agent_base_url, "bearer_token": agent_token})
     write_private_secret(portal_session_key)
     write_private_secret(portal_integration_key)
 
@@ -726,8 +721,10 @@ def main() -> int:
                            create_alias=create_alias)
     runtime_config = {
         "state_root": str(state_root),
-        "erp_compose": str(private_erp_compose(source, config_root / "erpnext-compose.yml")),
-        "erp_base_url": "http://192.0.2.10:8130",
+        "erp_compose": str(private_erp_compose(
+            source, config_root / "erpnext-compose.yml", company_profile_path.resolve(strict=True)
+        )),
+        "erp_base_url": args.erp_base_url,
         "erp_credentials_root": str(root / "erpnext/runtime/api-credentials"),
         "support_actor_id": company_profile["supportActorId"],
         "support_address": company_profile["supportEmail"],
@@ -737,18 +734,31 @@ def main() -> int:
             "mailu_smtp_host": MAIL_HOST,
             "mailu_smtp_port": MAIL_SMTP_PORT,
             "mailu_imap_host": MAIL_HOST,
-            "mailu_imap_port": 2993,
-            "webmail_url": "https://mail.company.example.test/webmail/",
+            "mailu_imap_port": args.mail_imap_port,
+            "webmail_url": args.mail_webmail_url,
             "tls_ca_file": str(args.tls_ca_file) if args.tls_ca_file else None,
-            "smtp4dev_api_base_url": "http://127.0.0.1:19157",
-            "smtp4dev_mailbox_name": "Default",
+            "smtp4dev_api_base_url": args.viv_api_url,
+            "smtp4dev_mailbox_name": args.viv_mailbox_name,
+            "smtp4dev_smtp_host": args.viv_smtp_host,
+            "smtp4dev_smtp_port": args.viv_smtp_port,
         },
         "mail_credentials_file": str(credentials_path),
         "employee_chat_credentials_file": str(secrets_root / "employee-chat-credentials.json"),
-        "rocketchat_base_url": "https://chat.company.example.test",
+        "company_profile_file": str(company_profile_path),
+        "employee_desktop_image": employee_desktop_image,
+        "employee_desktop_view_only": True,
+        "employee_cua_driver_file": str(cua_driver),
+        "employee_cua_model": args.employee_cua_model,
+        "employee_cua_inference_token_file": str(root / "actors/secrets/codex-inference-token"),
+        "employee_desktop_ca_file": str(args.tls_ca_file) if args.tls_ca_file else None,
+        "rocketchat_base_url": args.chat_url,
         "principals_file": str(principals_path),
         "workers_enabled": True,
-        "shared_company_clock_enabled": True,
+        "kernel_company_clock_enabled": True,
+        "kernel_company_clock_url": "http://10.0.2.2:8133",
+        "kernel_company_clock_token_file": "/etc/company-workplace/secrets/clock-api-token",
+        "shared_company_clock_enabled": False,
+        "company_clock_rate": 1,
         "shared_company_clock_file": "/data/theagentcompany/enterprise/state/company-clock/time",
         "shared_company_clock_state": str(state_root / "company-clock.json"),
         "host": args.host,
@@ -768,7 +778,7 @@ def main() -> int:
             provider_id: identity["actor_id"]
             for provider_id, identity in company_profile["background"]["external_providers"].items()
         },
-        "internal_url": f"http://{args.host}:8132",
+        "internal_url": "http://127.0.0.1:8132",
         "public_url": args.provider_portal_public_url,
     }
     write_private_json(config_root / "provider-portal.json", provider_portal_config)

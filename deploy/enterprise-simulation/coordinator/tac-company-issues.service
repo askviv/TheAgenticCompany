@@ -1,7 +1,7 @@
 [Unit]
 Description=Reconcile company evidence, native benchmark feedback and unread issue handoffs
 After=network-online.target docker.service tac-enterprise-simulation.service
-Requires=docker.service
+Wants=docker.service
 
 [Service]
 Type=oneshot

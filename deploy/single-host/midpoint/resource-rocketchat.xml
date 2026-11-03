@@ -5,6 +5,7 @@
           xmlns:icfc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/connector-schema-3"
           xmlns:rc="http://midpoint.evolveum.com/xml/ns/public/connector/icf-1/bundle/com.evolveum.polygon.scimrest.connector-rocketchat/com.evolveum.polygon.rocketchat.RocketChatConnector"
           xmlns:ri="http://midpoint.evolveum.com/xml/ns/public/resource/instance-3"
+          xmlns:ea="https://theagentcompany.com/xml/ns/midpoint/employee-accounts"
           oid="57a19684-cfe8-4f21-b7b4-0fb02b5ec001">
     <name>Rocket.Chat accounts</name>
     <description>Reads existing Rocket.Chat accounts by immutable user ID, creates accounts for newly assigned employees, and updates only centrally managed display name and email. Username, roles, account state, password, and immutable ID remain unchanged.</description>
@@ -32,7 +33,7 @@
                 <ref>ri:username</ref>
                 <outbound>
                     <strength>weak</strength>
-                    <source><path>$focus/name</path></source>
+                    <source><path>$focus/extension/ea:rocketchatUsername</path></source>
                 </outbound>
             </attribute>
             <attribute>

@@ -14,6 +14,7 @@ import os
 import secrets
 import smtplib
 import ssl
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -178,6 +179,7 @@ def ensure_account(
     name: str,
     *,
     global_admin: bool = False,
+    default_password: str | None = None,
 ) -> str:
     entry = records.setdefault(record_key, {"mail": {"address": email}})
     mail = entry.setdefault("mail", {"address": email})
@@ -193,7 +195,7 @@ def ensure_account(
         records.pop(record_key, None)
         return "existing_without_managed_credentials"
 
-    password = mail.get("password") or secrets.token_urlsafe(36)
+    password = mail.get("password") or default_password or secrets.token_urlsafe(36)
     mail.update({"address": email, "password": password, "status": "pending"})
     # Persist before the network mutation so an uncertain POST can safely retry.
     return "pending"
@@ -251,11 +253,29 @@ def ensure_viv_relay_account(client: MailuClient, service_accounts: dict) -> str
 
 
 def main() -> int:
+    global MAIL_DOMAIN, VIV_RELAY_EMAIL, SMTP_SUBMISSION_HOST, SMTP_SUBMISSION_PORT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--identities", type=Path, default=DEFAULT_IDENTITIES)
     parser.add_argument("--api", default=DEFAULT_API)
+    parser.add_argument("--mail-domain", default=MAIL_DOMAIN)
+    parser.add_argument("--smtp-host", default=SMTP_SUBMISSION_HOST)
+    parser.add_argument("--smtp-port", type=int, default=2587)
+    password_group = parser.add_mutually_exclusive_group()
+    password_group.add_argument("--mailbox-password")
+    password_group.add_argument("--mailbox-password-file", type=Path)
     args = parser.parse_args()
+    MAIL_DOMAIN = args.mail_domain
+    VIV_RELAY_EMAIL = f"{VIV_RELAY_KEY}@{MAIL_DOMAIN}"
+    SMTP_SUBMISSION_HOST = args.smtp_host
+    SMTP_SUBMISSION_PORT = args.smtp_port
+    mailbox_password = args.mailbox_password
+    if args.mailbox_password_file is not None:
+        if stat.S_IMODE(args.mailbox_password_file.stat().st_mode) != 0o600:
+            raise PermissionError("Mailbox password file must be mode 0600")
+        mailbox_password = args.mailbox_password_file.read_text(encoding="utf-8").rstrip("\r\n")
+        if not mailbox_password:
+            raise ValueError("Mailbox password file is empty")
     root = args.root
 
     token = read_env_value(root / "mailu.env", "API_TOKEN")
@@ -284,7 +304,22 @@ def main() -> int:
             write_private_json(root / "service-credentials.json", service_records)
             raise
 
-    created_domain = client.ensure_domain(MAIL_DOMAIN)
+    email_domains = set()
+    def collect_addresses(value):
+        if isinstance(value, dict):
+            for item in value.values():
+                collect_addresses(item)
+        elif isinstance(value, list):
+            for item in value:
+                collect_addresses(item)
+        elif isinstance(value, str) and value.count("@") == 1:
+            local, domain = value.rsplit("@", 1)
+            if local and domain:
+                email_domains.add(domain.lower())
+    collect_addresses(identities)
+    email_domains.add(MAIL_DOMAIN.lower())
+    for domain in sorted(email_domains):
+        client.ensure_domain(domain)
     counts = {"created": 0, "preserved": 0, "existing_without_managed_credentials": 0}
     seen_ids = set()
     for employee in employees:
@@ -296,10 +331,8 @@ def main() -> int:
         if employee_id in seen_ids:
             raise RuntimeError("Identity file contains duplicate employee IDs")
         seen_ids.add(employee_id)
-        if email.rsplit("@", 1)[-1].lower() != MAIL_DOMAIN:
-            raise RuntimeError(f"Identity {employee_id} is not in the configured mail domain")
-
-        outcome = ensure_account(client, employees_by_id, employee_id, email, name)
+        outcome = ensure_account(client, employees_by_id, employee_id, email, name,
+                                 default_password=mailbox_password)
         if outcome == "pending":
             write_private_json(root / "employee-credentials.json", employee_records)
             record = employees_by_id[employee_id]
@@ -356,9 +389,24 @@ def main() -> int:
     verify_viv_relay()
     write_private_json(root / "service-credentials.json", service_records)
 
+    service_key = "theagentcompany"
+    service_email = f"{service_key}@{MAIL_DOMAIN}"
+    outcome = ensure_account(client, service_accounts, service_key, service_email,
+                             "Company MidPoint Service", global_admin=False)
+    if outcome == "pending":
+        write_private_json(root / "service-credentials.json", service_records)
+        record = service_accounts[service_key]
+        if not client.create_user(service_email, "Company MidPoint Service", record["mail"]["password"],
+                                  enable_imap=False):
+            service_accounts.pop(service_key, None)
+            write_private_json(root / "service-credentials.json", service_records)
+            raise RuntimeError("MidPoint service account was created concurrently; rerun to preserve its credential")
+        record["mail"]["status"] = "ready"
+    write_private_json(root / "service-credentials.json", service_records)
+
     print(
         "Mailu provisioning complete: "
-        f"domain_created={str(created_domain).lower()} "
+        f"domains={len(email_domains)} "
         f"employee_records={len(employees_by_id)} "
         f"employee_accounts_created={counts['created']} "
         f"employees_preserved={counts['preserved']} "

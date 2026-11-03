@@ -46,13 +46,14 @@ def read_private_json(path: Path) -> dict:
     return value
 
 
-def import_object(base_url: str, admin_password: str, endpoint: str, xml: bytes, *, replace: bool) -> tuple[int, bytes]:
+def import_object(base_url: str, admin_username: str, admin_password: str, endpoint: str,
+                  xml: bytes, *, replace: bool) -> tuple[int, bytes]:
     root = ET.fromstring(xml)
     oid = root.attrib.get("oid")
     if not oid:
         raise RuntimeError("Resource template has no OID")
     url = base_url.rstrip("/") + f"/ws/rest/{endpoint}/{oid}" if replace else base_url.rstrip("/") + f"/ws/rest/{endpoint}"
-    credentials = base64.b64encode(f"theagentcompany:{admin_password}".encode()).decode()
+    credentials = base64.b64encode(f"{admin_username}:{admin_password}".encode()).decode()
     request = Request(
         url,
         data=xml,
@@ -103,6 +104,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--midpoint", default="http://127.0.0.1:18120/midpoint")
     parser.add_argument("--secrets", type=Path, default=DEFAULT_SECRETS)
+    parser.add_argument("--admin-username", default="theagentcompany")
+    parser.add_argument("--admin-password-file", type=Path, default=ADMIN_PASSWORD)
     parser.add_argument("--rocketchat-base-address", default=os.environ.get("ROCKETCHAT_BASE_ADDRESS"))
     parser.add_argument("--mailu-base-address", default=os.environ.get("MAILU_BASE_ADDRESS"))
     owncloud_mode = parser.add_mutually_exclusive_group()
@@ -112,7 +115,9 @@ def main() -> int:
     args = parser.parse_args()
 
     secrets = read_private_json(args.secrets)
-    admin_password = ADMIN_PASSWORD.read_text().strip()
+    if stat.S_IMODE(args.admin_password_file.stat().st_mode) & 0o077:
+        raise RuntimeError("MidPoint administrator password file must be private to its owner")
+    admin_password = args.admin_password_file.read_text(encoding="utf-8").strip()
     rocket = secrets["rocketchat"]
     mailu = secrets["mailu"]
     definitions = [] if args.owncloud_only else [
@@ -128,10 +133,14 @@ def main() -> int:
             (ROOT / "value-policy-owncloud-sandbox.xml", "valuePolicies"),
             (ROOT / "security-policy-owncloud-sandbox.xml", "securityPolicies"),
         ):
-            status, _body = import_object(args.midpoint, admin_password, endpoint, policy_file.read_bytes(), replace=args.replace_existing)
+            status, _body = import_object(args.midpoint, args.admin_username, admin_password, endpoint,
+                                          policy_file.read_bytes(), replace=args.replace_existing)
             print(f"{'Replaced' if args.replace_existing else 'Imported'} {policy_file.stem}: HTTP {status}")
     for template, namespace, properties, base_address in definitions:
-        status, _body = import_object(args.midpoint, admin_password, "resources", configure_template(template, namespace, properties, base_address), replace=args.replace_existing)
+        status, _body = import_object(
+            args.midpoint, args.admin_username, admin_password, "resources",
+            configure_template(template, namespace, properties, base_address), replace=args.replace_existing,
+        )
         print(f"{'Replaced' if args.replace_existing else 'Imported'} {template.stem}: HTTP {status}")
     return 0
 

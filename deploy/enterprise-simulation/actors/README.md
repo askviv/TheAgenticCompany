@@ -8,7 +8,11 @@ or ERPNext credentials.
 
 ## Runtime and upstream pins
 
-the host uses its existing Python 3.12 and Codex CLI 0.165.0 login. The
+Fresh deployments use [the infrastructure command](../../virtual-time-world/README.md)
+to install these services. The host uses standard Python and the exact Codex CLI
+version and model selected in the deployment profile; sign in through the
+dashboard's device-authentication control. No account credentials are bundled.
+The
 bootstrap installs uv 0.9.24 from a PyPI wheel whose SHA-256 is pinned in
 `uv-requirements.txt`, then synchronizes each committed lock with `--frozen`.
 The bootstrap defaults to the original local CLI configuration and requires

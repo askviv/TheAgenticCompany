@@ -20,6 +20,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from servers.simulation.clock_rate import kernel_virtual_time_rate
 from servers.simulation.models import CanonicalEvent, StartScenario
 
 
@@ -76,17 +77,20 @@ class SQLiteStore:
             self.db_path.chmod(0o600)
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, timeout=self.busy_timeout_seconds, isolation_level=None)
+        # SQLite's native sleep/retry timers follow the accelerated guest kernel.
+        # Every coordinator/actor connection uses the same unscaled base setting.
+        timeout = self.busy_timeout_seconds * kernel_virtual_time_rate()
+        connection = sqlite3.connect(self.db_path, timeout=timeout, isolation_level=None)
         connection.row_factory = sqlite3.Row
-        connection.execute(f"PRAGMA busy_timeout = {int(self.busy_timeout_seconds * 1000)}")
+        connection.execute(f"PRAGMA busy_timeout = {int(timeout * 1000)}")
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
     @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
-        """Open a writer transaction that serializes competing mutations."""
+    def transaction(self, *, write: bool = True) -> Iterator[sqlite3.Connection]:
+        """Use a reserved writer or a consistent deferred read snapshot."""
         with closing(self._connect()) as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             try:
                 yield connection
                 connection.commit()
@@ -163,6 +167,10 @@ class SQLiteStore:
                     private_payload_json TEXT NOT NULL,
                     payload_hash TEXT NOT NULL,
                     submission_started INTEGER NOT NULL DEFAULT 0 CHECK(submission_started IN (0,1)),
+                    submission_started_at TEXT,
+                    sent_uidvalidity TEXT,
+                    sent_uid_next INTEGER,
+                    native_message_id TEXT,
                     error_type TEXT,
                     status TEXT NOT NULL CHECK(status IN ('pending','uncertain','completed')),
                     outcome_json TEXT,
@@ -479,6 +487,10 @@ class SQLiteStore:
                 private_payload_json TEXT NOT NULL,
                 payload_hash TEXT NOT NULL,
                 submission_started INTEGER NOT NULL DEFAULT 0 CHECK(submission_started IN (0,1)),
+                submission_started_at TEXT,
+                sent_uidvalidity TEXT,
+                sent_uid_next INTEGER,
+                native_message_id TEXT,
                 error_type TEXT,
                 status TEXT NOT NULL CHECK(status IN ('pending','uncertain','completed')),
                 outcome_json TEXT,
@@ -545,9 +557,21 @@ class SQLiteStore:
         else:
             if "submission_started" not in outbox_columns:
                 connection.execute("ALTER TABLE outbox ADD COLUMN submission_started INTEGER NOT NULL DEFAULT 0")
+            if "submission_started_at" not in outbox_columns:
+                connection.execute("ALTER TABLE outbox ADD COLUMN submission_started_at TEXT")
+            if "sent_uidvalidity" not in outbox_columns:
+                connection.execute("ALTER TABLE outbox ADD COLUMN sent_uidvalidity TEXT")
+            if "sent_uid_next" not in outbox_columns:
+                connection.execute("ALTER TABLE outbox ADD COLUMN sent_uid_next INTEGER")
+            if "native_message_id" not in outbox_columns:
+                connection.execute("ALTER TABLE outbox ADD COLUMN native_message_id TEXT")
             if "error_type" not in outbox_columns:
                 connection.execute("ALTER TABLE outbox ADD COLUMN error_type TEXT")
             connection.execute("CREATE INDEX IF NOT EXISTS outbox_pending_idx ON outbox(run_id,generation,status,created_at)")
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS outbox_native_message_id_idx "
+            "ON outbox(run_id,generation,native_message_id) WHERE native_message_id IS NOT NULL"
+        )
 
     @staticmethod
     def _run_id(run_id: UUID | str) -> str:
@@ -1811,6 +1835,9 @@ class SQLiteStore:
             "event_id": row["event_id"], "actor_id": row["actor_id"],
             "private_payload": _decode(row["private_payload_json"]), "payload_hash": row["payload_hash"],
             "submission_started": bool(row["submission_started"]), "error_type": row["error_type"],
+            "submission_started_at": row["submission_started_at"],
+            "sent_uidvalidity": row["sent_uidvalidity"], "sent_uid_next": row["sent_uid_next"],
+            "native_message_id": row["native_message_id"],
             "status": row["status"], "outcome": _decode(row["outcome_json"]) if row["outcome_json"] else None,
             "created_at": row["created_at"], "completed_at": row["completed_at"],
         }
@@ -1865,6 +1892,7 @@ class SQLiteStore:
 
     def mark_outbox_submission_started(
         self, run_id: UUID | str, generation: int, outbox_id: str,
+        *, sent_uidvalidity: str | None = None, sent_uid_next: int | None = None,
     ) -> dict[str, Any]:
         """Atomically claim the one-way external submission boundary.
 
@@ -1875,10 +1903,11 @@ class SQLiteStore:
         with self.transaction() as conn:
             self._require_generation(conn, rid, generation)
             cursor = conn.execute(
-                """UPDATE outbox SET submission_started=1,error_type=NULL
+                """UPDATE outbox SET submission_started=1,submission_started_at=?,
+                    sent_uidvalidity=?,sent_uid_next=?,error_type=NULL
                 WHERE run_id=? AND generation=? AND outbox_id=?
                 AND status='pending' AND submission_started=0""",
-                (rid, generation, outbox_id),
+                (_now(), sent_uidvalidity, sent_uid_next, rid, generation, outbox_id),
             )
             if cursor.rowcount != 1:
                 row = conn.execute(
@@ -1888,6 +1917,38 @@ class SQLiteStore:
                 if row is None:
                     raise StoreNotFound("outbox item not found in requested run generation")
                 raise StoreConflict("outbox item was already claimed or is not retryable")
+            return self.get_outbox(rid, generation, outbox_id, connection=conn)
+
+    def record_outbox_native_message_id(
+        self, run_id: UUID | str, generation: int, outbox_id: str, message_id: str,
+    ) -> dict[str, Any]:
+        """Persist the Message-ID generated by the native mail client."""
+        if not isinstance(message_id, str) or not message_id.startswith("<") or not message_id.endswith(">"):
+            raise ValueError("native Message-ID must be an RFC message identifier")
+        rid = self._run_id(run_id)
+        with self.transaction() as conn:
+            self._require_generation(conn, rid, generation)
+            row = conn.execute(
+                "SELECT * FROM outbox WHERE run_id=? AND generation=? AND outbox_id=?",
+                (rid, generation, outbox_id),
+            ).fetchone()
+            if row is None:
+                raise StoreNotFound("outbox item not found in requested run generation")
+            if not row["submission_started"]:
+                raise StoreConflict("native Message-ID cannot be recorded before submission starts")
+            if row["native_message_id"] not in (None, message_id):
+                raise StoreConflict("outbox item already has a different native Message-ID")
+            existing = conn.execute(
+                "SELECT outbox_id FROM outbox WHERE run_id=? AND generation=? "
+                "AND native_message_id=? AND NOT (outbox_id=?)",
+                (rid, generation, message_id, outbox_id),
+            ).fetchone()
+            if existing is not None:
+                raise StoreConflict("native Message-ID is already assigned to another outbox item")
+            conn.execute(
+                "UPDATE outbox SET native_message_id=? WHERE run_id=? AND generation=? AND outbox_id=?",
+                (message_id, rid, generation, outbox_id),
+            )
             return self.get_outbox(rid, generation, outbox_id, connection=conn)
 
     def mark_outbox_failure(

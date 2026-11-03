@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from copy import deepcopy
 import hashlib
 import io
@@ -21,6 +21,7 @@ from servers.simulation.actor_protocol import (
     ActorTurnRequest, ActorTurnResponse, ActorUsage, SupplierStatePatch,
     SupplierKernelStatePatch, bearer_token_matches,
 )
+from servers.simulation.clock_rate import kernel_virtual_time_rate
 from servers.simulation.actor_worker_store import ActorTurnStore, canonical_request_hash
 from servers.simulation.coffeebench_supplier import CoffeeSupplierAgent
 from servers.simulation.coffeebench_supplier import CodexCoffeeModel
@@ -58,13 +59,14 @@ class CoffeeTranscriptStore:
             self.path.chmod(0o600)
 
     def _connect(self):
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        timeout = 30 * kernel_virtual_time_rate()
+        connection = sqlite3.connect(self.path, timeout=timeout, isolation_level=None)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout=30000")
+        connection.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS coffee_supplier_transcripts (
@@ -80,7 +82,7 @@ class CoffeeTranscriptStore:
             )
 
     def load(self, run_id: str, generation: int, actor_id: str) -> dict[str, Any] | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 "SELECT messages_json,model_id,upstream_commit,updated_turn_id "
                 "FROM coffee_supplier_transcripts WHERE run_id=? AND generation=? AND actor_id=?",
@@ -96,7 +98,7 @@ class CoffeeTranscriptStore:
         model_id: str, turn_id: str,
     ) -> None:
         encoded = json.dumps(messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "INSERT INTO coffee_supplier_transcripts "

@@ -1,9 +1,9 @@
 [Unit]
-Description=Synchronize the public Mailu certificate into the virtual-time guest
-After=network-online.target
+Description=Synchronize the public Caddy certificate to the fresh Mailu front
+After=network-online.target tac-https.service
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-EnvironmentFile=-/data/theagentcompany/virtual-time-world/config/public-mail-tls-sync.env
+EnvironmentFile=/data/theagentcompany/virtual-time-world/config/clock.env
 ExecStart=/usr/local/lib/virtual-time-world/sync-public-mail-tls-to-guest.sh
