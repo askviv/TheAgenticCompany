@@ -60,6 +60,9 @@ class FakeMail:
         self.viv_poll_calls.append(_kwargs)
         return []
 
+    def open_employee_message_for_response(self, _actor, _message_id):
+        return False
+
 
 class FakeERP:
     def __init__(self):
