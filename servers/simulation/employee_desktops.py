@@ -771,7 +771,7 @@ class EmployeeDesktopRuntime:
         # its launcher with the container-compatible sandbox/password-store flags.
         self._docker(
             "exec", "--user", "ubuntu", "--env", "DISPLAY=:20", "--detach", container,
-            "google-chrome", "--no-first-run", "--no-default-browser-check",
+            "google-chrome", "--no-first-run", "--no-default-browser-check", "--start-fullscreen",
             "--remote-debugging-port=9222",
             "--user-data-dir=/home/ubuntu/.employee-browser-profile", "about:blank",
         )
