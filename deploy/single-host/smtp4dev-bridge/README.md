@@ -25,3 +25,11 @@ The script reads the private credential file on the host and updates smtp4dev's 
 Mailu skips only greylisting for the specific Mac gateway IP `192.168.0.118/32`; sender-domain checks, other antispam checks, and recipient/external-delivery restrictions stay active. This is required because smtp4dev is a simulator rather than a durable retrying MTA. Change the scoped IP rule if the Mac's LAN address changes.
 
 To stop this bridge, boot out both `org.example.tac-smtp4dev-*` user LaunchAgents and disable/stop `tac-smtp4dev.socket` and `tac-smtp4dev.service` on the host. To remove automatic replies, use smtp4dev's settings to clear the company relay host and expression. Do not delete messages, Mailu volumes, or the shared smtp4dev service. Restore the host-alias field only if it still matches this overlay; preserve other aliases added subsequently.
+
+For an existing local Docker mailbox, use direct forwarding instead of the Kubernetes listener:
+
+```sh
+python3 install-mac.py --ssh-key /path/to/key --mini company@192.0.2.10 --direct --smtp-port 9170 --api-port 9167
+```
+
+Use `--label-prefix` to reconcile the label prefix of an already-installed bridge. Direct mode removes that bridge's Kubernetes forward LaunchAgent. It does not create or replace the mailbox service.
