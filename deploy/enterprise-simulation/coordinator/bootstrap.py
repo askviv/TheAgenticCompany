@@ -578,6 +578,7 @@ def preserve_runtime_settings(runtime_config: dict, previous_config: dict | None
 def main() -> int:
     global MAIL_DOMAIN, MAIL_HOST, MAIL_SMTP_PORT, VIV_RELAY_ACCOUNT_EMAIL, VIV_PUBLIC_EMAIL
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--employee-cua-model", default="gpt-6.1-terra")
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--source", type=Path, default=SOURCE)
     parser.add_argument("--mail-root", type=Path, default=MAIL_ROOT)
@@ -747,6 +748,7 @@ def main() -> int:
         "employee_desktop_image": employee_desktop_image,
         "employee_desktop_view_only": True,
         "employee_cua_driver_file": str(cua_driver),
+        "employee_cua_model": args.employee_cua_model,
         "employee_cua_inference_token_file": str(root / "actors/secrets/codex-inference-token"),
         "employee_desktop_ca_file": str(args.tls_ca_file) if args.tls_ca_file else None,
         "rocketchat_base_url": args.chat_url,

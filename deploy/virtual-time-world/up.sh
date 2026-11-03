@@ -282,6 +282,8 @@ clock_api_token="$WORLD_ROOT/config/clock-api-token"
 if [[ ! -s $clock_api_token ]]; then umask 077; openssl rand -hex 32 > "$clock_api_token"; fi
 codex_version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["codex"]["cli_version"])' "$PROFILE")
 codex_model=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["codex"]["model"])' "$PROFILE")
+codex_cua_model=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["codex"].get("employee_model", "gpt-6.1-terra"))' "$PROFILE")
+[[ $codex_cua_model =~ ^[A-Za-z0-9._-]+$ ]] || fail 'codex.employee_model contains unsupported characters'
 [[ $codex_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'codex.cli_version must be an exact npm version'
 [[ $codex_model =~ ^[A-Za-z0-9._-]+$ ]] || fail 'codex.model contains unsupported characters'
 # Install the complete official package, including its native tool host. A lone
@@ -303,6 +305,7 @@ install -o company -g company -m 0600 "$host_token" /home/company/.codex-inferen
 cat > /home/company/.codex-inference.env <<EOF2
 CODEX_INFERENCE_BEARER_TOKEN=$(cat "$host_token")
 CODEX_MODEL=$codex_model
+CODEX_CUA_MODEL=$codex_cua_model
 CODEX_HOME=/home/company/.codex
 CODEX_EXECUTABLE=$(command -v codex)
 CODEX_CUA_GUEST_SSH_PORT=$WORLD_SSH_PORT

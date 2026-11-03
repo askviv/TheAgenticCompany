@@ -332,6 +332,7 @@ def main() -> int:
 
     coordinator = source / "deploy/enterprise-simulation/coordinator/bootstrap.py"
     _run([sys.executable, str(coordinator), "--root", str(ENTERPRISE_ROOT), "--source", str(ENTERPRISE_ROOT / "source"),
+          "--employee-cua-model", profile["codex"].get("employee_model", "gpt-6.1-terra"),
           "--mail-root", str(MAIL_ROOT), "--mail-api", "http://127.0.0.1:8112/api/v1",
           "--mail-domain", mail_domain, "--mail-host", profile["domains"]["mail"],
           "--mail-smtp-port", "12587",

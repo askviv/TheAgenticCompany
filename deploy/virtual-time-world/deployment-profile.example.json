@@ -26,6 +26,7 @@
   },
   "codex": {
     "cli_version": "0.166.0",
-    "model": "gpt-6-luna"
+    "model": "gpt-6-luna",
+    "employee_model": "gpt-6.1-terra"
   }
 }

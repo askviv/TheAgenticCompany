@@ -162,7 +162,7 @@ def create_codex_transport(settings):
     return CodexCLIModel(settings)
 
 
-def create_codex_inference_app(settings: CodexCLISettings, bearer_token: SecretStr) -> FastAPI:
+def create_codex_inference_app(settings: CodexCLISettings, bearer_token: SecretStr, *, employee_model: str | None = None) -> FastAPI:
     """Expose only structured inference; all prompts and results stay out of logs."""
     auth_manager = CodexDeviceAuthManager(settings)
     app = FastAPI(
@@ -172,6 +172,7 @@ def create_codex_inference_app(settings: CodexCLISettings, bearer_token: SecretS
         lifespan=auth_manager.lifespan,
     )
     model = CodexCLIModel(settings)
+    desktop_model = CodexCLIModel(settings.model_copy(update={"model": employee_model})) if employee_model else model
     token = bearer_token.get_secret_value()
     if not token:
         raise ValueError("Codex inference bearer token is required")
@@ -187,7 +188,7 @@ def create_codex_inference_app(settings: CodexCLISettings, bearer_token: SecretS
         if not authorization or not authorization.startswith("Bearer ") or not hmac.compare_digest(supplied, token):
             raise HTTPException(status_code=401, detail="unauthorized")
         try:
-            return model.complete(
+            return (desktop_model if request.desktop_container is not None else model).complete(
                 request.messages, tools=request.tools,
                 mcp_servers=employee_cua_mcp(request.desktop_container, request.desktop_environment)
                 if request.desktop_container is not None else None,
@@ -233,4 +234,4 @@ def host_app_from_environment():
         codex_home=os.environ["CODEX_HOME"],
         timeout_seconds=None,
         reasoning_effort=os.getenv("CODEX_REASONING_EFFORT", "low"),
-    ), SecretStr(token))
+    ), SecretStr(token), employee_model=os.getenv("CODEX_CUA_MODEL"))
