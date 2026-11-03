@@ -1,4 +1,7 @@
-# Local Viv mail bridge
+# Local assistant mail bridge
+
+For configuration, both mail directions, and the current Docker-based local setup,
+see [Local email setup](../../../docs/LOCAL_EMAIL.md).
 
 The shared smtp4dev UI belongs to the local Kubernetes platform and is available at http://127.0.0.1:9167. This bridge uses the same `app.kubernetes.io/name=smtp4dev` service in the explicit `docker-desktop` context. It discovers its namespace after restarts; it never edits or replaces that service. The native reply relay needs only the additional Mailu hostname mapping described below.
 

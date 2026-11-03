@@ -1,0 +1,6 @@
+# Optional: resolve the verified Mailu TLS name to the Docker-to-host gateway
+# when SMTP submission is carried by a local SSH forward.
+services:
+  smtp4dev:
+    extra_hosts:
+      - "${SMTP4DEV_RELAY_HOST:?Set the Mailu TLS hostname}:${SMTP4DEV_RELAY_GATEWAY_IP:?Set the Docker host gateway IP}"
