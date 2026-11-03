@@ -406,8 +406,7 @@ function ActivityPage() {
   const [manualRefresh, setManualRefresh] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState("all")
-  const [backgroundControlBusy, setBackgroundControlBusy] = useState<Record<string, boolean>>({})
-  const [backgroundControlErrors, setBackgroundControlErrors] = useState<Record<string, string>>({})
+
 
   useEffect(() => {
     let active = true
@@ -441,21 +440,6 @@ function ActivityPage() {
     setManualRefresh((current) => current + 1)
   }
 
-  const setBackgroundProvider = async (providerId: "coffeebench" | "ecommercebench", enabled: boolean) => {
-    setBackgroundControlBusy((current) => ({ ...current, [providerId]: true }))
-    setBackgroundControlErrors((current) => ({ ...current, [providerId]: "" }))
-    try {
-      await setBackgroundProviderEnabled(providerId, enabled)
-      setCompany(await getCompany())
-    } catch (reason) {
-      setBackgroundControlErrors((current) => ({ ...current, [providerId]: reason instanceof Error ? reason.message : `${providerId} control could not be confirmed. Refresh to reconcile the requested state.` }))
-    } finally {
-      setBackgroundControlBusy((current) => ({ ...current, [providerId]: false }))
-    }
-  }
-
-
-
   const filtered = [...activity]
     .filter((entry) => filter === "all" || entry.type === filter || (filter === "message" && entry.type === "chat") || (filter === "chatter" && (entry.type === "chatter" || (entry.type === "message" && entry.direction === "sent" && Boolean(entry.actor)))))
     .sort((first, second) => second.timestamp.localeCompare(first.timestamp))
@@ -477,41 +461,6 @@ function ActivityPage() {
         </div>
         <Button variant="outline" render={<Link to="/experiments" />}>Browse experiments <ArrowRight /></Button>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Background simulations</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
-          {([['coffeebench', 'CoffeeBench'], ['ecommercebench', 'E-CommerceBench']] as const).map(([providerId, label]) => {
-            const provider = company?.background?.providers[providerId]
-            const enabled = provider?.enabled
-            const issue = company?.background?.errors[providerId] ?? company?.background?.errors.configuration
-            return <div key={providerId} className="rounded-lg border p-4">
-              <div className="flex items-center justify-between gap-4">
-                <span id={`${providerId}-label`} className="font-medium">{label}</span>
-                <Switch.Root
-                  aria-labelledby={`${providerId}-label`}
-                  checked={enabled === true}
-                  disabled={backgroundControlBusy[providerId] || enabled === undefined || provider?.status === "stopping" || (enabled === false && provider?.in_flight === true)}
-                  onCheckedChange={(checked) => void setBackgroundProvider(providerId, checked)}
-                  className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background shadow-sm transition-transform data-[checked]:translate-x-5" />
-                </Switch.Root>
-              </div>
-              {provider?.status === "starting" && <p className="mt-2 text-sm text-muted-foreground">Starting…</p>}
-              {(provider?.status === "stopping" || (enabled === false && provider?.in_flight)) && <p className="mt-2 text-sm text-muted-foreground">Finishing current work…</p>}
-              {issue && <p className="mt-2 text-sm text-destructive">Needs attention ({issue.code}).</p>}
-              {!issue && provider?.status === "error" && <p className="mt-2 text-sm text-destructive">Needs attention.</p>}
-              {backgroundControlErrors[providerId] && <p className="mt-2 text-sm text-destructive">{backgroundControlErrors[providerId]}</p>}
-            </div>
-          })}
-        </CardContent>
-      </Card>
-
-
-
 
       {globalBackgroundErrors.length > 0 && <Alert variant="destructive">
         <CircleAlert />
@@ -807,6 +756,72 @@ function HelpPage() {
   )
 }
 
+function BackgroundSimulations() {
+  const refreshKey = useRefreshKey()
+  const [company, setCompany] = useState<Company | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [backgroundControlBusy, setBackgroundControlBusy] = useState<Record<string, boolean>>({})
+  const [backgroundControlErrors, setBackgroundControlErrors] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    let active = true
+    getCompany().then((value) => {
+      if (active) { setCompany(value); setError(null) }
+    }).catch((reason: unknown) => {
+      if (active) setError(reason instanceof Error ? reason.message : "Company status could not be loaded.")
+    })
+    return () => { active = false }
+  }, [refreshKey])
+
+  const setBackgroundProvider = async (providerId: "coffeebench" | "ecommercebench", enabled: boolean) => {
+    setBackgroundControlBusy((current) => ({ ...current, [providerId]: true }))
+    setBackgroundControlErrors((current) => ({ ...current, [providerId]: "" }))
+    try {
+      await setBackgroundProviderEnabled(providerId, enabled)
+      setCompany(await getCompany())
+    } catch (reason) {
+      setBackgroundControlErrors((current) => ({ ...current, [providerId]: reason instanceof Error ? reason.message : `${providerId} control could not be confirmed. Refresh to reconcile the requested state.` }))
+    } finally {
+      setBackgroundControlBusy((current) => ({ ...current, [providerId]: false }))
+    }
+  }
+
+  return <div className="space-y-4">
+    {error && <ErrorNotice message={error} title="Background simulations unavailable" />}
+      <Card>
+        <CardHeader>
+          <CardTitle>Background simulations</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 sm:grid-cols-2">
+          {([['coffeebench', 'CoffeeBench'], ['ecommercebench', 'E-CommerceBench']] as const).map(([providerId, label]) => {
+            const provider = company?.background?.providers[providerId]
+            const enabled = provider?.enabled
+            const issue = company?.background?.errors[providerId] ?? company?.background?.errors.configuration
+            return <div key={providerId} className="rounded-lg border p-4">
+              <div className="flex items-center justify-between gap-4">
+                <span id={`${providerId}-label`} className="font-medium">{label}</span>
+                <Switch.Root
+                  aria-labelledby={`${providerId}-label`}
+                  checked={enabled === true}
+                  disabled={backgroundControlBusy[providerId] || enabled === undefined || provider?.status === "stopping" || (enabled === false && provider?.in_flight === true)}
+                  onCheckedChange={(checked) => void setBackgroundProvider(providerId, checked)}
+                  className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background shadow-sm transition-transform data-[checked]:translate-x-5" />
+                </Switch.Root>
+              </div>
+              {provider?.status === "starting" && <p className="mt-2 text-sm text-muted-foreground">Starting…</p>}
+              {(provider?.status === "stopping" || (enabled === false && provider?.in_flight)) && <p className="mt-2 text-sm text-muted-foreground">Finishing current work…</p>}
+              {issue && <p className="mt-2 text-sm text-destructive">Needs attention ({issue.code}).</p>}
+              {!issue && provider?.status === "error" && <p className="mt-2 text-sm text-destructive">Needs attention.</p>}
+              {backgroundControlErrors[providerId] && <p className="mt-2 text-sm text-destructive">{backgroundControlErrors[providerId]}</p>}
+            </div>
+          })}
+        </CardContent>
+      </Card>
+  </div>
+}
+
 function LibraryPage() {
   const refreshKey = useRefreshKey()
   const [experiments, setExperiments] = useState<Experiment[]>([])
@@ -872,6 +887,7 @@ function LibraryPage() {
           </div>
         </div>
       </div>
+      <BackgroundSimulations />
       <CodexConnectionCard />
 
       <fieldset className="space-y-3">
