@@ -232,7 +232,7 @@ class EmployeeCuaAction:
                 if key not in {"credential"}
             }
             native_args["text"] = value
-            result = self._native_type_text(native_args)
+            result = self._native_call("type_text", native_args)
             if self._raise_or_report_native_error("type_text", result):
                 return "Credential entry was refused by the native UI. Refresh the current field and retry.", []
             return "Credential entered into the requested native field; value withheld.", []
