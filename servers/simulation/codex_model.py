@@ -1,7 +1,7 @@
 """Codex CLI model transport for upstream actor runtimes, not an actor policy.
 
-The upstream runtime owns its prompts, history and tools. Codex returns proposed
-tool calls as structured data; it must never execute those tools itself.
+Upstream benchmark runtimes receive proposed tool calls as structured data.
+Employee desktop actions use Codex's native MCP integration directly.
 """
 
 from __future__ import annotations
@@ -108,7 +108,7 @@ class CodexCLIModel:
 
     def complete(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
-        *, on_submission_started=None,
+        *, on_submission_started=None, mcp_servers: dict[str, dict[str, Any]] | None = None,
     ) -> dict:
         """Make one CLI invocation; failures/uncertain outcomes are not retried."""
         tools = tools or []
@@ -132,19 +132,32 @@ class CodexCLIModel:
                 else:
                     parts.append(part)
             model_messages.append({**message, "content": parts})
-        prompt = (
-            "Act only as the inference provider for the supplied conversation. "
-            "Follow its system/developer instructions and reply to its latest turn. "
-            "The supplied tools belong to the calling runtime: return tool calls as data, "
-            "never execute commands, inspect files, or contact services. "
-            "Return content and tool_calls matching the output schema.\n"
-            + json.dumps({"messages": model_messages, "tools": tools}, ensure_ascii=False)
-        )
+        if mcp_servers:
+            prompt = (
+                "Carry out the supplied conversation using the connected native CUA MCP tools. "
+                "Codex owns tool execution; do not return tool calls as text or JSON proposals. "
+                "Use native foreground mouse and keyboard actions in the employee's visible Chrome. "
+                "Never use shell, scripts, clipboard, browser APIs, or backend message sends. "
+                "Keep Chrome full screen. Never reveal account credentials in your final response. "
+                "Return the final result in content with an empty tool_calls array. "
+                "Only report completion after observing the requested UI outcome.\n"
+                + json.dumps({"messages": model_messages}, ensure_ascii=False)
+            )
+        else:
+            prompt = (
+                "Act only as the inference provider for the supplied conversation. "
+                "Follow its system/developer instructions and reply to its latest turn. "
+                "The supplied tools belong to the calling runtime: return tool calls as data, "
+                "never execute commands, inspect files, or contact services. "
+                "Return content and tool_calls matching the output schema.\n"
+                + json.dumps({"messages": model_messages, "tools": tools}, ensure_ascii=False)
+            )
         output, usage = self._run_structured_cli(
             prompt, ModelReply.model_json_schema(), images=images,
             on_submission_started=on_submission_started,
             reasoning_effort=self.settings.reasoning_effort,
-            reject_native_tools=True, validate_usage=True,
+            reject_native_tools=not bool(mcp_servers), validate_usage=True,
+            mcp_servers=mcp_servers,
         )
         try:
             reply = ModelReply.model_validate_json(output)
@@ -179,6 +192,7 @@ class CodexCLIModel:
         images: list[tuple[bytes, str]] | None = None,
         on_submission_started=None, reasoning_effort: str | None,
         reject_native_tools: bool, validate_usage: bool,
+        mcp_servers: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[str, dict[str, int] | None]:
         """Shared CLI JSON-schema execution and turn confirmation boundary."""
         settings = self.settings
@@ -195,6 +209,9 @@ class CodexCLIModel:
                 "--output-schema", str(schema), "--output-last-message", str(output)]
             for feature in DISABLED_FEATURES:
                 command.extend(["--disable", feature])
+            for server_name, server in (mcp_servers or {}).items():
+                for key, value in server.items():
+                    command.extend(["--config", f"mcp_servers.{server_name}.{key}={json.dumps(value)}"])
             for override in (
                 'web_search="disabled"', "project_doc_max_bytes=0",
                 'shell_environment_policy.inherit="none"',

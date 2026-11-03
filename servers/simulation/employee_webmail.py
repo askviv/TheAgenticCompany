@@ -5,7 +5,6 @@ import json
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
-from .employee_cua import EmployeeCuaAgent
 
 
 class EmployeeWebmailError(RuntimeError):
@@ -18,12 +17,13 @@ class EmployeeWebmailSender:
     def __init__(self, employee_desktops: Any, webmail_url: str):
         self.employee_desktops = employee_desktops
         self.webmail_url = webmail_url
-        self.cua = EmployeeCuaAgent(employee_desktops)
+        from .runtime import employee_cua_model
+        self.model = employee_cua_model()
 
     def _identity(self, email: str, username: str) -> str:
         return (f"Use the employee's Chrome window at {self.webmail_url}. "
                 f"The account must be {email}; sign in as {username} if necessary using "
-                "type_credential for the private password. Keep the browser full screen. "
+                "the private login credentials supplied with this request. Keep the browser full screen. "
                 "Use native CUA mouse and keyboard actions, never shell, scripts, clipboard or backend sends. ")
 
     def send(self, employee_id: str, sender_email: str, sender_username: str,
@@ -57,13 +57,18 @@ class EmployeeWebmailSender:
         with self.employee_desktops.employee_activity(employee_id):
             if verify_reply_source:
                 verify_reply_source()
-            with self.cua.session(employee_id, credentials={"username": sender_username,
-                                                          "password": sender_password}) as action:
-                def submitting():
-                    if verify_reply_source:
-                        verify_reply_source()
-                    on_submission_started()
-                action.run(instruction, on_submission_started=submitting)
+            self.employee_desktops.prepare_cua_runtime(employee_id)
+            def submitting():
+                if verify_reply_source:
+                    verify_reply_source()
+                on_submission_started()
+            self.model.complete([
+                {"role": "user", "content": instruction},
+                {"role": "user", "content": "Private login credentials; never repeat: " + json.dumps(
+                    {"username": sender_username, "password": sender_password})},
+            ], employee_id=employee_id,
+                desktop_environment=self.employee_desktops.cua_environment(employee_id),
+                on_submission_started=submitting)
             if on_submission_completed:
                 on_submission_completed()
 
@@ -72,9 +77,14 @@ class EmployeeWebmailSender:
         with self.employee_desktops.employee_action_lock(employee_id):
             if session is None:
                 self.employee_desktops.ensure_session(employee_id)
-            with self.cua.session(employee_id, credentials={"username": username, "password": password}) as action:
-                action.run(self._identity(email, username) +
-                           "Open the Inbox and check for new mail. Leave the Inbox visible; do not send or open a message.")
+            self.employee_desktops.prepare_cua_runtime(employee_id)
+            self.model.complete([
+                {"role": "user", "content": self._identity(email, username) +
+                 "Open the Inbox and check for new mail. Leave the Inbox visible; do not send or open a message."},
+                {"role": "user", "content": "Private login credentials; never repeat: " + json.dumps(
+                    {"username": username, "password": password})},
+            ], employee_id=employee_id,
+                desktop_environment=self.employee_desktops.cua_environment(employee_id))
 
     def refresh_inbox(self, employee_id: str, email: str, username: str, password: str,
                       *, session: dict[str, Any]) -> None:
@@ -84,9 +94,14 @@ class EmployeeWebmailSender:
                      message_url: str) -> None:
         self._validate_same_origin(message_url)
         with self.employee_desktops.employee_activity(employee_id):
-            with self.cua.session(employee_id, credentials={"username": username, "password": password}) as action:
-                action.run(self._identity(email, username) +
-                           f"Open and read this exact email, leaving it visible: {message_url}. Do not send a reply.")
+            self.employee_desktops.prepare_cua_runtime(employee_id)
+            self.model.complete([
+                {"role": "user", "content": self._identity(email, username) +
+                 f"Open and read this exact email, leaving it visible: {message_url}. Do not send a reply."},
+                {"role": "user", "content": "Private login credentials; never repeat: " + json.dumps(
+                    {"username": username, "password": password})},
+            ], employee_id=employee_id,
+                desktop_environment=self.employee_desktops.cua_environment(employee_id))
 
     def _validate_same_origin(self, url: str) -> None:
         expected, actual = urlsplit(self.webmail_url), urlsplit(url)

@@ -118,6 +118,27 @@ def private_secret(path: Path) -> str:
     return value
 
 
+def employee_cua_model() -> Any:
+    from pydantic import SecretStr
+
+    from .codex_remote import CodexRemoteModel, CodexRemoteSettings
+
+    config_path = Path(os.environ.get(
+        "SIMULATION_CONFIG", str(RuntimeConfig.model_fields["issue_config_path"].default)
+    ))
+    config = RuntimeConfig.model_validate(private_json(config_path))
+    url = config.employee_cua_inference_url
+    token_file = config.employee_cua_inference_token_file
+    model_name = config.employee_cua_model
+    token = private_secret(token_file)
+    return CodexRemoteModel(CodexRemoteSettings(
+        url=url,
+        bearer_token=SecretStr(token),
+        model=model_name,
+        reasoning_effort="low",
+    ))
+
+
 def employee_desktop_manager(config: RuntimeConfig | None = None):
     """Use the coordinator's private settings for host-local employee browsers."""
     from .employee_desktops import (

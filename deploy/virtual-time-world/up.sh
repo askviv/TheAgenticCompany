@@ -273,6 +273,9 @@ scp -i "$WORLD_ROOT/config/ssh_ed25519" -o BatchMode=yes -o StrictHostKeyCheckin
 # The bridge exposes only host loopback through QEMU's guest gateway.
 id company >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/company --shell /usr/sbin/nologin company
 install -d -o company -g company -m 0700 /home/company/.codex
+install -d -o company -g company -m 0700 /home/company/.ssh
+install -o company -g company -m 0600 "$WORLD_ROOT/config/ssh_ed25519" /home/company/.ssh/tac-guest-ed25519
+install -o company -g company -m 0600 "$WORLD_ROOT/config/known_hosts" /home/company/.ssh/tac-guest-known-hosts
 host_token="$WORLD_ROOT/config/codex-inference-token"
 if [[ ! -s $host_token ]]; then umask 077; openssl rand -hex 32 > "$host_token"; fi
 clock_api_token="$WORLD_ROOT/config/clock-api-token"
@@ -291,6 +294,7 @@ CODEX_INFERENCE_BEARER_TOKEN=$(cat "$host_token")
 CODEX_MODEL=$codex_model
 CODEX_HOME=/home/company/.codex
 CODEX_EXECUTABLE=$(command -v codex)
+CODEX_CUA_GUEST_SSH_PORT=$WORLD_SSH_PORT
 EOF2
 chown company:company /home/company/.codex-inference.env
 chmod 0600 /home/company/.codex-inference.env

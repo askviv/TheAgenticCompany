@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import hmac
+import os
+from pathlib import Path
+import shlex
 import logging
-from typing import Any
+from typing import Any, Literal
 
 import requests
 from fastapi import FastAPI, Header, HTTPException
@@ -30,11 +33,42 @@ class CodexRemoteSettings(BaseModel):
     reasoning_effort: str = Field(default="low", pattern="^(low|medium|high|xhigh|max)$")
 
 
+DesktopEnvironmentKey = Literal[
+    "DISPLAY", "HOME", "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "AT_SPI_BUS_ADDRESS",
+    "XDG_RUNTIME_DIR", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE",
+]
+CUA_TOOLS = [
+    "list_apps", "list_windows", "get_window_state", "get_desktop_state", "get_guide",
+    "get_screen_size", "get_cursor_position", "move_cursor", "click", "double_click",
+    "right_click", "drag", "scroll", "type_text", "press_key", "hotkey",
+    "set_agent_cursor_enabled", "get_agent_cursor_state",
+]
+
+
+def employee_cua_mcp(container: str, environment: dict[str, str]) -> dict[str, dict[str, Any]]:
+    """Native Codex MCP configuration for one isolated employee desktop."""
+    remote = ["sudo", "docker", "exec", "--interactive", "--user", "ubuntu"]
+    for key, value in {**environment, "DISPLAY": ":20", "CUA_DRIVER_PERMISSION_MODE": "standard"}.items():
+        remote.extend(["--env", f"{key}={value}"])
+    remote.extend([container, "/opt/employee-cua/cua-driver", "mcp"])
+    return {"employee_cua": {
+        "command": "/usr/bin/ssh",
+        "args": ["-T", "-i", str(Path.home() / ".ssh/tac-guest-ed25519"), "-o", "BatchMode=yes",
+                 "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes",
+                 "-o", "UserKnownHostsFile=" + str(Path.home() / ".ssh/tac-guest-known-hosts"),
+                 "-p", os.environ.get("CODEX_CUA_GUEST_SSH_PORT", "22220"), "ubuntu@127.0.0.1", shlex.join(remote)],
+        "required": True,
+        "enabled_tools": CUA_TOOLS,
+    }}
+
+
 class CodexInferenceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     messages: list[dict[str, Any]]
     tools: list[dict[str, Any]] = Field(default_factory=list)
+    desktop_container: str | None = Field(default=None, pattern=r"^tac-employee-desktop-[a-f0-9]{24}$")
+    desktop_environment: dict[DesktopEnvironmentKey, str] = Field(default_factory=dict)
 
 
 class CodexInferenceResponse(BaseModel):
@@ -81,8 +115,14 @@ class CodexRemoteModel:
         if session is None:
             self.session.trust_env = False
 
-    def complete(self, messages: list[dict[str, Any]], tools=None, *, on_submission_started=None) -> dict:
-        payload = CodexInferenceRequest(messages=messages, tools=tools or []).model_dump(mode="json")
+    def complete(self, messages: list[dict[str, Any]], tools=None, *, on_submission_started=None,
+                 employee_id: str | None = None, desktop_environment: dict[str, str] | None = None) -> dict:
+        container = None
+        if employee_id is not None:
+            from .employee_desktops import EmployeeDesktopRuntime
+            container = EmployeeDesktopRuntime._container_name(employee_id)
+        payload = CodexInferenceRequest(messages=messages, tools=tools or [], desktop_container=container,
+                                       desktop_environment=desktop_environment or {}).model_dump(mode="json")
         if on_submission_started is not None:
             on_submission_started()
         try:
@@ -143,7 +183,11 @@ def create_codex_inference_app(settings: CodexCLISettings, bearer_token: SecretS
         if not authorization or not authorization.startswith("Bearer ") or not hmac.compare_digest(supplied, token):
             raise HTTPException(status_code=401, detail="unauthorized")
         try:
-            return model.complete(request.messages, tools=request.tools)
+            return model.complete(
+                request.messages, tools=request.tools,
+                mcp_servers=employee_cua_mcp(request.desktop_container, request.desktop_environment)
+                if request.desktop_container is not None else None,
+            )
         except CodexModelError as error:
             logging.getLogger(__name__).exception(
                 "Codex inference failed exception_type=%s", type(error).__name__

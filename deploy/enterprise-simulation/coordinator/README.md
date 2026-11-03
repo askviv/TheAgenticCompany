@@ -445,8 +445,7 @@ Employee stream access is controlled in the coordinator runtime JSON:
 
 The default is `true`. Selkies enforces the viewer role on the server: keyboard,
 mouse, clipboard, gamepad, command input and file transfers are blocked for the
-stream credentials. Employee automation continues through its private Chrome
-DevTools connection. Set the value to `false` to allow viewer control.
+stream credentials. Employee automation uses its private native CUA MCP connection. Set the value to `false` to allow viewer control.
 Docker environment settings apply when a desktop container is created; existing
 containers must be recreated to apply a changed mode, retaining their profile volumes.
 
@@ -454,13 +453,14 @@ Employee desktops use Selkies' native fixed 1920 × 1080 resolution with dynamic
 resize locked off. Grid thumbnails and focused viewers scale the same desktop;
 connecting, focusing or disconnecting a viewer does not change its resolution.
 
-Native employee computer actions use the official Cua Driver MCP catalog, exposed
-through the existing Codex model transport. The model receives native desktop
-screenshots and accessibility state and chooses native foreground clicks, cursor
-movement and keyboard actions. No Playwright or browser script action path is used.
-The local credential tool types passwords without placing their values in model
-prompts. Message preparation finishes before the existing durable submission
-boundary; delivery is confirmed from native mailbox or chat records.
+Employee agents use Codex's native MCP support connected directly to the official
+Cua Driver in their own desktop container. Codex owns the agent/tool loop and
+receives native screenshots and accessibility state directly from CUA. There is
+no application tool dispatcher, custom finish tool, screenshot adapter or
+Playwright action path. The application's existing submission state and native
+mail/chat receipts remain responsible for idempotency and delivery confirmation.
+Private login credentials use the authenticated inference connection and are not
+written to application logs.
 
 Runtime configuration uses `employee_cua_driver_file`, `employee_cua_inference_url`,
 `employee_cua_inference_token_file` and `employee_cua_model`. The pinned driver is

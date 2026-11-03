@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 import requests
+import json
 
 from .scenarios import RealChatTransport
 
@@ -41,10 +42,11 @@ class CuaChatTransport:
             self._headers_by_identity[key] = headers
         return headers
 
-    def _read_messages(self, base: str, headers: dict[str, str], room_id: str) -> list[dict[str, Any]]:
+    def _read_messages(self, base: str, headers: dict[str, str], room: dict[str, Any]) -> list[dict[str, Any]]:
+        endpoint = {"c": "channels.history", "p": "groups.history", "d": "im.history"}[room["t"]]
         response = self.session.get(
-            urljoin(base, "api/v1/rooms.messages"), headers=headers,
-            params={"roomId": room_id}, timeout=None,
+            urljoin(base, "api/v1/" + endpoint), headers=headers,
+            params={"roomId": room["_id"], "sort": json.dumps({"ts": -1})}, timeout=None,
         )
         response.raise_for_status()
         messages = response.json().get("messages") or []
@@ -88,28 +90,32 @@ class CuaChatTransport:
         message_text = (mention + " " if mention else "") + fixture["chat_message"]
         if on_effective_message_text is not None:
             on_effective_message_text(message_text)
-        baseline_ids = {message["_id"] for message in self._read_messages(base, headers, room_id)
+        baseline_ids = {message["_id"] for message in self._read_messages(base, headers, room)
                         if isinstance(message.get("_id"), str)}
         from .browser_chat import employee_id_for_email
 
         employee_id = employee_id_for_email(self.desktop_manager.company_profile_path, box["address"])
-        from servers.simulation.employee_cua import EmployeeCuaAgent
+        from servers.simulation.runtime import employee_cua_model
 
         room_url = self._helpers._browser_room_url(base, room)
         instruction = (
             f"Open {base} in the employee's managed browser. If Rocket.Chat requires login, use the "
-            f"provided employee credential helper with username {credentials['username']!r} and the "
+            f"private login credentials supplied with this request, username {credentials['username']!r} and the "
             "stored password; do not reveal the password. Navigate to the exact room URL "
             f"{room_url}. In the message composer, type the following message exactly using native "
             "keystrokes (do not paste), then submit it once with Enter. Do not alter or repeat it.\n\n"
             f"{message_text}"
         )
         with self.desktop_manager.employee_activity(employee_id):
-            with EmployeeCuaAgent(self.desktop_manager).session(
-                    employee_id, credentials=credentials) as action:
-                action.run(instruction, on_submission_started=on_submission_started)
+            self.desktop_manager.prepare_cua_runtime(employee_id)
+            employee_cua_model().complete([
+                {"role": "user", "content": instruction},
+                {"role": "user", "content": "Private login credentials; never repeat: " + json.dumps(credentials)},
+            ], employee_id=employee_id,
+                desktop_environment=self.desktop_manager.cua_environment(employee_id),
+                on_submission_started=on_submission_started)
 
-        matches = [message for message in self._read_messages(base, headers, room_id)
+        matches = [message for message in self._read_messages(base, headers, room)
                    if message.get("_id") not in baseline_ids and message.get("rid") == room_id
                    and message.get("msg") == message_text and isinstance(message.get("u"), dict)
                    and message["u"].get("_id") == author_id]

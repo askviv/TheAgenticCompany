@@ -783,6 +783,52 @@ class EmployeeDesktopRuntime:
                 os.chown(database_file, 1000, 1000)
         return db
 
+    def cua_environment(self, employee_id: str) -> dict[str, str]:
+        container = self._container_name(employee_id)
+        # Read only display-session variables from the already-running Chrome
+        # process. Never return the full process environment or expose it to Codex.
+        script = r"""
+    set -eu
+    pid="$(pgrep -f 'remote-debugging-port=9222' | head -n 1)"
+    test -n "$pid"
+    tr '\000' '\n' < "/proc/$pid/environ" |
+      awk -F= '$1 ~ /^(XAUTHORITY|DBUS_SESSION_BUS_ADDRESS|AT_SPI_BUS_ADDRESS|XDG_RUNTIME_DIR|XDG_CURRENT_DESKTOP|XDG_SESSION_TYPE)$/ { print }'
+    if ! tr '\000' '\n' < "/proc/$pid/environ" | grep -q '^XDG_RUNTIME_DIR='; then
+      for runtime in /run/user/1000 /tmp/runtime-ubuntu; do
+        if [ -d "$runtime" ]; then
+          printf 'XDG_RUNTIME_DIR=%s\n' "$runtime"
+          break
+        fi
+      done
+    fi
+    if ! tr '\000' '\n' < "/proc/$pid/environ" | grep -q '^DBUS_SESSION_BUS_ADDRESS='; then
+      runtime="$(tr '\000' '\n' < "/proc/$pid/environ" | sed -n 's/^XDG_RUNTIME_DIR=//p' | head -n 1)"
+      if [ -z "$runtime" ]; then
+        for candidate in /run/user/1000 /tmp/runtime-ubuntu; do
+          if [ -d "$candidate" ]; then runtime="$candidate"; break; fi
+        done
+      fi
+      if [ -n "$runtime" ] && [ -S "$runtime/bus" ]; then
+        printf 'DBUS_SESSION_BUS_ADDRESS=unix:path=%s/bus\n' "$runtime"
+      fi
+    fi
+    """
+        result = self._docker(
+            "exec", "--user", "ubuntu", container, "/bin/sh", "-c", script,
+        )
+        environment: dict[str, str] = {"DISPLAY": ":20", "HOME": "/home/ubuntu", "XDG_SESSION_TYPE": "x11"}
+        allowed = {
+            "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS", "AT_SPI_BUS_ADDRESS",
+            "XDG_RUNTIME_DIR", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE",
+        }
+        for line in result.stdout.splitlines():
+            name, separator, value = line.partition("=")
+            if separator and name in allowed:
+                if "\x00" in value or "\n" in value or "\r" in value:
+                    raise EmployeeDesktopError(f"Employee desktop returned an invalid {name} value")
+                environment[name] = value
+        return environment
+
     def configure_chrome_policy(self, employee_id: str) -> None:
         """Apply Chrome's managed policy to the employee's own desktop."""
         container = self._container_name(employee_id)
