@@ -471,7 +471,12 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                            chat_browser_url=sent['browser_url'])
             except Exception as error:
                 logging.exception('Experiment dispatch failed run=%s', run_id)
-                update(run_id,status='uncertain',error=f'Could not confirm delivery ({type(error).__name__}). Retry checks the same request before sending again.')
+                if isinstance(error, CoordinatorError) and error.code == 'browser_send_failed_before_submit':
+                    detail = 'The employee desktop failed before the message was submitted. Retry resumes this same request.'
+                else:
+                    code = f'{type(error).__name__}: {error.code}' if isinstance(error, CoordinatorError) else type(error).__name__
+                    detail = f'Could not confirm delivery ({code}). Retry checks the same request before sending again.'
+                update(run_id,status='uncertain',error=detail)
                 return
             try: refresh(run_id)
             except Exception:

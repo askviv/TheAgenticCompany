@@ -984,8 +984,21 @@ class EmployeeDesktopRuntime:
                 "xdpyinfo", "-display", ":20", check=False,
             )
             if probe.returncode == 0:
-                return
-            if probe.returncode != 1:
+                # Xvfb can be ready before LXQt publishes the D-Bus session
+                # used by Chrome and native CUA accessibility.
+                session = self._docker(
+                    "exec", "--user", "ubuntu", container, "/bin/sh", "-c",
+                    'pid=$(pgrep -x lxqt-session | head -n 1); test -n "$pid" && '
+                    r"tr '\000' '\n' < /proc/$pid/environ | grep -q '^DBUS_SESSION_BUS_ADDRESS='",
+                    check=False,
+                )
+                if session.returncode == 0:
+                    return
+                if session.returncode != 1:
+                    raise EmployeeDesktopError("Desktop session readiness probe failed") from subprocess.CalledProcessError(
+                        session.returncode, [self.docker_binary, "exec", container, "pgrep"],
+                    )
+            elif probe.returncode != 1:
                 raise EmployeeDesktopError("X11 display readiness probe failed") from subprocess.CalledProcessError(
                     probe.returncode, [self.docker_binary, "exec", container, "xdpyinfo"],
                 )

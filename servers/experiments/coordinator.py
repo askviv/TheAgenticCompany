@@ -77,7 +77,15 @@ class SimulationCoordinatorClient:
                 if isinstance(candidate,str) and re.fullmatch(
                     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",candidate):
                     correlation_id=candidate
-            raise CoordinatorError(endpoint, f"http_{status}",correlation_id) from error
+            code = f"http_{status}"
+            if error.response is not None:
+                try:
+                    detail = error.response.json().get("detail")
+                except (ValueError, AttributeError):
+                    detail = None
+                if isinstance(detail, str) and re.fullmatch(r"[a-z][a-z0-9_]{0,95}", detail):
+                    code = detail
+            raise CoordinatorError(endpoint, code,correlation_id) from error
         except requests.RequestException as error:
             raise CoordinatorError(endpoint, "transport_error") from error
         except ValueError as error:
