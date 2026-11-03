@@ -21,7 +21,6 @@ from typing import Any
 import requests
 
 from servers.simulation.engine import EngineConflict, SimulationEngine
-from servers.simulation.mail import SMTP4DevAPIError
 from servers.simulation.models import (
     AdvanceClock, ERPAction, SendMessage, StartScenario, UpdateCase,
 )
@@ -132,8 +131,6 @@ def _is_transient_mailbox_read_error(error: Exception) -> bool:
     transient_types = (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError)
     if isinstance(error, transient_types):
         return True
-    if not isinstance(error, SMTP4DevAPIError):
-        return False
     cause = error.__cause__ or error.__context__
     while cause is not None:
         if isinstance(cause, transient_types):

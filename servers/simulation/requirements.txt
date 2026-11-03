@@ -26,8 +26,6 @@ imapclient==4.1.0
     # via -r servers/simulation/requirements.in
 itsdangerous==2.2.0
     # via -r servers/simulation/requirements.in
-msgpack==1.1.2
-    # via signalrcore
 numpy==2.5.4
     # via -r servers/simulation/requirements.in
 opentelemetry-api==1.45.2
@@ -41,8 +39,6 @@ pydantic-core==2.50.2
 python-dateutil==2.9.0.post0
     # via -r servers/simulation/requirements.in
 requests==2.34.2
-    # via -r servers/simulation/requirements.in
-signalrcore==1.0.2
     # via -r servers/simulation/requirements.in
 simpy==4.1.2
     # via -r servers/simulation/requirements.in

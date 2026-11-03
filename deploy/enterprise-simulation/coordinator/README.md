@@ -125,13 +125,11 @@ sudo systemctl status tac-enterprise-simulation.service
 
 Inspect safe service status with `journalctl -u tac-enterprise-simulation.service`.
 The API's unauthenticated `/health` response reports only component status, not
-private actor state or provider response bodies. Workers wait for native Mailu
-IMAP IDLE notifications and smtp4dev's native SignalR `messageschanged` event
-on `/hubs/notifications`; they never poll smtp4dev or advance simulated time.
-The live Mini hub negotiation and client handshake were verified without
-sending a test message. The event is mailbox-wide, so the handler wakes one
-coalescing worker which pumps active runs and applies each run's exact
-run/generation correlation. Clock advancement remains controller-only.
+private actor state or provider response bodies. Employee mailbox workers use
+native Mailu IMAP IDLE notifications and wake a coalescing processor. The
+coordinator does not subscribe to or poll Viv's inbox. Employees receive and
+respond to replies in their own Mailu browser sessions through native CUA.
+Outbound email completes on SMTP acceptance, without recipient inbox checks.
 
 The employee-facing provider portal is a separate FastAPI service on port
 8132. It authenticates staff against each existing Mailu mailbox and only shows
@@ -166,11 +164,6 @@ bootstrap, service management, and the frozen dependency versions. Neither
 worker exposes its port beyond loopback. The Codex adapter does not resubmit a
 whole actor turn after an uncertain result; this describes the adapter's
 behavior, not retry behavior inside the underlying CLI/provider protocol.
-
-The source project's [SignalR testing guide](https://github.com/rnwood/smtp4dev/blob/master/docs/Testing.md)
-documents the hub endpoint and `messageschanged` callback. The coordinator uses
-the pinned Python [SignalR Core client](https://pypi.org/project/signalrcore/)
-in `servers/simulation/requirements.txt`.
 
 ## Operator API client
 
@@ -458,7 +451,8 @@ Cua Driver in their own desktop container. Codex owns the agent/tool loop and
 receives native screenshots and accessibility state directly from CUA. There is
 no application tool dispatcher, custom finish tool, screenshot adapter or
 Playwright action path. The application's existing submission state and native
-mail/chat receipts remain responsible for idempotency and delivery confirmation.
+mail submission evidence and chat receipts remain responsible for idempotency.
+SMTP acceptance completes outbound email; no recipient inbox is queried for confirmation.
 Private login credentials use the authenticated inference connection and are not
 written to application logs.
 

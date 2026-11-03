@@ -245,7 +245,7 @@ def environment_manifest() -> dict:
         "source_revision": source_revision,
         "source_dirty": source_dirty,
         "packages": {name: importlib.metadata.version(name) for name in
-                     ("fastapi", "pydantic", "simpy", "numpy", "requests", "IMAPClient", "signalrcore")},
+                     ("fastapi", "pydantic", "simpy", "numpy", "requests", "IMAPClient")},
         "actor_mode": "upstream_model_backed",
         "deterministic_components": ["simpy", "ecommercebench_negotiation", "ecommercebench_market"],
         "agent_execution": "not_measured",
@@ -260,44 +260,19 @@ class MailWorkers:
     Transient IMAP transport/authentication failures reconnect after the next
     listener renewal interval; programming/configuration failures remain visible.
     """
-    def __init__(self, engine: SimulationEngine, actors: list[dict], *, hub_connection_factory=None,
-                 viv_mailbox_name: str = "Default", mailbox_idle_renewal_seconds: float = 30):
+    def __init__(self, engine: SimulationEngine, actors: list[dict], *,
+                 mailbox_idle_renewal_seconds: float = 30):
         self.engine = engine
         self.actors = [actor for actor in actors if actor.get("kind") != "agent"]
-        self.viv_mailbox_name = viv_mailbox_name
         self.mailbox_idle_renewal_seconds = mailbox_idle_renewal_seconds
-        self._hub_connection_factory = hub_connection_factory
         self.changed = threading.Event()
         self.stopped = threading.Event()
         self.errors: dict[str, str] = {}
         self.threads: list[threading.Thread] = []
-        self._hub_connection = None
-        self._hub_closed = threading.Event()
-        self._hub_connected = threading.Event()
-        self._viv_activity_condition = threading.Condition()
-        self._viv_activity_sequence = 0
         self._employee_inbox_worker_lock = threading.Lock()
         self._employee_inbox_queues: dict[str, queue.Queue[dict[str, Any] | None]] = {}
         self.employee_inbox_coalesced_events: dict[str, int] = {}
 
-    def viv_activity_version(self) -> int:
-        with self._viv_activity_condition:
-            return self._viv_activity_sequence
-
-    def wait_for_viv_activity(self, after_version: int, timeout: float = 30) -> bool:
-        """Wait for a native Viv mailbox notification newer than a cursor."""
-        with self._viv_activity_condition:
-            notified = self._viv_activity_condition.wait_for(
-                lambda: self._viv_activity_sequence > after_version or self.stopped.is_set(),
-                timeout=timeout,
-            )
-            return notified and self._viv_activity_sequence > after_version
-
-    def _signal_viv_activity(self) -> None:
-        with self._viv_activity_condition:
-            self._viv_activity_sequence += 1
-            self._viv_activity_condition.notify_all()
-        self.changed.set()
 
     def _failure(self, component: str, error: BaseException) -> None:
         self.errors[component] = type(error).__name__
@@ -381,70 +356,6 @@ class MailWorkers:
             if self.stopped.is_set():
                 return
 
-    def _viv_notification(self, arguments: Any) -> None:
-        # signalrcore 1.0.2 invokes handlers with HubMessage.arguments (a list),
-        # even when the hub method has only one parameter.
-        mailbox = arguments[0] if isinstance(arguments, (list, tuple)) and len(arguments) == 1 else arguments
-        if isinstance(mailbox, str) and mailbox.casefold() == self.viv_mailbox_name.casefold():
-            self._signal_viv_activity()
-
-    def _watch_viv(self) -> None:
-        try:
-            api_base = self.engine.mail.config.smtp4dev_api_base_url.rstrip("/")
-            if self._hub_connection_factory is None:
-                from signalrcore.hub_connection_builder import HubConnectionBuilder
-
-                connection = (
-                    HubConnectionBuilder()
-                    .with_url(api_base + "/hubs/notifications")
-                    .with_automatic_reconnect({
-                        "type": "raw",
-                        "keep_alive_interval": _company_clock_interval(15, self.engine),
-                        "reconnect_interval": _company_clock_interval(5, self.engine),
-                        "max_attempts": 10,
-                    })
-                    .build()
-                )
-            else:
-                connection = self._hub_connection_factory(api_base + "/hubs/notifications")
-            self._hub_connection = connection
-            connection.on("messageschanged", self._viv_notification)
-            connection.on_open(self._viv_opened)
-            connection.on_close(self._viv_closed_callback)
-            connection.on_error(self._viv_error)
-            connection.start()
-            self._hub_closed.wait()
-            if not self.stopped.is_set() and "smtp4dev_notifications" not in self.errors:
-                self._failure("smtp4dev_notifications", ConnectionError("SignalR connection closed"))
-        except Exception as error:
-            if not self.stopped.is_set() and "smtp4dev_notifications" not in self.errors:
-                self._failure("smtp4dev_notifications", error)
-
-    def _viv_opened(self) -> None:
-        self._hub_connected.set()
-        self.errors.pop("smtp4dev_notifications", None)
-        self._signal_viv_activity()
-
-    def _viv_closed_callback(self) -> None:
-        self._hub_closed.set()
-
-    def _viv_error(self, error: Any) -> None:
-        # Transport callbacks can carry provider-specific text. Keep diagnostics
-        # to exception classes and stack locations only.
-        self.errors["smtp4dev_notifications"] = "SignalRTransportError"
-        if isinstance(error, BaseException):
-            frames = [(frame.filename, frame.lineno, frame.name)
-                      for frame in traceback.extract_tb(error.__traceback__)]
-            causes = []
-            cause = error.__cause__ or error.__context__
-            while cause is not None:
-                causes.append(type(cause).__name__)
-                cause = cause.__cause__ or cause.__context__
-            LOG.error("simulation worker failed component=smtp4dev_notifications exception_type=%s causes=%s stack=%s",
-                      type(error).__name__, causes, frames)
-        else:
-            LOG.error("simulation worker failed component=smtp4dev_notifications callback_type=%s",
-                      type(error).__name__)
 
     def _process(self) -> None:
         while not self.stopped.is_set():
@@ -478,8 +389,6 @@ class MailWorkers:
             components["mailu_mailboxes"] = "failed"
         if any(key.startswith("employee_inbox:") for key in self.errors):
             components["employee_inboxes"] = "failed"
-        if "smtp4dev_notifications" in self.errors:
-            components["viv_notifications"] = "failed"
         if any(key.startswith("run:") for key in self.errors):
             components["run_processor"] = "failed"
         try:
@@ -501,9 +410,6 @@ class MailWorkers:
         self.threads += [threading.Thread(target=self._watch, args=(actor,),
                                         name="simulation-mail-" + actor["actor_id"], daemon=True)
                          for actor in self.actors]
-        if hasattr(self.engine.mail, "config") and hasattr(self.engine.mail.config, "smtp4dev_api_base_url"):
-            self.threads.append(threading.Thread(target=self._watch_viv,
-                                                 name="simulation-viv-notifications", daemon=True))
         startup_threads = tuple(self.threads)
         for thread in startup_threads:
             thread.start()
@@ -520,11 +426,6 @@ class MailWorkers:
             except queue.Full:
                 # The worker will exit after finishing its already queued event.
                 pass
-        if self._hub_connection is not None:
-            try:
-                self._hub_connection.stop()
-            except Exception as error:
-                self._failure("smtp4dev_notifications_stop", error)
         for thread in self.threads:
             thread.join()
 
@@ -825,7 +726,6 @@ def build_app(config_path: str | Path):
             engine.company_issue_activity = issue_workflow.service.activity
     app = create_app(engine, private_json(config.principals_file))
     workers = MailWorkers(engine, config.mail["actors"],
-                          viv_mailbox_name=config.mail.get("smtp4dev_mailbox_name", "Default"),
                           mailbox_idle_renewal_seconds=config.mailbox_idle_renewal_seconds)
     company_clock = CompanyClockWorker(engine, shared_time_enabled=config.shared_company_clock_enabled,
                                        observation_seconds=config.company_clock_observation_seconds)
@@ -916,8 +816,6 @@ def build_app(config_path: str | Path):
     else:
         engine.provider_experiment_unavailable = provider_experiments_unavailable or {
             "code": "provider_experiments_unavailable"}
-    engine.viv_activity_version = workers.viv_activity_version
-    engine.wait_for_viv_activity = workers.wait_for_viv_activity
 
     feedback_workflow = None
     feedback_configuration_error = None

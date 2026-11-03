@@ -821,16 +821,6 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         load_run(run_id)
         return engine.list_pending(run_id)
 
-    @app.get("/agents/{actor_id}/inbox")
-    def inbox(
-        actor_id: str, run_id: UUID = Query(...), principal: Principal = Depends(authenticate),
-    ):
-        if principal.role not in ("controller", "agent"):
-            raise HTTPException(status_code=403, detail="Operation is not permitted for this principal")
-        authorize_run(run_id, principal, agent_allowed=True, privileged_roles=("controller",))
-        if principal.role == "agent" and actor_id != principal.actor_id:
-            raise HTTPException(status_code=404, detail="Inbox not found")
-        return engine.inbox(run_id, actor_id)
 
     @app.get("/cases/{case_id}")
     def case(

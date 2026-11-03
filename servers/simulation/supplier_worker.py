@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from copy import deepcopy
 import hashlib
 import io
@@ -66,7 +66,7 @@ class CoffeeTranscriptStore:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS coffee_supplier_transcripts (
@@ -82,7 +82,7 @@ class CoffeeTranscriptStore:
             )
 
     def load(self, run_id: str, generation: int, actor_id: str) -> dict[str, Any] | None:
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             row = connection.execute(
                 "SELECT messages_json,model_id,upstream_commit,updated_turn_id "
                 "FROM coffee_supplier_transcripts WHERE run_id=? AND generation=? AND actor_id=?",
@@ -98,7 +98,7 @@ class CoffeeTranscriptStore:
         model_id: str, turn_id: str,
     ) -> None:
         encoded = json.dumps(messages, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "INSERT INTO coffee_supplier_transcripts "

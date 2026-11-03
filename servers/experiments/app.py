@@ -242,7 +242,6 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     catalogue_lock=threading.RLock()
     compatibility=public_compatibility()
     inputs=json.loads(Path(__file__).with_name('inputs.json').read_text())['tasks']
-    refresh_lock=threading.RLock()
     rocket=client_factory()
     def client(): return rocket
     coordinator_instance=None
@@ -271,7 +270,6 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         return definition
     executor=ThreadPoolExecutor(max_workers=4, thread_name_prefix='experiments')
     app.extensions['experiments_executor']=executor
-    company_lock=threading.RLock()
     changed=threading.Condition()
     version=[0]
     def notify():
@@ -288,19 +286,21 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         return data
     def all_runs():
         with db() as c: return [dict(r) for r in c.execute('SELECT * FROM runs ORDER BY created_at DESC')]
-    def update(run_id, **values):
+    def update(run_id, *, expected_revision=None, **values):
         material={key:value for key,value in values.items() if key!='simulated_time'}
+        revision_clause=' AND revision=?' if expected_revision is not None else ''
+        revision_params=(expected_revision,) if expected_revision is not None else ()
         with db() as c:
             changed_row=0
             if material:
                 changed_row=c.execute(
                     'UPDATE runs SET '+','.join(k+'=?' for k in values)+',revision=revision+1 '
-                    +'WHERE id=? AND ('+' OR '.join(k+' IS NOT ?' for k in material)+')',
-                    (*values.values(),run_id,*material.values()),
+                    +'WHERE id=?'+revision_clause+' AND ('+' OR '.join(k+' IS NOT ?' for k in material)+')',
+                    (*values.values(),run_id,*revision_params,*material.values()),
                 ).rowcount
             if not changed_row and 'simulated_time' in values:
-                c.execute('UPDATE runs SET simulated_time=? WHERE id=? AND simulated_time IS NOT ?',
-                          (values['simulated_time'],run_id,values['simulated_time']))
+                c.execute('UPDATE runs SET simulated_time=? WHERE id=?'+revision_clause+' AND simulated_time IS NOT ?',
+                          (values['simulated_time'],run_id,*revision_params,values['simulated_time']))
         if changed_row: notify()
     def save_company(state, error=None, *, clear_error=False):
         with db() as c:
@@ -582,15 +582,14 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         update(run_id,status=status,simulated_time=linked.get('simulated_time'),
                activity=json.dumps(activity),error=None)
     def refresh(run_id):
-        with refresh_lock:
-            item=row(run_id)
-            if not item['message_id']: return
-            chat=client()
-            messages=chat.thread(item['room_id'],item['message_id'])
-            if messages != item['messages'] or item['error']:
-                status=item['status']
-                if status!='completed' and any(m['author']==chat.viv_username for m in messages): status='viv_replied'
-                update(run_id,messages=json.dumps(messages),status=status,error=None)
+        item=row(run_id)
+        if not item['message_id']: return
+        chat=client()
+        messages=chat.thread(item['room_id'],item['message_id'])
+        if messages != item['messages'] or item['error']:
+            status=item['status']
+            if status!='completed' and any(m['author']==chat.viv_username for m in messages): status='viv_replied'
+            update(run_id,expected_revision=item['revision'],messages=json.dumps(messages),status=status,error=None)
     def refresh_channel(room_id):
         with app.app_context():
             for item in all_runs():
@@ -1083,21 +1082,20 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def start_company():
         requested_key=request.form.get('idempotency_key')
         if not requested_key: abort(400)
-        with company_lock:
-            try:
-                current=company_state()
-                if current['status']=='paused':
-                    state=safe_company(coordinator().pause_company(False,idempotency_key=requested_key))
-                    state.update(experiments=current['experiments'],activity=current['activity'])
-                    save_company(state,clear_error=True)
-                    return jsonify(company=api_company_shape(state))
-                if current['status']=='running':
-                    return jsonify(company=api_company_shape(current))
-                return jsonify(error='The persistent company is not initialized. Retry after the coordinator is ready.'),503
-            except Exception as error:
-                logging.exception('Company resume failed')
-                save_company_error(f'Company resume could not be confirmed ({type(error).__name__}). Retry to reconcile the requested state.')
-                return jsonify(error='Company resume could not be confirmed. Retry to reconcile the requested state.'),502
+        try:
+            current=company_state()
+            if current['status']=='paused':
+                state=safe_company(coordinator().pause_company(False,idempotency_key=requested_key))
+                state.update(experiments=current['experiments'],activity=current['activity'])
+                save_company(state,clear_error=True)
+                return jsonify(company=api_company_shape(state))
+            if current['status']=='running':
+                return jsonify(company=api_company_shape(current))
+            return jsonify(error='The persistent company is not initialized. Retry after the coordinator is ready.'),503
+        except Exception as error:
+            logging.exception('Company resume failed')
+            save_company_error(f'Company resume could not be confirmed ({type(error).__name__}). Retry to reconcile the requested state.')
+            return jsonify(error='Company resume could not be confirmed. Retry to reconcile the requested state.'),502
     @app.post('/company/pause')
     def pause_company():
         raw=request.form.get('paused')

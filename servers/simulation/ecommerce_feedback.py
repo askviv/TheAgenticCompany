@@ -869,7 +869,7 @@ class EcommerceNativeActionCheckpoint:
                 or erp_document.get("custom_source_system") != NATIVE_ECOMMERCE_SOURCE
                 or erp_document.get("custom_source_id") != product_id):
             raise ValueError("E-Commerce source Item document does not match immutable upstream identity")
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             state = connection.execute(
                 "SELECT * FROM ecommerce_native_world_state WHERE singleton=1"
             ).fetchone()
@@ -994,7 +994,7 @@ class EcommerceNativeActionCheckpoint:
 
     def capture_evaluation_snapshot(self) -> dict[str, Any]:
         """Capture immutable provider bytes and identity while excluding clock writers."""
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             state = connection.execute(
                 "SELECT * FROM ecommerce_native_world_state WHERE singleton=1"
             ).fetchone()
@@ -1035,7 +1035,7 @@ class EcommerceNativeActionCheckpoint:
 
     def evaluation_source_identity(self) -> dict[str, Any]:
         """Read only the pinned bootstrap identity needed before evaluation reservation."""
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             row = connection.execute(
                 "SELECT identity_json,upstream_commit FROM ecommerce_native_world_state WHERE singleton=1"
             ).fetchone()
@@ -1078,7 +1078,7 @@ class EcommerceNativeActionCheckpoint:
         checkpoint_hash = hashlib.sha256(checkpoint_bytes).hexdigest()
         if checkpoint_hash != snapshot.get("native_state_hash"):
             raise StoreConflict("E-Commerce captured provider checkpoint changed after snapshot")
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             row = connection.execute(
                 "SELECT identity_json,store_id,upstream_commit FROM ecommerce_native_world_state WHERE singleton=1"
             ).fetchone()
@@ -1127,7 +1127,7 @@ class EcommerceNativeActionCheckpoint:
         digest = hashlib.sha256(path.read_bytes()).hexdigest()
         if digest != snapshot.get("native_state_hash"):
             raise StoreConflict("E-Commerce captured provider checkpoint changed after evaluation")
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             row = connection.execute(
                 "SELECT identity_json,store_id,upstream_commit FROM ecommerce_native_world_state WHERE singleton=1"
             ).fetchone()
@@ -1148,7 +1148,7 @@ class EcommerceNativeActionCheckpoint:
         current = _plain(evidence)
         route = _plain(mapping)
         if route.get("erp_doctype") == "Item" and not route.get("native_context"):
-            with self.store.transaction() as connection:
+            with self.store.transaction(write=False) as connection:
                 stored_mapping = connection.execute(
                     "SELECT baseline_json FROM company_record_mappings WHERE mapping_id=?",
                     (route.get("mapping_id"),),
@@ -1276,726 +1276,730 @@ class EcommerceNativeActionCheckpoint:
             action_rows = connection.execute(
                 "SELECT request_json,result_json FROM ecommerce_native_action_receipts"
             ).fetchall()
-            for action_row in action_rows:
-                request_action = json.loads(action_row["request_json"])
-                action_result = json.loads(action_row["result_json"])
-                evidence = action_result.get("outcome", {}).get("evidence", {})
-                batch_id = evidence.get("batch_id")
-                arguments = request_action.get("arguments", {})
-                action_kind = request_action.get("native_action")
-                if action_result.get("accepted") and action_kind in {
-                    "ship_orders", "withdraw", "process_structured_order",
-                }:
-                    outcome = action_result.get("outcome", {})
-                    occurred_at = outcome.get("company_time") or request_action.get("company_time")
-                    if action_kind == "ship_orders":
-                        direction, native_amount = "withdrawal", evidence.get("shipping_cost")
-                        movement_type = "shipment"
-                        reference = f"shipment:{evidence.get('shipment_id')}"
-                    elif action_kind == "withdraw":
-                        direction, native_amount = "deposit", evidence.get("amount")
-                        movement_type = "marketplace_settlement"
-                        reference = str(evidence.get("payment_entry") or "")
-                    else:
-                        direction, native_amount = "withdrawal", evidence.get("native_total_charged")
-                        movement_type = "supplier_purchase"
-                        reference = str(evidence.get("purchase_order") or "")
-                    try:
-                        event_time = datetime.fromisoformat(
-                            str(occurred_at).replace("Z", "+00:00")
-                        )
-                        amount_native = Decimal(str(native_amount))
-                    except (TypeError, ValueError, InvalidOperation):
-                        event_time = None
-                        amount_native = Decimal("NaN")
-                    if (event_time is None or event_time.tzinfo is None
-                            or event_time.utcoffset() is None or not amount_native.is_finite()
-                            or amount_native <= 0):
-                        unmapped_outcomes.append({
-                            "event_type": "bank_movement", "source_action_id": action_result.get("action_id"),
-                            "mapping_status": "inconclusive",
-                            "reason": "Pinned E-Commerce bank movement lacks an exact amount or aware company-time receipt",
-                        })
-                    else:
-                        action_id = str(action_result.get("action_id", ""))
-                        source_id = f"bank:{state['store_id']}:{action_id}"
-                        if source_id not in acknowledged_source_ids:
-                            amount = amount_native / units_per_currency
-                            bank_fact = {
-                                "store_id": state["store_id"],
-                                "store_type": identity["store_type"],
-                                "action_id": action_id,
-                                "movement_type": movement_type,
-                                "direction": direction,
-                                "amount": format(amount, "f"),
-                                "amount_native_units": format(amount_native, "f"),
-                                "currency": money_unit["currency"],
-                                "occurred_at": event_time.astimezone(timezone.utc).isoformat(),
-                                "reference": reference,
-                                "bank_balance_after": outcome.get("evidence", {}).get("bank_balance_after"),
-                            }
-                            source_records_by_id[source_id] = {
-                                "id": source_id,
-                                "source": NATIVE_ECOMMERCE_SOURCE,
-                                "kind": "bank_transaction",
-                                "source_ref": action_id,
-                                "occurred_at": bank_fact["occurred_at"],
-                                "upstream_commit": UPSTREAM_COMMIT,
-                                "party": f"ecommercebench-marketplace:{identity['store_type']}",
-                                "currency": money_unit["currency"],
-                                "amount": bank_fact["amount"],
-                                "native_units_per_currency_unit": money_unit[
-                                    "native_units_per_currency_unit"
-                                ],
-                                "native_record": bank_fact,
-                            }
-                if action_result.get("accepted") and isinstance(batch_id, int):
-                    shipment = {
-                        "source_id": f"{arguments.get('store_id')}:shipment:{arguments.get('shipment_id')}",
-                        "store_id": arguments.get("store_id"),
-                        "shipment_id": arguments.get("shipment_id"),
-                        "product_id": arguments.get("product_id"),
-                        "quantity": arguments.get("quantity"),
-                        "delivery_note_names": list(arguments.get("delivery_note_names", [])),
-                    }
-                    previous = batch_to_shipment.get(batch_id)
-                    if previous is not None and previous != shipment:
-                        raise StoreConflict(
-                            "E-Commerce settlement batch is linked to multiple native shipments"
-                        )
-                    batch_to_shipment[batch_id] = shipment
+            source_observations = {
+                row["source_id"]: dict(row)
+                for row in connection.execute(
+                    "SELECT source_id,observed_at FROM ecommerce_native_source_observations"
+                ).fetchall()
+            }
+        # Release the owned read snapshot before advancing or serializing the world.
+        for action_row in action_rows:
+            request_action = json.loads(action_row["request_json"])
+            action_result = json.loads(action_row["result_json"])
+            evidence = action_result.get("outcome", {}).get("evidence", {})
+            batch_id = evidence.get("batch_id")
+            arguments = request_action.get("arguments", {})
+            action_kind = request_action.get("native_action")
+            if action_result.get("accepted") and action_kind in {
+                "ship_orders", "withdraw", "process_structured_order",
+            }:
+                outcome = action_result.get("outcome", {})
+                occurred_at = outcome.get("company_time") or request_action.get("company_time")
+                if action_kind == "ship_orders":
+                    direction, native_amount = "withdrawal", evidence.get("shipping_cost")
+                    movement_type = "shipment"
+                    reference = f"shipment:{evidence.get('shipment_id')}"
+                elif action_kind == "withdraw":
+                    direction, native_amount = "deposit", evidence.get("amount")
+                    movement_type = "marketplace_settlement"
+                    reference = str(evidence.get("payment_entry") or "")
+                else:
+                    direction, native_amount = "withdrawal", evidence.get("native_total_charged")
+                    movement_type = "supplier_purchase"
+                    reference = str(evidence.get("purchase_order") or "")
+                try:
+                    event_time = datetime.fromisoformat(
+                        str(occurred_at).replace("Z", "+00:00")
+                    )
+                    amount_native = Decimal(str(native_amount))
+                except (TypeError, ValueError, InvalidOperation):
+                    event_time = None
+                    amount_native = Decimal("NaN")
+                if (event_time is None or event_time.tzinfo is None
+                        or event_time.utcoffset() is None or not amount_native.is_finite()
+                        or amount_native <= 0):
+                    unmapped_outcomes.append({
+                        "event_type": "bank_movement", "source_action_id": action_result.get("action_id"),
+                        "mapping_status": "inconclusive",
+                        "reason": "Pinned E-Commerce bank movement lacks an exact amount or aware company-time receipt",
+                    })
+                else:
+                    action_id = str(action_result.get("action_id", ""))
+                    source_id = f"bank:{state['store_id']}:{action_id}"
+                    if source_id not in acknowledged_source_ids:
+                        amount = amount_native / units_per_currency
+                        bank_fact = {
+                            "store_id": state["store_id"],
+                            "store_type": identity["store_type"],
+                            "action_id": action_id,
+                            "movement_type": movement_type,
+                            "direction": direction,
+                            "amount": format(amount, "f"),
+                            "amount_native_units": format(amount_native, "f"),
+                            "currency": money_unit["currency"],
+                            "occurred_at": event_time.astimezone(timezone.utc).isoformat(),
+                            "reference": reference,
+                            "bank_balance_after": outcome.get("evidence", {}).get("bank_balance_after"),
+                        }
+                        source_records_by_id[source_id] = {
+                            "id": source_id,
+                            "source": NATIVE_ECOMMERCE_SOURCE,
+                            "kind": "bank_transaction",
+                            "source_ref": action_id,
+                            "occurred_at": bank_fact["occurred_at"],
+                            "upstream_commit": UPSTREAM_COMMIT,
+                            "party": f"ecommercebench-marketplace:{identity['store_type']}",
+                            "currency": money_unit["currency"],
+                            "amount": bank_fact["amount"],
+                            "native_units_per_currency_unit": money_unit[
+                                "native_units_per_currency_unit"
+                            ],
+                            "native_record": bank_fact,
+                        }
+            if action_result.get("accepted") and isinstance(batch_id, int):
+                shipment = {
+                    "source_id": f"{arguments.get('store_id')}:shipment:{arguments.get('shipment_id')}",
+                    "store_id": arguments.get("store_id"),
+                    "shipment_id": arguments.get("shipment_id"),
+                    "product_id": arguments.get("product_id"),
+                    "quantity": arguments.get("quantity"),
+                    "delivery_note_names": list(arguments.get("delivery_note_names", [])),
+                }
+                previous = batch_to_shipment.get(batch_id)
+                if previous is not None and previous != shipment:
+                    raise StoreConflict(
+                        "E-Commerce settlement batch is linked to multiple native shipments"
+                    )
+                batch_to_shipment[batch_id] = shipment
 
-            opening_time = environment.start_time.replace(tzinfo=timezone.utc)
-            opening_balance_id = f"bank:{state['store_id']}:opening_balance"
-            if opening_balance_id not in acknowledged_source_ids:
-                opening_amount = Decimal(str(environment.initial_balance))
-                source_records_by_id[opening_balance_id] = {
-                    "id": opening_balance_id,
-                    "source": NATIVE_ECOMMERCE_SOURCE,
-                    "kind": "bank_transaction",
-                    "source_ref": "native-opening-balance",
-                    "occurred_at": opening_time.isoformat(),
-                    "upstream_commit": UPSTREAM_COMMIT,
-                    "party": f"ecommercebench-marketplace:{identity['store_type']}",
-                    "currency": money_unit["currency"],
+        opening_time = environment.start_time.replace(tzinfo=timezone.utc)
+        opening_balance_id = f"bank:{state['store_id']}:opening_balance"
+        if opening_balance_id not in acknowledged_source_ids:
+            opening_amount = Decimal(str(environment.initial_balance))
+            source_records_by_id[opening_balance_id] = {
+                "id": opening_balance_id,
+                "source": NATIVE_ECOMMERCE_SOURCE,
+                "kind": "bank_transaction",
+                "source_ref": "native-opening-balance",
+                "occurred_at": opening_time.isoformat(),
+                "upstream_commit": UPSTREAM_COMMIT,
+                "party": f"ecommercebench-marketplace:{identity['store_type']}",
+                "currency": money_unit["currency"],
+                "amount": format(opening_amount / units_per_currency, "f"),
+                "native_units_per_currency_unit": money_unit[
+                    "native_units_per_currency_unit"
+                ],
+                "native_record": {
+                    "store_id": state["store_id"],
+                    "store_type": identity["store_type"],
+                    "movement_type": "opening_balance",
+                    "direction": "deposit",
                     "amount": format(opening_amount / units_per_currency, "f"),
-                    "native_units_per_currency_unit": money_unit[
-                        "native_units_per_currency_unit"
-                    ],
-                    "native_record": {
-                        "store_id": state["store_id"],
-                        "store_type": identity["store_type"],
-                        "movement_type": "opening_balance",
-                        "direction": "deposit",
-                        "amount": format(opening_amount / units_per_currency, "f"),
-                        "amount_native_units": format(opening_amount, "f"),
-                        "currency": money_unit["currency"],
-                        "occurred_at": opening_time.isoformat(),
-                        "reference": "native-opening-balance",
-                        "bank_balance_after": format(opening_amount, "f"),
-                    },
-                }
-            setup_amount = Decimal(str(environment._ledger.get("setup", 0)))
-            setup_id = f"bank:{state['store_id']}:initial_store_setup"
-            if setup_amount > 0 and setup_id not in acknowledged_source_ids:
-                source_records_by_id[setup_id] = {
-                    "id": setup_id,
-                    "source": NATIVE_ECOMMERCE_SOURCE,
-                    "kind": "bank_transaction",
-                    "source_ref": "native-store-setup",
+                    "amount_native_units": format(opening_amount, "f"),
+                    "currency": money_unit["currency"],
                     "occurred_at": opening_time.isoformat(),
+                    "reference": "native-opening-balance",
+                    "bank_balance_after": format(opening_amount, "f"),
+                },
+            }
+        setup_amount = Decimal(str(environment._ledger.get("setup", 0)))
+        setup_id = f"bank:{state['store_id']}:initial_store_setup"
+        if setup_amount > 0 and setup_id not in acknowledged_source_ids:
+            source_records_by_id[setup_id] = {
+                "id": setup_id,
+                "source": NATIVE_ECOMMERCE_SOURCE,
+                "kind": "bank_transaction",
+                "source_ref": "native-store-setup",
+                "occurred_at": opening_time.isoformat(),
+                "upstream_commit": UPSTREAM_COMMIT,
+                "party": f"ecommercebench-marketplace:{identity['store_type']}",
+                "currency": money_unit["currency"],
+                "amount": format(setup_amount / units_per_currency, "f"),
+                "native_units_per_currency_unit": money_unit[
+                    "native_units_per_currency_unit"
+                ],
+                "native_record": {
+                    "store_id": state["store_id"],
+                    "store_type": identity["store_type"],
+                    "movement_type": "initial_store_setup",
+                    "direction": "withdrawal",
+                    "amount": format(setup_amount / units_per_currency, "f"),
+                    "amount_native_units": format(setup_amount, "f"),
+                    "currency": money_unit["currency"],
+                    "occurred_at": opening_time.isoformat(),
+                    "reference": "native-store-setup",
+                    "bank_balance_after": format(
+                        Decimal(str(environment.initial_balance)) - setup_amount, "f"
+                    ),
+                },
+            }
+
+        def capture_pending(observed_at: datetime) -> None:
+            observed_text = observed_at.astimezone(timezone.utc).isoformat()
+            rows = environment.get_pending_shipments().get("pending_shipments", [])
+            raw_pending = {
+                int(item["shipment_id"]): item
+                for item in environment.pending_shipments
+            }
+            for row in rows:
+                source_id = f"{state['store_id']}:shipment:{row['shipment_id']}"
+                if source_id in acknowledged_source_ids:
+                    continue
+                raw = raw_pending.get(int(row["shipment_id"]))
+                product = environment.products.get(str(row["product_id"]))
+                if (
+                    raw is None
+                    or raw.get("store_id") != state["store_id"]
+                    or not isinstance(product, dict)
+                    or product.get("store_type") != identity["store_type"]
+                ):
+                    unmapped_by_id[source_id] = {
+                        "source_id": source_id,
+                        "source_system": NATIVE_ECOMMERCE_SOURCE,
+                        "upstream_commit": UPSTREAM_COMMIT,
+                        "native_record_type": "pending_shipment",
+                        "native_record": {
+                            key: row[key]
+                            for key in (
+                                "shipment_id",
+                                "store_id",
+                                "product_id",
+                                "quantity",
+                                "sale_date",
+                                "ship_deadline",
+                            )
+                            if key in row
+                        },
+                        "mapping_status": "unmapped",
+                        "reason": "Pinned E-CommerceBench shipment is missing its exact company store or product facts",
+                    }
+                    continue
+                try:
+                    quantity = Decimal(str(raw["quantity"]))
+                    native_gross = Decimal(str(raw["revenue_gross"]))
+                    unit_price = Decimal(str(raw["unit_price"]))
+                    native_net = Decimal(str(raw["revenue_net"]))
+                    commission = Decimal(str(raw["commission"]))
+                except (KeyError, InvalidOperation, ValueError):
+                    quantity = native_gross = unit_price = native_net = (
+                        commission
+                    ) = Decimal("NaN")
+                if (
+                    not quantity.is_finite()
+                    or quantity <= 0
+                    or quantity != quantity.to_integral_value()
+                    or not native_gross.is_finite()
+                    or native_gross < 0
+                    or not unit_price.is_finite()
+                    or unit_price < 0
+                    or not native_net.is_finite()
+                    or native_net < 0
+                    or not commission.is_finite()
+                    or commission < 0
+                ):
+                    unmapped_by_id[source_id] = {
+                        "source_id": source_id,
+                        "source_system": NATIVE_ECOMMERCE_SOURCE,
+                        "upstream_commit": UPSTREAM_COMMIT,
+                        "native_record_type": "pending_shipment",
+                        "native_record": dict(row),
+                        "mapping_status": "unmapped",
+                        "reason": "Pinned E-CommerceBench shipment has invalid native quantity or money facts",
+                    }
+                    continue
+                observation = source_observations.get(source_id)
+                if observation is None:
+                    stable_observed_at = observed_text
+                    new_source_observations[source_id] = stable_observed_at
+                    source_observations[source_id] = {"observed_at": stable_observed_at}
+                    if not owned_transaction:
+                        connection.execute(
+                            "INSERT INTO ecommerce_native_source_observations(source_id,observed_at) VALUES(?,?)",
+                            (source_id, stable_observed_at),
+                        )
+                else:
+                    stable_observed_at = observation["observed_at"]
+                native_record = {
+                    "shipment_id": int(row["shipment_id"]),
+                    "store_id": str(row["store_id"]),
+                    "store_type": identity["store_type"],
+                    "product_id": str(row["product_id"]),
+                    "product": {
+                        key: product.get(key)
+                        for key in (
+                            "product_id",
+                            "title",
+                            "category",
+                            "store_type",
+                            "brand",
+                            "size",
+                            "reference_price",
+                        )
+                    },
+                    "quantity": int(quantity),
+                    "unit_price": format(unit_price, "f"),
+                    "revenue_gross": format(native_gross, "f"),
+                    "revenue_net": format(native_net, "f"),
+                    "commission": format(commission, "f"),
+                    "sale_date": str(row["sale_date"]),
+                    "ship_deadline": str(row["ship_deadline"]),
+                }
+                source_record = {
+                    "id": source_id,
+                    "source": NATIVE_ECOMMERCE_SOURCE,
+                    "kind": "order",
+                    "source_ref": source_id,
+                    "occurred_at": stable_observed_at,
                     "upstream_commit": UPSTREAM_COMMIT,
                     "party": f"ecommercebench-marketplace:{identity['store_type']}",
                     "currency": money_unit["currency"],
-                    "amount": format(setup_amount / units_per_currency, "f"),
+                    "amount": format(native_gross / units_per_currency, "f"),
+                    "observed_at": stable_observed_at,
                     "native_units_per_currency_unit": money_unit[
                         "native_units_per_currency_unit"
                     ],
+                    "native_record": native_record,
+                }
+                prior_record = source_records_by_id.get(source_id)
+                if prior_record is not None and prior_record != source_record:
+                    raise StoreConflict(
+                        "E-Commerce shipment ID changed its native source facts during one clock advance"
+                    )
+                source_records_by_id[source_id] = source_record
+
+        def capture_company_catalog(observed_at: datetime) -> None:
+            """Expose the pinned source catalog and supplier roster as native master data."""
+            # Master data has no transaction time; use the source world's
+            # own configured start anchor rather than inventing one per poll.
+            observed_text = identity["started_at"]
+            for product_id, product in sorted(environment.products.items()):
+                if product.get("store_type") != identity["store_type"]:
+                    continue
+                source_id = f"catalog:{state['store_id']}:product:{product_id}"
+                if source_id in acknowledged_source_ids:
+                    continue
+                source_record = {
+                    "id": source_id,
+                    "source": NATIVE_ECOMMERCE_SOURCE,
+                    "kind": "catalog_product",
+                    "source_ref": source_id,
+                    "occurred_at": observed_text,
+                    "upstream_commit": UPSTREAM_COMMIT,
+                    "party": f"ecommercebench-marketplace:{identity['store_type']}",
+                    # Catalog rows are non-monetary source master data.
+                    # Do not fabricate a zero-valued financial fact.
+                    "observed_at": observed_text,
                     "native_record": {
                         "store_id": state["store_id"],
                         "store_type": identity["store_type"],
-                        "movement_type": "initial_store_setup",
-                        "direction": "withdrawal",
-                        "amount": format(setup_amount / units_per_currency, "f"),
-                        "amount_native_units": format(setup_amount, "f"),
-                        "currency": money_unit["currency"],
-                        "occurred_at": opening_time.isoformat(),
-                        "reference": "native-store-setup",
-                        "bank_balance_after": format(
-                            Decimal(str(environment.initial_balance)) - setup_amount, "f"
-                        ),
-                    },
-                }
-
-            def capture_pending(observed_at: datetime) -> None:
-                observed_text = observed_at.astimezone(timezone.utc).isoformat()
-                rows = environment.get_pending_shipments().get("pending_shipments", [])
-                raw_pending = {
-                    int(item["shipment_id"]): item
-                    for item in environment.pending_shipments
-                }
-                for row in rows:
-                    source_id = f"{state['store_id']}:shipment:{row['shipment_id']}"
-                    if source_id in acknowledged_source_ids:
-                        continue
-                    raw = raw_pending.get(int(row["shipment_id"]))
-                    product = environment.products.get(str(row["product_id"]))
-                    if (
-                        raw is None
-                        or raw.get("store_id") != state["store_id"]
-                        or not isinstance(product, dict)
-                        or product.get("store_type") != identity["store_type"]
-                    ):
-                        unmapped_by_id[source_id] = {
-                            "source_id": source_id,
-                            "source_system": NATIVE_ECOMMERCE_SOURCE,
-                            "upstream_commit": UPSTREAM_COMMIT,
-                            "native_record_type": "pending_shipment",
-                            "native_record": {
-                                key: row[key]
-                                for key in (
-                                    "shipment_id",
-                                    "store_id",
-                                    "product_id",
-                                    "quantity",
-                                    "sale_date",
-                                    "ship_deadline",
-                                )
-                                if key in row
-                            },
-                            "mapping_status": "unmapped",
-                            "reason": "Pinned E-CommerceBench shipment is missing its exact company store or product facts",
-                        }
-                        continue
-                    try:
-                        quantity = Decimal(str(raw["quantity"]))
-                        native_gross = Decimal(str(raw["revenue_gross"]))
-                        unit_price = Decimal(str(raw["unit_price"]))
-                        native_net = Decimal(str(raw["revenue_net"]))
-                        commission = Decimal(str(raw["commission"]))
-                    except (KeyError, InvalidOperation, ValueError):
-                        quantity = native_gross = unit_price = native_net = (
-                            commission
-                        ) = Decimal("NaN")
-                    if (
-                        not quantity.is_finite()
-                        or quantity <= 0
-                        or quantity != quantity.to_integral_value()
-                        or not native_gross.is_finite()
-                        or native_gross < 0
-                        or not unit_price.is_finite()
-                        or unit_price < 0
-                        or not native_net.is_finite()
-                        or native_net < 0
-                        or not commission.is_finite()
-                        or commission < 0
-                    ):
-                        unmapped_by_id[source_id] = {
-                            "source_id": source_id,
-                            "source_system": NATIVE_ECOMMERCE_SOURCE,
-                            "upstream_commit": UPSTREAM_COMMIT,
-                            "native_record_type": "pending_shipment",
-                            "native_record": dict(row),
-                            "mapping_status": "unmapped",
-                            "reason": "Pinned E-CommerceBench shipment has invalid native quantity or money facts",
-                        }
-                        continue
-                    observation = connection.execute(
-                        "SELECT observed_at FROM ecommerce_native_source_observations WHERE source_id=?",
-                        (source_id,),
-                    ).fetchone()
-                    if observation is None:
-                        stable_observed_at = observed_text
-                        new_source_observations[source_id] = stable_observed_at
-                        if not owned_transaction:
-                            connection.execute(
-                                "INSERT INTO ecommerce_native_source_observations(source_id,observed_at) VALUES(?,?)",
-                                (source_id, stable_observed_at),
-                            )
-                    else:
-                        stable_observed_at = observation["observed_at"]
-                    native_record = {
-                        "shipment_id": int(row["shipment_id"]),
-                        "store_id": str(row["store_id"]),
-                        "store_type": identity["store_type"],
-                        "product_id": str(row["product_id"]),
+                        "product_id": product_id,
                         "product": {
                             key: product.get(key)
                             for key in (
-                                "product_id",
-                                "title",
-                                "category",
-                                "store_type",
-                                "brand",
-                                "size",
-                                "reference_price",
+                                "product_id", "title", "category", "store_type",
+                                "brand", "size", "reference_price",
                             )
                         },
-                        "quantity": int(quantity),
-                        "unit_price": format(unit_price, "f"),
-                        "revenue_gross": format(native_gross, "f"),
-                        "revenue_net": format(native_net, "f"),
-                        "commission": format(commission, "f"),
-                        "sale_date": str(row["sale_date"]),
-                        "ship_deadline": str(row["ship_deadline"]),
-                    }
-                    source_record = {
-                        "id": source_id,
-                        "source": NATIVE_ECOMMERCE_SOURCE,
-                        "kind": "order",
-                        "source_ref": source_id,
-                        "occurred_at": stable_observed_at,
-                        "upstream_commit": UPSTREAM_COMMIT,
-                        "party": f"ecommercebench-marketplace:{identity['store_type']}",
-                        "currency": money_unit["currency"],
-                        "amount": format(native_gross / units_per_currency, "f"),
-                        "observed_at": stable_observed_at,
-                        "native_units_per_currency_unit": money_unit[
-                            "native_units_per_currency_unit"
-                        ],
-                        "native_record": native_record,
-                    }
-                    prior_record = source_records_by_id.get(source_id)
-                    if prior_record is not None and prior_record != source_record:
-                        raise StoreConflict(
-                            "E-Commerce shipment ID changed its native source facts during one clock advance"
-                        )
-                    source_records_by_id[source_id] = source_record
+                    },
+                }
+                source_records_by_id[source_id] = source_record
+            catalog_categories = {
+                product.get("category") for product in environment.products.values()
+                if product.get("store_type") == identity["store_type"]
+                and isinstance(product.get("category"), str)
+            }
+            for supplier in sorted(
+                environment.suppliers_data,
+                key=lambda row: (str(row.get("supplier_id", "")), str(row.get("supplier_name", ""))),
+            ):
+                supplier_id = str(supplier.get("supplier_id", ""))
+                supplier_name = supplier.get("supplier_name")
+                if not supplier_id or not isinstance(supplier_name, str) or not supplier_name:
+                    continue
+                source_id = f"catalog:{state['store_id']}:supplier:{supplier_id}"
+                if source_id in acknowledged_source_ids:
+                    continue
+                served_categories = set(str(supplier.get("categories_served", "")).split("|"))
+                if not served_categories.intersection(catalog_categories):
+                    continue
+                source_record = {
+                    "id": source_id,
+                    "source": NATIVE_ECOMMERCE_SOURCE,
+                    "kind": "catalog_supplier",
+                    "source_ref": source_id,
+                    "occurred_at": observed_text,
+                    "upstream_commit": UPSTREAM_COMMIT,
+                    "party": f"ecommercebench-marketplace:{identity['store_type']}",
+                    # Supplier roster rows are non-monetary source master data.
+                    "observed_at": observed_text,
+                    "native_record": {
+                        "store_id": state["store_id"],
+                        "store_type": identity["store_type"],
+                        "supplier_id": supplier_id,
+                        "supplier_name": supplier_name,
+                    },
+                }
+                source_records_by_id[source_id] = source_record
 
-            def capture_company_catalog(observed_at: datetime) -> None:
-                """Expose the pinned source catalog and supplier roster as native master data."""
-                # Master data has no transaction time; use the source world's
-                # own configured start anchor rather than inventing one per poll.
-                observed_text = identity["started_at"]
-                for product_id, product in sorted(environment.products.items()):
-                    if product.get("store_type") != identity["store_type"]:
-                        continue
-                    source_id = f"catalog:{state['store_id']}:product:{product_id}"
-                    if source_id in acknowledged_source_ids:
-                        continue
-                    source_record = {
-                        "id": source_id,
-                        "source": NATIVE_ECOMMERCE_SOURCE,
-                        "kind": "catalog_product",
-                        "source_ref": source_id,
-                        "occurred_at": observed_text,
-                        "upstream_commit": UPSTREAM_COMMIT,
-                        "party": f"ecommercebench-marketplace:{identity['store_type']}",
-                        # Catalog rows are non-monetary source master data.
-                        # Do not fabricate a zero-valued financial fact.
-                        "observed_at": observed_text,
-                        "native_record": {
+        # Preserve existing source sales before advancing; a large company
+        # clock jump may cross their upstream shipping deadline.
+        capture_company_catalog(previous_cursor)
+        capture_pending(previous_cursor)
+        while target_native > environment.current_time and not environment.is_done:
+            trigger_time = environment._next_daily_trigger_time()
+            step_target = min(target_native, trigger_time)
+            minutes = int(
+                (step_target - environment.current_time).total_seconds() // 60
+            )
+            if minutes <= 0:
+                break
+            before_pending = {
+                int(row["shipment_id"]): dict(row)
+                for row in environment.pending_shipments
+            }
+            before_returns = {
+                int(row["batch_id"]): dict(row)
+                for row in environment.pending_returns
+            }
+            before_escrow_by_batch = {
+                int(row["batch_id"]): Decimal(str(row.get("amount", 0)))
+                for row in environment.escrow_batches
+            }
+            before_bank_balance = Decimal(str(environment.bank_balance))
+            before_ledger = {
+                key: Decimal(str(value)) for key, value in environment._ledger.items()
+            }
+            step_result = environment.advance_minutes(minutes)
+            after_bank_balance = Decimal(str(environment.bank_balance))
+            bank_delta = after_bank_balance - before_bank_balance
+            native_events.extend(step_result.get("events", []))
+            daily_summaries = [
+                event.get("summary", {})
+                for event in step_result.get("events", [])
+                if event.get("type") == "daily_trigger"
+            ]
+            if daily_summaries:
+                step_time = step_target.replace(tzinfo=timezone.utc)
+                capture_pending(step_time)
+                if bank_delta:
+                    source_id = f"bank:{state['store_id']}:daily:{step_time.date().isoformat()}"
+                    if source_id not in acknowledged_source_ids:
+                        amount = abs(bank_delta) / units_per_currency
+                        ledger_deltas = {
+                            key: format(Decimal(str(value)) - before_ledger.get(key, Decimal(0)), "f")
+                            for key, value in environment._ledger.items()
+                            if Decimal(str(value)) != before_ledger.get(key, Decimal(0))
+                        }
+                        bank_fact = {
                             "store_id": state["store_id"],
                             "store_type": identity["store_type"],
-                            "product_id": product_id,
-                            "product": {
-                                key: product.get(key)
-                                for key in (
-                                    "product_id", "title", "category", "store_type",
-                                    "brand", "size", "reference_price",
-                                )
-                            },
-                        },
-                    }
-                    source_records_by_id[source_id] = source_record
-                catalog_categories = {
-                    product.get("category") for product in environment.products.values()
-                    if product.get("store_type") == identity["store_type"]
-                    and isinstance(product.get("category"), str)
+                            "movement_type": "daily_native_cash_activity",
+                            "direction": "deposit" if bank_delta > 0 else "withdrawal",
+                            "amount": format(amount, "f"),
+                            "amount_native_units": format(abs(bank_delta), "f"),
+                            "currency": money_unit["currency"],
+                            "occurred_at": step_time.isoformat(),
+                            "reference": f"native-day:{step_time.date().isoformat()}",
+                            "bank_balance_after": format(after_bank_balance, "f"),
+                            "ledger_deltas_native_units": ledger_deltas,
+                            "daily_summaries": daily_summaries,
+                        }
+                        source_records_by_id[source_id] = {
+                            "id": source_id,
+                            "source": NATIVE_ECOMMERCE_SOURCE,
+                            "kind": "bank_transaction",
+                            "source_ref": bank_fact["reference"],
+                            "occurred_at": step_time.isoformat(),
+                            "upstream_commit": UPSTREAM_COMMIT,
+                            "party": f"ecommercebench-marketplace:{identity['store_type']}",
+                            "currency": money_unit["currency"],
+                            "amount": bank_fact["amount"],
+                            "native_units_per_currency_unit": money_unit[
+                                "native_units_per_currency_unit"
+                            ],
+                            "native_record": bank_fact,
+                        }
+                after_pending_ids = {
+                    int(row["shipment_id"]) for row in environment.pending_shipments
                 }
-                for supplier in sorted(
-                    environment.suppliers_data,
-                    key=lambda row: (str(row.get("supplier_id", "")), str(row.get("supplier_name", ""))),
-                ):
-                    supplier_id = str(supplier.get("supplier_id", ""))
-                    supplier_name = supplier.get("supplier_name")
-                    if not supplier_id or not isinstance(supplier_name, str) or not supplier_name:
-                        continue
-                    source_id = f"catalog:{state['store_id']}:supplier:{supplier_id}"
-                    if source_id in acknowledged_source_ids:
-                        continue
-                    served_categories = set(str(supplier.get("categories_served", "")).split("|"))
-                    if not served_categories.intersection(catalog_categories):
-                        continue
-                    source_record = {
-                        "id": source_id,
-                        "source": NATIVE_ECOMMERCE_SOURCE,
-                        "kind": "catalog_supplier",
-                        "source_ref": source_id,
-                        "occurred_at": observed_text,
-                        "upstream_commit": UPSTREAM_COMMIT,
-                        "party": f"ecommercebench-marketplace:{identity['store_type']}",
-                        # Supplier roster rows are non-monetary source master data.
-                        "observed_at": observed_text,
-                        "native_record": {
-                            "store_id": state["store_id"],
-                            "store_type": identity["store_type"],
-                            "supplier_id": supplier_id,
-                            "supplier_name": supplier_name,
-                        },
-                    }
-                    source_records_by_id[source_id] = source_record
-
-            # Preserve existing source sales before advancing; a large company
-            # clock jump may cross their upstream shipping deadline.
-            capture_company_catalog(previous_cursor)
-            capture_pending(previous_cursor)
-            while target_native > environment.current_time and not environment.is_done:
-                trigger_time = environment._next_daily_trigger_time()
-                step_target = min(target_native, trigger_time)
-                minutes = int(
-                    (step_target - environment.current_time).total_seconds() // 60
-                )
-                if minutes <= 0:
-                    break
-                before_pending = {
-                    int(row["shipment_id"]): dict(row)
-                    for row in environment.pending_shipments
-                }
-                before_returns = {
-                    int(row["batch_id"]): dict(row)
-                    for row in environment.pending_returns
-                }
-                before_escrow_by_batch = {
-                    int(row["batch_id"]): Decimal(str(row.get("amount", 0)))
-                    for row in environment.escrow_batches
-                }
-                before_bank_balance = Decimal(str(environment.bank_balance))
-                before_ledger = {
-                    key: Decimal(str(value)) for key, value in environment._ledger.items()
-                }
-                step_result = environment.advance_minutes(minutes)
-                after_bank_balance = Decimal(str(environment.bank_balance))
-                bank_delta = after_bank_balance - before_bank_balance
-                native_events.extend(step_result.get("events", []))
-                daily_summaries = [
-                    event.get("summary", {})
-                    for event in step_result.get("events", [])
-                    if event.get("type") == "daily_trigger"
+                cancelled = [
+                    row
+                    for shipment_id, row in before_pending.items()
+                    if shipment_id not in after_pending_ids
                 ]
-                if daily_summaries:
-                    step_time = step_target.replace(tzinfo=timezone.utc)
-                    capture_pending(step_time)
-                    if bank_delta:
-                        source_id = f"bank:{state['store_id']}:daily:{step_time.date().isoformat()}"
-                        if source_id not in acknowledged_source_ids:
-                            amount = abs(bank_delta) / units_per_currency
-                            ledger_deltas = {
-                                key: format(Decimal(str(value)) - before_ledger.get(key, Decimal(0)), "f")
-                                for key, value in environment._ledger.items()
-                                if Decimal(str(value)) != before_ledger.get(key, Decimal(0))
+                for summary in daily_summaries:
+                    outcome_time = step_target.replace(
+                        tzinfo=timezone.utc
+                    ).isoformat()
+                    cancelled_count = int(summary.get("orders_cancelled", 0) or 0)
+                    if cancelled_count != len(cancelled):
+                        if cancelled_count:
+                            unmapped_outcomes.append(
+                                {
+                                    "event_type": "shipment_cancellation",
+                                    "date": summary.get("date"),
+                                    "count": cancelled_count,
+                                    "mapping_status": "unmapped",
+                                    "reason": "Pinned E-CommerceBench cancellation output did not identify each removed shipment",
+                                }
+                            )
+                    else:
+                        for row in cancelled:
+                            cancellation_id = (
+                                f"outcome:{state['store_id']}:shipment_cancelled:{row['shipment_id']}"
+                            )
+                            cancellation_facts = {
+                                key: value.isoformat()
+                                if hasattr(value, "isoformat")
+                                else value
+                                for key, value in row.items()
+                                if key in (
+                                    "shipment_id", "store_id", "product_id", "quantity",
+                                    "unit_price", "revenue_gross", "revenue_net",
+                                    "sale_date", "deadline",
+                                )
                             }
-                            bank_fact = {
-                                "store_id": state["store_id"],
-                                "store_type": identity["store_type"],
-                                "movement_type": "daily_native_cash_activity",
-                                "direction": "deposit" if bank_delta > 0 else "withdrawal",
-                                "amount": format(amount, "f"),
-                                "amount_native_units": format(abs(bank_delta), "f"),
-                                "currency": money_unit["currency"],
-                                "occurred_at": step_time.isoformat(),
-                                "reference": f"native-day:{step_time.date().isoformat()}",
-                                "bank_balance_after": format(after_bank_balance, "f"),
-                                "ledger_deltas_native_units": ledger_deltas,
-                                "daily_summaries": daily_summaries,
-                            }
-                            source_records_by_id[source_id] = {
-                                "id": source_id,
+                            native_outcomes.append(
+                                {
+                                    "event_type": "shipment_cancelled",
+                                    "source_id": f"{row['store_id']}:shipment:{row['shipment_id']}",
+                                    "occurred_at": outcome_time,
+                                    "source": NATIVE_ECOMMERCE_SOURCE,
+                                    "upstream_commit": UPSTREAM_COMMIT,
+                                    "mapping_status": "source_linked",
+                                    "erp_reversal_status": "not_applied",
+                                    "reason": "Native cancellation is recorded without changing the employee-owned ERP Sales Order",
+                                    "native_record": cancellation_facts,
+                                }
+                            )
+                            source_records_by_id.setdefault(cancellation_id, {
+                                "id": cancellation_id,
                                 "source": NATIVE_ECOMMERCE_SOURCE,
-                                "kind": "bank_transaction",
-                                "source_ref": bank_fact["reference"],
-                                "occurred_at": step_time.isoformat(),
+                                "kind": "native_outcome",
+                                "source_ref": f"{row['store_id']}:shipment:{row['shipment_id']}",
+                                "occurred_at": outcome_time,
+                                "observed_at": outcome_time,
                                 "upstream_commit": UPSTREAM_COMMIT,
                                 "party": f"ecommercebench-marketplace:{identity['store_type']}",
                                 "currency": money_unit["currency"],
-                                "amount": bank_fact["amount"],
                                 "native_units_per_currency_unit": money_unit[
                                     "native_units_per_currency_unit"
                                 ],
-                                "native_record": bank_fact,
-                            }
-                    after_pending_ids = {
-                        int(row["shipment_id"]) for row in environment.pending_shipments
+                                "native_record": {
+                                    "event_type": "shipment_cancelled",
+                                    "store_type": identity["store_type"],
+                                    "source_shipment_id": f"{row['store_id']}:shipment:{row['shipment_id']}",
+                                    **cancellation_facts,
+                                },
+                            })
+                    after_returns = {
+                        int(row["batch_id"]): dict(row)
+                        for row in environment.pending_returns
                     }
-                    cancelled = [
+                    removed_returns = [
                         row
-                        for shipment_id, row in before_pending.items()
-                        if shipment_id not in after_pending_ids
+                        for batch_id, row in before_returns.items()
+                        if batch_id not in after_returns
                     ]
-                    for summary in daily_summaries:
-                        outcome_time = step_target.replace(
-                            tzinfo=timezone.utc
-                        ).isoformat()
-                        cancelled_count = int(summary.get("orders_cancelled", 0) or 0)
-                        if cancelled_count != len(cancelled):
-                            if cancelled_count:
-                                unmapped_outcomes.append(
-                                    {
-                                        "event_type": "shipment_cancellation",
-                                        "date": summary.get("date"),
-                                        "count": cancelled_count,
-                                        "mapping_status": "unmapped",
-                                        "reason": "Pinned E-CommerceBench cancellation output did not identify each removed shipment",
-                                    }
-                                )
-                        else:
-                            for row in cancelled:
-                                cancellation_id = (
-                                    f"outcome:{state['store_id']}:shipment_cancelled:{row['shipment_id']}"
-                                )
-                                cancellation_facts = {
-                                    key: value.isoformat()
-                                    if hasattr(value, "isoformat")
-                                    else value
-                                    for key, value in row.items()
-                                    if key in (
-                                        "shipment_id", "store_id", "product_id", "quantity",
-                                        "unit_price", "revenue_gross", "revenue_net",
-                                        "sale_date", "deadline",
-                                    )
-                                }
-                                native_outcomes.append(
-                                    {
-                                        "event_type": "shipment_cancelled",
-                                        "source_id": f"{row['store_id']}:shipment:{row['shipment_id']}",
-                                        "occurred_at": outcome_time,
-                                        "source": NATIVE_ECOMMERCE_SOURCE,
-                                        "upstream_commit": UPSTREAM_COMMIT,
-                                        "mapping_status": "source_linked",
-                                        "erp_reversal_status": "not_applied",
-                                        "reason": "Native cancellation is recorded without changing the employee-owned ERP Sales Order",
-                                        "native_record": cancellation_facts,
-                                    }
-                                )
-                                source_records_by_id.setdefault(cancellation_id, {
-                                    "id": cancellation_id,
-                                    "source": NATIVE_ECOMMERCE_SOURCE,
-                                    "kind": "native_outcome",
-                                    "source_ref": f"{row['store_id']}:shipment:{row['shipment_id']}",
-                                    "occurred_at": outcome_time,
-                                    "observed_at": outcome_time,
-                                    "upstream_commit": UPSTREAM_COMMIT,
-                                    "party": f"ecommercebench-marketplace:{identity['store_type']}",
-                                    "currency": money_unit["currency"],
-                                    "native_units_per_currency_unit": money_unit[
-                                        "native_units_per_currency_unit"
-                                    ],
-                                    "native_record": {
-                                        "event_type": "shipment_cancelled",
-                                        "store_type": identity["store_type"],
-                                        "source_shipment_id": f"{row['store_id']}:shipment:{row['shipment_id']}",
-                                        **cancellation_facts,
-                                    },
-                                })
-                        after_returns = {
-                            int(row["batch_id"]): dict(row)
-                            for row in environment.pending_returns
-                        }
-                        removed_returns = [
-                            row
-                            for batch_id, row in before_returns.items()
-                            if batch_id not in after_returns
-                        ]
-                        refund_count = int(summary.get("returns_processed", 0) or 0)
-                        escrow_consumed_by_batch: dict[int, Decimal] = {}
-                        for row in removed_returns:
-                            shipment = batch_to_shipment.get(int(row["batch_id"]))
-                            try:
-                                refund_amount = Decimal(
-                                    str(row["refund_per_unit"])
-                                ) * int(row["quantity"])
-                            except (KeyError, InvalidOperation, ValueError):
-                                refund_amount = Decimal("NaN")
-                            if not refund_amount.is_finite() or refund_amount < 0:
-                                unmapped_outcomes.append(
-                                    {
-                                        "event_type": "refund",
-                                        "date": summary.get("date"),
-                                        "count": 1,
-                                        "mapping_status": "unmapped",
-                                        "reason": "Pinned E-CommerceBench return has invalid refund amount facts",
-                                    }
-                                )
-                                continue
-                            refund_facts = {
-                                "event_type": "refund_processed",
-                                "store_type": identity["store_type"],
-                                "batch_id": row["batch_id"],
-                                "store_id": row["store_id"],
-                                "shipment_id": shipment.get("shipment_id") if shipment else None,
-                                "product_id": row["product_id"],
-                                "quantity": row["quantity"],
-                                "refund_per_unit": format(
-                                    Decimal(str(row["refund_per_unit"])), "f"
-                                ),
-                                "refund_amount_native_units": format(refund_amount, "f"),
-                                "escrow_reclaimed_native_units": format(
-                                    min(
-                                        max(
-                                            before_escrow_by_batch.get(int(row["batch_id"]), Decimal(0))
-                                            - escrow_consumed_by_batch.get(int(row["batch_id"]), Decimal(0)),
-                                            Decimal(0),
-                                        ),
-                                        refund_amount,
-                                    ),
-                                    "f",
-                                ),
-                                "commission_reversed_native_units": format(
-                                    refund_amount - min(
-                                        max(
-                                            before_escrow_by_batch.get(int(row["batch_id"]), Decimal(0))
-                                            - escrow_consumed_by_batch.get(int(row["batch_id"]), Decimal(0)),
-                                            Decimal(0),
-                                        ),
-                                        refund_amount,
-                                    ),
-                                    "f",
-                                ),
-                                "source_delivery_note_names": list(
-                                    shipment.get("delivery_note_names", [])
-                                ) if shipment else [],
-                                "arrival_date": row["arrival_date"].isoformat()
-                                if hasattr(row["arrival_date"], "isoformat")
-                                else str(row["arrival_date"]),
-                            }
-                            escrow_consumed_by_batch[int(row["batch_id"])] = (
-                                escrow_consumed_by_batch.get(int(row["batch_id"]), Decimal(0))
-                                + Decimal(refund_facts["escrow_reclaimed_native_units"])
-                            )
-                            native_outcomes.append(
-                                {
-                                    "event_type": "refund_processed",
-                                    "source_id": shipment["source_id"]
-                                    if shipment
-                                    else None,
-                                    "occurred_at": outcome_time,
-                                    "source": NATIVE_ECOMMERCE_SOURCE,
-                                    "upstream_commit": UPSTREAM_COMMIT,
-                                    "mapping_status": "source_linked"
-                                    if shipment
-                                    else "unmapped",
-                                    "erp_reversal_status": "not_applied",
-                                    "reason": None
-                                    if shipment
-                                    else "Native return batch has no exact accepted shipment action receipt",
-                                    "currency": money_unit["currency"],
-                                    "amount": format(
-                                        refund_amount / units_per_currency, "f"
-                                    ),
-                                    "native_units_per_currency_unit": money_unit[
-                                        "native_units_per_currency_unit"
-                                    ],
-                                    "native_record": refund_facts,
-                                }
-                            )
-                            if shipment:
-                                refund_id = (
-                                    f"outcome:{state['store_id']}:refund:{row['batch_id']}"
-                                )
-                                source_records_by_id.setdefault(refund_id, {
-                                    "id": refund_id,
-                                    "source": NATIVE_ECOMMERCE_SOURCE,
-                                    "kind": "native_outcome",
-                                    "source_ref": shipment["source_id"],
-                                    "occurred_at": outcome_time,
-                                    "observed_at": outcome_time,
-                                    "upstream_commit": UPSTREAM_COMMIT,
-                                    "party": f"ecommercebench-marketplace:{identity['store_type']}",
-                                    "currency": money_unit["currency"],
-                                    "amount": format(refund_amount / units_per_currency, "f"),
-                                    "native_units_per_currency_unit": money_unit[
-                                        "native_units_per_currency_unit"
-                                    ],
-                                    "native_record": refund_facts,
-                                })
-                        if refund_count != len(removed_returns) and refund_count:
+                    refund_count = int(summary.get("returns_processed", 0) or 0)
+                    escrow_consumed_by_batch: dict[int, Decimal] = {}
+                    for row in removed_returns:
+                        shipment = batch_to_shipment.get(int(row["batch_id"]))
+                        try:
+                            refund_amount = Decimal(
+                                str(row["refund_per_unit"])
+                            ) * int(row["quantity"])
+                        except (KeyError, InvalidOperation, ValueError):
+                            refund_amount = Decimal("NaN")
+                        if not refund_amount.is_finite() or refund_amount < 0:
                             unmapped_outcomes.append(
                                 {
                                     "event_type": "refund",
                                     "date": summary.get("date"),
-                                    "count": refund_count - len(removed_returns),
+                                    "count": 1,
                                     "mapping_status": "unmapped",
-                                    "reason": "Pinned E-CommerceBench refund summary has no matching pending-return facts",
+                                    "reason": "Pinned E-CommerceBench return has invalid refund amount facts",
                                 }
                             )
-            native_result = {"events": native_events}
-            # Include pending sales from the final native cursor even when the
-            # requested boundary did not land on a daily trigger.
-            capture_pending(target)
-            calendar_conditions = calendar_supply_conditions(
-                int(identity["seed"]),
-                identity["store_type"],
-                previous_cursor,
-                target,
-            )
-            pending_rows = environment.get_pending_shipments().get(
-                "pending_shipments", []
-            )
-            # Upstream transaction dates are dates, so occurred_at identifies
-            # when this pending sale was actually observed on the company clock;
-            # the original native sale date remains in native_record.sale_date.
-            daily_triggers = [
-                event.get("summary", {})
-                for event in native_result.get("events", [])
-                if event.get("type") == "daily_trigger"
-            ]
-            path = self._write_checkpoint(environment)
-            result = {
-                "status": "finished" if environment.is_done else "active",
-                "company_time": target_text,
-                "native_time": environment.current_time.isoformat(),
-                "store_id": state["store_id"],
-                "store_type": identity["store_type"],
-                "daily_triggers": [
-                    {"date": item.get("date"), "day": item.get("day")}
-                    for item in daily_triggers
-                ],
-                "active_calendar_events": [
-                    row.get("event_name") for row in environment.active_events
-                ],
-                "calendar_conditions": calendar_conditions,
-                "pending_native_shipments": len(pending_rows),
-                "source_records": list(source_records_by_id.values()),
-                "unmapped_native_transactions": list(unmapped_by_id.values()),
-                "native_outcomes": native_outcomes,
-                "unmapped_native_outcomes": unmapped_outcomes,
-                "coverage": {
-                    "native_provider": f"{PROVIDER_ID}:{UPSTREAM_COMMIT}",
-                    "currency_available": True,
-                    "erp_item_mapping_available": True,
-                    "transactions_mapped_to_erp": 0,
-                    "cancellation_shipment_linkage": "derived_from_native_pending_state_transition",
-                    "refund_shipment_linkage": "linked_via_native_shipment_batch_receipt",
-                },
-                "native_state_ref": self._state_ref(str(path)),
-            }
-            if not owned_transaction:
-                for source in result["source_records"]:
-                    source_id = str(source.get("id", ""))
-                    if source_id and source_id not in acknowledged_source_ids:
-                        connection.execute(
-                            "INSERT OR IGNORE INTO ecommerce_native_pending_source_facts VALUES(?,?,?)",
-                            (source_id, json.dumps(source, sort_keys=True, separators=(",", ":")),
-                             datetime.now(timezone.utc).isoformat()),
+                            continue
+                        refund_facts = {
+                            "event_type": "refund_processed",
+                            "store_type": identity["store_type"],
+                            "batch_id": row["batch_id"],
+                            "store_id": row["store_id"],
+                            "shipment_id": shipment.get("shipment_id") if shipment else None,
+                            "product_id": row["product_id"],
+                            "quantity": row["quantity"],
+                            "refund_per_unit": format(
+                                Decimal(str(row["refund_per_unit"])), "f"
+                            ),
+                            "refund_amount_native_units": format(refund_amount, "f"),
+                            "escrow_reclaimed_native_units": format(
+                                min(
+                                    max(
+                                        before_escrow_by_batch.get(int(row["batch_id"]), Decimal(0))
+                                        - escrow_consumed_by_batch.get(int(row["batch_id"]), Decimal(0)),
+                                        Decimal(0),
+                                    ),
+                                    refund_amount,
+                                ),
+                                "f",
+                            ),
+                            "commission_reversed_native_units": format(
+                                refund_amount - min(
+                                    max(
+                                        before_escrow_by_batch.get(int(row["batch_id"]), Decimal(0))
+                                        - escrow_consumed_by_batch.get(int(row["batch_id"]), Decimal(0)),
+                                        Decimal(0),
+                                    ),
+                                    refund_amount,
+                                ),
+                                "f",
+                            ),
+                            "source_delivery_note_names": list(
+                                shipment.get("delivery_note_names", [])
+                            ) if shipment else [],
+                            "arrival_date": row["arrival_date"].isoformat()
+                            if hasattr(row["arrival_date"], "isoformat")
+                            else str(row["arrival_date"]),
+                        }
+                        escrow_consumed_by_batch[int(row["batch_id"])] = (
+                            escrow_consumed_by_batch.get(int(row["batch_id"]), Decimal(0))
+                            + Decimal(refund_facts["escrow_reclaimed_native_units"])
                         )
-                connection.execute(
-                    """UPDATE ecommerce_native_world_state
-                    SET checkpoint_path=?,company_cursor=?,updated_at=? WHERE singleton=1""",
-                    (str(path), target_text, datetime.now(timezone.utc).isoformat()),
-                )
-                connection.execute(
-                    "INSERT INTO ecommerce_native_advance_receipts VALUES(?,?,?,?)",
-                    (
-                        operation_id,
-                        request_json,
-                        json.dumps(result, sort_keys=True, separators=(",", ":")),
-                        datetime.now(timezone.utc).isoformat(),
-                    ),
-                )
-                return result
-
+                        native_outcomes.append(
+                            {
+                                "event_type": "refund_processed",
+                                "source_id": shipment["source_id"]
+                                if shipment
+                                else None,
+                                "occurred_at": outcome_time,
+                                "source": NATIVE_ECOMMERCE_SOURCE,
+                                "upstream_commit": UPSTREAM_COMMIT,
+                                "mapping_status": "source_linked"
+                                if shipment
+                                else "unmapped",
+                                "erp_reversal_status": "not_applied",
+                                "reason": None
+                                if shipment
+                                else "Native return batch has no exact accepted shipment action receipt",
+                                "currency": money_unit["currency"],
+                                "amount": format(
+                                    refund_amount / units_per_currency, "f"
+                                ),
+                                "native_units_per_currency_unit": money_unit[
+                                    "native_units_per_currency_unit"
+                                ],
+                                "native_record": refund_facts,
+                            }
+                        )
+                        if shipment:
+                            refund_id = (
+                                f"outcome:{state['store_id']}:refund:{row['batch_id']}"
+                            )
+                            source_records_by_id.setdefault(refund_id, {
+                                "id": refund_id,
+                                "source": NATIVE_ECOMMERCE_SOURCE,
+                                "kind": "native_outcome",
+                                "source_ref": shipment["source_id"],
+                                "occurred_at": outcome_time,
+                                "observed_at": outcome_time,
+                                "upstream_commit": UPSTREAM_COMMIT,
+                                "party": f"ecommercebench-marketplace:{identity['store_type']}",
+                                "currency": money_unit["currency"],
+                                "amount": format(refund_amount / units_per_currency, "f"),
+                                "native_units_per_currency_unit": money_unit[
+                                    "native_units_per_currency_unit"
+                                ],
+                                "native_record": refund_facts,
+                            })
+                    if refund_count != len(removed_returns) and refund_count:
+                        unmapped_outcomes.append(
+                            {
+                                "event_type": "refund",
+                                "date": summary.get("date"),
+                                "count": refund_count - len(removed_returns),
+                                "mapping_status": "unmapped",
+                                "reason": "Pinned E-CommerceBench refund summary has no matching pending-return facts",
+                            }
+                        )
+        native_result = {"events": native_events}
+        # Include pending sales from the final native cursor even when the
+        # requested boundary did not land on a daily trigger.
+        capture_pending(target)
+        calendar_conditions = calendar_supply_conditions(
+            int(identity["seed"]),
+            identity["store_type"],
+            previous_cursor,
+            target,
+        )
+        pending_rows = environment.get_pending_shipments().get(
+            "pending_shipments", []
+        )
+        # Upstream transaction dates are dates, so occurred_at identifies
+        # when this pending sale was actually observed on the company clock;
+        # the original native sale date remains in native_record.sale_date.
+        daily_triggers = [
+            event.get("summary", {})
+            for event in native_result.get("events", [])
+            if event.get("type") == "daily_trigger"
+        ]
+        path = self._write_checkpoint(environment)
+        result = {
+            "status": "finished" if environment.is_done else "active",
+            "company_time": target_text,
+            "native_time": environment.current_time.isoformat(),
+            "store_id": state["store_id"],
+            "store_type": identity["store_type"],
+            "daily_triggers": [
+                {"date": item.get("date"), "day": item.get("day")}
+                for item in daily_triggers
+            ],
+            "active_calendar_events": [
+                row.get("event_name") for row in environment.active_events
+            ],
+            "calendar_conditions": calendar_conditions,
+            "pending_native_shipments": len(pending_rows),
+            "source_records": list(source_records_by_id.values()),
+            "unmapped_native_transactions": list(unmapped_by_id.values()),
+            "native_outcomes": native_outcomes,
+            "unmapped_native_outcomes": unmapped_outcomes,
+            "coverage": {
+                "native_provider": f"{PROVIDER_ID}:{UPSTREAM_COMMIT}",
+                "currency_available": True,
+                "erp_item_mapping_available": True,
+                "transactions_mapped_to_erp": 0,
+                "cancellation_shipment_linkage": "derived_from_native_pending_state_transition",
+                "refund_shipment_linkage": "linked_via_native_shipment_batch_receipt",
+            },
+            "native_state_ref": self._state_ref(str(path)),
+        }
+        if not owned_transaction:
+            for source in result["source_records"]:
+                source_id = str(source.get("id", ""))
+                if source_id and source_id not in acknowledged_source_ids:
+                    connection.execute(
+                        "INSERT OR IGNORE INTO ecommerce_native_pending_source_facts VALUES(?,?,?)",
+                        (source_id, json.dumps(source, sort_keys=True, separators=(",", ":")),
+                         datetime.now(timezone.utc).isoformat()),
+                    )
+            connection.execute(
+                """UPDATE ecommerce_native_world_state
+                SET checkpoint_path=?,company_cursor=?,updated_at=? WHERE singleton=1""",
+                (str(path), target_text, datetime.now(timezone.utc).isoformat()),
+            )
+            connection.execute(
+                "INSERT INTO ecommerce_native_advance_receipts VALUES(?,?,?,?)",
+                (
+                    operation_id,
+                    request_json,
+                    json.dumps(result, sort_keys=True, separators=(",", ":")),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            return result
         # Automatic clock advancement computes and writes its private checkpoint
-        # under a read snapshot. Keep only receipt/state publication in the
+        # outside its read snapshot. Keep only receipt/state publication in the
         # writer transaction so SQLite's single writer is not held while native
         # simulation, historical fact reads, or checkpoint serialization run.
         result_json = json.dumps(result, sort_keys=True, separators=(",", ":"))
@@ -2191,7 +2195,7 @@ class EcommerceNativeActionCheckpoint:
             if action_time is not None
             else None
         )
-        with self.store.transaction() as connection:
+        with self.store._connection(None) as connection:
             prior = connection.execute(
                 "SELECT request_json,result_json FROM ecommerce_native_action_receipts WHERE action_id=?",
                 (action_id,),
@@ -2213,23 +2217,37 @@ class EcommerceNativeActionCheckpoint:
                 raise StoreConflict(
                     "E-Commerce native action targets a store outside the initialized company mapping"
                 )
-            current_cursor = datetime.fromisoformat(state["company_cursor"])
-            cursor_native = current_cursor.astimezone(timezone.utc).replace(
-                second=0, microsecond=0
-            )
-            if native_action_time is not None and native_action_time < cursor_native:
-                receipt = NativeActionReceipt(
-                    action_id=action_id,
-                    accepted=False,
-                    reconciled=False,
-                    native_state_ref=self._state_ref(state["checkpoint_path"]),
-                    outcome={
-                        "status": "inconclusive",
-                        "reason": "company evidence predates the confirmed native E-Commerce clock",
-                        "company_time": action_time.isoformat(),
-                        "native_action_time": native_action_time.isoformat(),
-                    },
-                ).model_dump(mode="json")
+        current_cursor = datetime.fromisoformat(state["company_cursor"])
+        cursor_native = current_cursor.astimezone(timezone.utc).replace(
+            second=0, microsecond=0
+        )
+        if native_action_time is not None and native_action_time < cursor_native:
+            receipt = NativeActionReceipt(
+                action_id=action_id,
+                accepted=False,
+                reconciled=False,
+                native_state_ref=self._state_ref(state["checkpoint_path"]),
+                outcome={
+                    "status": "inconclusive",
+                    "reason": "company evidence predates the confirmed native E-Commerce clock",
+                    "company_time": action_time.isoformat(),
+                    "native_action_time": native_action_time.isoformat(),
+                },
+            ).model_dump(mode="json")
+            with self.store.transaction() as connection:
+                prior = connection.execute(
+                    "SELECT request_json,result_json FROM ecommerce_native_action_receipts WHERE action_id=?",
+                    (action_id,),
+                ).fetchone()
+                if prior is not None:
+                    if prior["request_json"] != request_json:
+                        raise StoreConflict("E-Commerce native action ID was reused for different evidence")
+                    return json.loads(prior["result_json"])
+                current = connection.execute(
+                    "SELECT checkpoint_path,company_cursor FROM ecommerce_native_world_state WHERE singleton=1"
+                ).fetchone()
+                if current is None or (current["checkpoint_path"], current["company_cursor"]) != (state["checkpoint_path"], state["company_cursor"]):
+                    raise StoreConflict("E-Commerce native state changed during action computation")
                 connection.execute(
                     "INSERT INTO ecommerce_native_action_receipts VALUES(?,?,?,?)",
                     (
@@ -2239,53 +2257,64 @@ class EcommerceNativeActionCheckpoint:
                         datetime.now(timezone.utc).isoformat(),
                     ),
                 )
-                return receipt
-            if action_time is not None and action_time > current_cursor:
-                # Hold this writer transaction through clock advancement and the
-                # action receipt so another process cannot advance past evidence
-                # time between the two native checkpoint mutations.
-                self.advance_to(action_time, connection=connection)
-                state = connection.execute(
-                    "SELECT * FROM ecommerce_native_world_state WHERE singleton=1"
-                ).fetchone()
-            with open(state["checkpoint_path"], "rb") as checkpoint:
-                environment = pickle.load(checkpoint)
-            prior_batch_ids = {
-                int(row["batch_id"]) for row in environment.escrow_batches
-            }
-            outcome = apply_native(environment, translated)
-            if action_time is not None:
-                outcome["company_time"] = action_time.isoformat()
-                outcome["native_action_time"] = native_action_time.isoformat()
-            accepted = outcome["status"] == "accepted"
+            return receipt
+        if action_time is not None and action_time > current_cursor:
+            self.advance_to(action_time)
+            # Reload after the clock's separately committed checkpoint.
+            return self.apply(action)
+        with open(state["checkpoint_path"], "rb") as checkpoint:
+            environment = pickle.load(checkpoint)
+        prior_batch_ids = {
+            int(row["batch_id"]) for row in environment.escrow_batches
+        }
+        outcome = apply_native(environment, translated)
+        if action_time is not None:
+            outcome["company_time"] = action_time.isoformat()
+            outcome["native_action_time"] = native_action_time.isoformat()
+        accepted = outcome["status"] == "accepted"
+        if accepted:
+            if translated.get("native_action") == "ship_orders":
+                new_batches = [
+                    int(row["batch_id"])
+                    for row in environment.escrow_batches
+                    if int(row["batch_id"]) not in prior_batch_ids
+                ]
+                if len(new_batches) != 1:
+                    raise RuntimeError(
+                        "Native E-Commerce shipment did not create one identifiable escrow batch"
+                    )
+                outcome["evidence"]["batch_id"] = new_batches[0]
+            path = self._write_checkpoint(environment)
+            state_ref = self._state_ref(str(path))
+        else:
+            state_ref = self._state_ref(state["checkpoint_path"])
+        receipt = NativeActionReceipt(
+            action_id=action_id,
+            accepted=accepted,
+            reconciled=accepted,
+            native_state_ref=state_ref,
+            outcome=outcome,
+        ).model_dump(mode="json")
+        encoded = json.dumps(receipt, sort_keys=True, separators=(",", ":"))
+        with self.store.transaction() as connection:
+            prior = connection.execute(
+                "SELECT request_json,result_json FROM ecommerce_native_action_receipts WHERE action_id=?",
+                (action_id,),
+            ).fetchone()
+            if prior is not None:
+                if prior["request_json"] != request_json:
+                    raise StoreConflict("E-Commerce native action ID was reused for different evidence")
+                return json.loads(prior["result_json"])
+            current = connection.execute(
+                "SELECT checkpoint_path,company_cursor FROM ecommerce_native_world_state WHERE singleton=1"
+            ).fetchone()
+            if current is None or (current["checkpoint_path"], current["company_cursor"]) != (state["checkpoint_path"], state["company_cursor"]):
+                raise StoreConflict("E-Commerce native state changed during action computation")
             if accepted:
-                if translated.get("native_action") == "ship_orders":
-                    new_batches = [
-                        int(row["batch_id"])
-                        for row in environment.escrow_batches
-                        if int(row["batch_id"]) not in prior_batch_ids
-                    ]
-                    if len(new_batches) != 1:
-                        raise RuntimeError(
-                            "Native E-Commerce shipment did not create one identifiable escrow batch"
-                        )
-                    outcome["evidence"]["batch_id"] = new_batches[0]
-                path = self._write_checkpoint(environment)
                 connection.execute(
                     "UPDATE ecommerce_native_world_state SET checkpoint_path=?,updated_at=? WHERE singleton=1",
                     (str(path), datetime.now(timezone.utc).isoformat()),
                 )
-                state_ref = self._state_ref(str(path))
-            else:
-                state_ref = self._state_ref(state["checkpoint_path"])
-            receipt = NativeActionReceipt(
-                action_id=action_id,
-                accepted=accepted,
-                reconciled=accepted,
-                native_state_ref=state_ref,
-                outcome=outcome,
-            ).model_dump(mode="json")
-            encoded = json.dumps(receipt, sort_keys=True, separators=(",", ":"))
             connection.execute(
                 "INSERT INTO ecommerce_native_action_receipts VALUES(?,?,?,?)",
                 (
@@ -2295,13 +2324,13 @@ class EcommerceNativeActionCheckpoint:
                     datetime.now(timezone.utc).isoformat(),
                 ),
             )
-            return receipt
+        return receipt
 
     def reconcile(self, action: Any) -> dict[str, Any] | None:
         translated = _plain(action)
         action_id = str(translated.get("action_id", ""))
         request_json = json.dumps(translated, sort_keys=True, separators=(",", ":"))
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             row = connection.execute(
                 "SELECT request_json,result_json FROM ecommerce_native_action_receipts WHERE action_id=?",
                 (action_id,),
@@ -2361,7 +2390,7 @@ class EcommerceNativeActionCheckpoint:
             for receipt in receipts
             if receipt and receipt["accepted"] and receipt["reconciled"]
         ]
-        with self.store.transaction() as connection:
+        with self.store.transaction(write=False) as connection:
             state = connection.execute(
                 "SELECT * FROM ecommerce_native_world_state WHERE singleton=1"
             ).fetchone()

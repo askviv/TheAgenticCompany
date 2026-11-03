@@ -22,7 +22,6 @@ A custom harness can use these authenticated operations. The running API's `/doc
 
 | Operation | Endpoint |
 | --- | --- |
-| Read the agent's native inbox | `GET /agents/{actor_id}/inbox?run_id={uuid}` |
 | Inspect a visible case | `GET /cases/{case_id}?run_id={uuid}` |
 | Record findings and case updates | `PATCH /cases/{case_id}?run_id={uuid}` |
 | Send a native company email | `POST /messages` |
@@ -53,3 +52,5 @@ The reference runner exercises production engine and provider paths with a scrip
 Each run owns an ERP site and coordinator generation. Reset uses that site's native golden backup, preserves prior audit history, changes message generation and leaves other runs intact. Shared workplace resets and mailbox deletion are not part of reset. Old native messages remain in the shared inbox but cannot be consumed as the new generation's evidence.
 
 Distinct runs can progress independently. Run-scoped process/thread locks and durable idempotency protect state transitions. the host's limited CPU makes native provisioning and restoration slow; measure resource use and begin with one assignment at a time.
+
+Employees read replies in their own Mailu inboxes through CUA. The coordinator does not poll Viv’s inbox. Outbound success means SMTP acceptance; recipient inbox confirmation is not required.
