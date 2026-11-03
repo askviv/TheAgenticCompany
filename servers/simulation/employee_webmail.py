@@ -5,20 +5,22 @@ from __future__ import annotations
 from typing import Any, Callable
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlsplit, urlunsplit
 
+from servers.simulation.clock_rate import kernel_virtual_time_rate
 
 class EmployeeWebmailError(RuntimeError):
     """The employee browser could not safely complete the native webmail action."""
 
 
 _TYPING_DELAY_MS = 150
+_COMPOSE_FORM_SELECTOR = 'form[name="form"]'
 
 
 class EmployeeWebmailSender:
     """Use a managed employee Chrome profile and Roundcube's normal compose UI.
 
-    Roundcube's TAC plugin supplies deterministic headers through its compose
-    and pre-send hooks. This class does not call SMTP or infer delivery; the
-    caller must reconcile the resulting native mailbox receipt.
+    This class uses Roundcube's native compose and reply actions. It does not
+    call SMTP or infer delivery; the caller must reconcile the resulting
+    native mailbox receipt.
     """
 
     def __init__(
@@ -51,6 +53,8 @@ class EmployeeWebmailSender:
         reply_to: str | None,
         automated: bool,
         on_submission_started: Callable[[], None],
+        require_reply_to: str | None = None,
+        on_submission_completed: Callable[[], None] | None = None,
     ) -> None:
         with self.employee_desktops.employee_activity(employee_id) as session:
             endpoint = session.get("cdp_endpoint")
@@ -73,7 +77,10 @@ class EmployeeWebmailSender:
                 reply_to=reply_to,
                 automated=automated,
                 on_submission_started=on_submission_started,
+                require_reply_to=require_reply_to,
             )
+            if on_submission_completed is not None:
+                on_submission_completed()
 
     def open_inbox(
         self,
@@ -216,6 +223,7 @@ class EmployeeWebmailSender:
         reply_to: str | None,
         automated: bool,
         on_submission_started: Callable[[], None],
+        require_reply_to: str | None,
     ) -> None:
         playwright = self._start_playwright()
         page = None
@@ -249,71 +257,26 @@ class EmployeeWebmailSender:
                 source_uids = reply_query.get("_uid", [])
                 if len(source_uids) != 1 or not source_uids[0].isdigit():
                     raise EmployeeWebmailError("employee reply reference has no exact native inbox UID")
-                compose_request_modified = False
-                correlation = self._correlation_values(
-                    message_id, run_id, generation, in_reply_to,
-                    reply_to, automated,
-                )
-
-                def preserve_native_reply(route):
-                    nonlocal compose_request_modified
-                    request_parts = urlsplit(route.request.url)
-                    query = dict(parse_qsl(request_parts.query, keep_blank_values=True))
-                    if (
-                        request_parts.scheme == urlsplit(self.webmail_url).scheme
-                        and request_parts.netloc.casefold() == urlsplit(self.webmail_url).netloc.casefold()
-                        and query.get("_task") == "mail"
-                        and query.get("_action") == "compose"
-                        and query.get("_reply_uid") == source_uids[0]
-                        and query.get("_mbox") == "INBOX"
-                    ):
-                        query.update(correlation)
-                        correlated_url = urlunsplit((
-                            request_parts.scheme,
-                            request_parts.netloc,
-                            request_parts.path,
-                            urlencode(query),
-                            request_parts.fragment,
-                        ))
-                        route.continue_(url=correlated_url)
-                        compose_request_modified = True
-                    else:
-                        route.continue_()
-
-                page.route("**/*", preserve_native_reply)
                 reply_link = page.get_by_role("link", name="Reply", exact=True)
-                try:
-                    if reply_link.count() != 1:
-                        raise EmployeeWebmailError("Roundcube message view did not expose one native Reply action")
-                    reply_link.click()
-                finally:
-                    page.unroute("**/*", preserve_native_reply)
-                if not compose_request_modified:
-                    raise EmployeeWebmailError(
-                        "Roundcube native Reply request did not preserve its exact UID and TAC context"
-                    )
-                page.locator("#form").wait_for(state="visible")
-                page.wait_for_function(
-                    "document.querySelector('#form')?.dataset.tacCorrelationReady === 'true'",
-                    timeout=0,
-                )
+                if reply_link.count() != 1:
+                    raise EmployeeWebmailError("Roundcube message view did not expose one native Reply action")
+                reply_link.click()
+                page.locator(_COMPOSE_FORM_SELECTOR).wait_for(state="visible")
             else:
-                compose_url = self._compose_url(
-                    message_id, run_id, generation, in_reply_to, reply_to, automated
-                )
+                compose_url = self._compose_url()
                 page.goto(compose_url, wait_until="domcontentloaded", timeout=0)
-            form = page.locator("#form")
+            form = page.locator(_COMPOSE_FORM_SELECTOR)
             form.wait_for(state="visible")
-            page.wait_for_function(
-                "document.querySelector('#form')?.dataset.tacCorrelationReady === 'true'",
-                timeout=0,
-            )
-            self._verify_plugin_context(form, message_id, run_id, generation,
-                                        in_reply_to, reply_to, automated)
 
             self._type_text(form.locator("#_to"), recipient_email)
             self._type_text(form.locator("#compose-subject"), subject)
             self._verify_sender(form, sender_email)
+            if require_reply_to is not None and require_reply_to.casefold() != sender_email.casefold():
+                page.locator('a[data-popup="headers-menu"]').click()
+                page.locator('#headers-menu [data-target="replyto"]').click()
+                reply_to_field = form.locator("#_replyto")
+                reply_to_field.wait_for(state="visible")
+                self._type_text(reply_to_field, require_reply_to)
             body_field = form.locator("#composebody")
             if body_field.is_visible():
                 self._type_text(body_field, body)
@@ -370,7 +333,7 @@ class EmployeeWebmailSender:
                 line = line[:-1]
             if line:
                 locator.press_sequentially(
-                    line, delay=_TYPING_DELAY_MS, timeout=0
+                    line, delay=_TYPING_DELAY_MS * kernel_virtual_time_rate(), timeout=0
                 )
             if index < len(lines) - 1:
                 locator.press("Enter", timeout=0)
@@ -417,73 +380,18 @@ class EmployeeWebmailSender:
             raise EmployeeWebmailError("employee reply reference is outside the configured webmail origin")
 
     def _validate_account(self, page: Any, expected_email: str) -> None:
-        actual_email = page.evaluate("rcmail.env.tac_logged_in_email || null")
-        if not isinstance(actual_email, str) or actual_email.casefold() != expected_email.casefold():
+        account_label = page.locator("#layout-sidebar .header-title.username")
+        if account_label.count() != 1:
+            raise EmployeeWebmailError("Roundcube does not expose its authenticated mailbox identity")
+        actual_email = account_label.inner_text().strip()
+        if not actual_email or actual_email.casefold() != expected_email.casefold():
             raise EmployeeWebmailError("Roundcube authenticated mailbox does not match the employee identity")
 
-    def _compose_url(
-        self,
-        message_id: str,
-        run_id: str,
-        generation: int,
-        in_reply_to: str | None,
-        reply_to: str | None,
-        automated: bool,
-    ) -> str:
+    def _compose_url(self) -> str:
         parts = urlsplit(self.webmail_url)
         query = dict(parse_qsl(parts.query, keep_blank_values=True))
-        query.update({
-            "_task": "mail",
-            "_action": "compose",
-            "_tac_message_id": message_id,
-            "_tac_run_id": run_id,
-            "_tac_generation": str(generation),
-            "_tac_in_reply_to": in_reply_to or "",
-            "_tac_reply_to": reply_to or "",
-            "_tac_automated": "1" if automated else "0",
-        })
+        query.update({"_task": "mail", "_action": "compose"})
         return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
-
-    def _verify_plugin_context(
-        self,
-        form: Any,
-        message_id: str,
-        run_id: str,
-        generation: int,
-        in_reply_to: str | None,
-        reply_to: str | None,
-        automated: bool,
-    ) -> None:
-        expected = {
-            "_tac_message_id": message_id,
-            "_tac_run_id": run_id,
-            "_tac_generation": str(generation),
-            "_tac_in_reply_to": in_reply_to or "",
-            "_tac_reply_to": reply_to or "",
-            "_tac_automated": "1" if automated else "0",
-        }
-        for name, value in expected.items():
-            field = form.locator(f'input[name="{name}"]')
-            if field.count() != 1 or field.input_value() != value:
-                raise EmployeeWebmailError("Roundcube TAC correlation plugin is absent or incomplete")
-
-    @staticmethod
-    def _correlation_values(
-        message_id: str,
-        run_id: str,
-        generation: int,
-        in_reply_to: str | None,
-        reply_to: str | None,
-        automated: bool,
-    ) -> dict[str, str]:
-        return {
-            "_tac_message_id": message_id,
-            "_tac_run_id": run_id,
-            "_tac_generation": str(generation),
-            "_tac_in_reply_to": in_reply_to or "",
-            "_tac_reply_to": reply_to or "",
-            "_tac_automated": "1" if automated else "0",
-        }
 
     def _verify_sender(self, form: Any, sender_email: str) -> None:
         field = form.locator("#_from")

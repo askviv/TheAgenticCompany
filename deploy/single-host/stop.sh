@@ -10,6 +10,6 @@ docker compose --env-file "$TAC_ROOT/source/deploy/single-host/host.env" -p tac-
   -f "$TAC_ROOT/source/deploy/single-host/controller.compose.yml" stop
 docker compose --env-file "$TAC_ROOT/plane/plane-app/plane.env" -p plane-app \
   -f "$TAC_ROOT/plane/plane-app/docker-compose.yaml" stop
-GITLAB_PORT=8929 docker compose -p theagentcompany \
+docker compose -p theagentcompany \
   -f "$TAC_ROOT/source/servers/docker-compose.yml" \
   -f "$TAC_ROOT/source/deploy/single-host/apps.override.yml" stop

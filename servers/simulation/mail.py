@@ -28,6 +28,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, m
 
 from servers.company.scenarios import (
     RealMailTransport,
+    _confirm_smtp4dev_until,
     _roundcube_message_url,
     _ssl_context,
 )
@@ -224,6 +225,15 @@ def _decoded_header(values: list[Any]) -> str:
         str(make_header(decode_header(str(value)))).strip()
         for value in values
     )
+
+
+def _address_header(values: list[Any]) -> str:
+    addresses = [address for _name, address in getaddresses([str(value) for value in values]) if address]
+    return addresses[0] if len(addresses) == 1 else ""
+
+
+def _normalize_mail_body(value: str) -> str:
+    return value.replace("\r\n", "\n").replace("\r", "\n")
 
 
 _COMPANY_TIME = TypeAdapter(AwareDatetime)
@@ -515,6 +525,8 @@ class MailuGateway:
         delivery_address: str | None = None,
         business_time: str | datetime | None = None,
         on_submission_started: Callable[[], None] = lambda: None,
+        on_submission_snapshot: Callable[[str, int], None] | None = None,
+        on_native_message_id: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
         """Submit once, then require a native, correlated delivery receipt.
 
@@ -585,6 +597,44 @@ class MailuGateway:
                     {"actor_id": sender_actor.actor_id, "email": sender_actor.email},
                     reply_source,
                 )
+            sent_snapshot: dict[str, Any] | None = None
+            submission_time: datetime | None = None
+
+            def mark_browser_submission_started() -> None:
+                nonlocal submission_time, sent_snapshot
+                # Called inside the employee's activity lock, immediately before
+                # native Send. Earlier snapshots could include a different
+                # experiment's message while this action waits for the browser.
+                sent_snapshot = self._employee_sent_snapshot(sender_credentials)
+                submission_time = datetime.now(timezone.utc)
+                if on_submission_snapshot is not None:
+                    on_submission_snapshot(sent_snapshot["uidvalidity"], sent_snapshot["uid_next"])
+                else:
+                    on_submission_started()
+
+            native_message_id: str | None = None
+
+            def reconcile_browser_submission() -> None:
+                nonlocal native_message_id
+                if submission_time is None or sent_snapshot is None:
+                    raise MailReceiptMismatch("employee browser send returned without crossing the submission boundary")
+                native_message_id = self._employee_sent_message_id(
+                    sender_credentials,
+                    sender_actor.email,
+                    delivery_address or recipient_actor.email,
+                    context.subject,
+                    body,
+                    context.in_reply_to,
+                    sent_snapshot["uidvalidity"],
+                    sent_snapshot["uid_next"],
+                )
+                if native_message_id is None:
+                    raise MailDeliveryUnconfirmed(
+                        "employee browser submission has no unique matching Sent-folder message"
+                    )
+                if on_native_message_id is not None:
+                    on_native_message_id(native_message_id)
+
             webmail.send(
                 employee_id,
                 sender_actor.email,
@@ -601,19 +651,27 @@ class MailuGateway:
                 verify_reply_source=source_verifier,
                 reply_to=reply_to_actor.email if reply_to_actor is not None else None,
                 automated=context.automated,
-                on_submission_started=on_submission_started,
+                require_reply_to=reply_to_actor.email if reply_to_actor is not None else None,
+                on_submission_started=mark_browser_submission_started,
+                on_submission_completed=reconcile_browser_submission,
             )
+            if native_message_id is None:
+                raise MailDeliveryUnconfirmed("employee browser submission has no confirmed native Message-ID")
+            receipt_message_id = native_message_id
         elif delivery_address is None:
             self._smtp_send(sender_actor, recipient_actor, message, on_submission_started)
+            receipt_message_id = context.message_id
         else:
             self._smtp_send(sender_actor, recipient_actor, message, on_submission_started,
                             delivery_address=delivery_address)
+            receipt_message_id = context.message_id
         receipt = self.find_receipt(
             recipient_actor,
-            context.message_id,
+            receipt_message_id,
             context.subject,
             context.run_id,
             context.generation,
+            native_message=employee_id is not None,
         )
         if receipt is None:
             raise MailDeliveryUnconfirmed(
@@ -632,6 +690,8 @@ class MailuGateway:
         subject: str,
         run_id: str,
         generation: int,
+        *,
+        native_message: bool = False,
     ) -> dict[str, Any] | None:
         """Reconcile an earlier submission using the recipient's native provider."""
         recipient_actor = self._actor(recipient, "recipient")
@@ -644,15 +704,22 @@ class MailuGateway:
         if self._is_viv(recipient_actor):
             fixture = {
                 "subject": context.subject,
+                "confirm_timeout_seconds": self.config.confirm_timeout_seconds,
                 "smtp4dev_base_url": self.config.smtp4dev_api_base_url,
                 "smtp4dev_mailbox_name": self.config.smtp4dev_mailbox_name,
                 "employee_mailbox": {"tls_ca_file": self.config.tls_ca_file},
             }
-            receipt = self._transport.confirm_smtp4dev(fixture, context.message_id)
+            receipt = _confirm_smtp4dev_until(
+                self._transport, fixture, context.message_id,
+            )
             if receipt is None:
                 return None
             headers = self._smtp4dev_headers(receipt["mailbox_uid"])
-            self._verify_headers(headers, context)
+            if native_message:
+                if headers.get("message_id") != context.message_id or headers.get("subject") != context.subject:
+                    raise MailReceiptMismatch("native Mailu receipt does not match its exact sent message")
+            else:
+                self._verify_headers(headers, context)
         else:
             credentials = self._credentials_for(recipient_actor)
             fixture = {
@@ -672,7 +739,11 @@ class MailuGateway:
             if receipt is None:
                 return None
             headers = self._mailu_headers(receipt["mailbox_uid"], credentials)
-            self._verify_headers(headers, context)
+            if native_message:
+                if headers.get("message_id") != context.message_id or headers.get("subject") != context.subject:
+                    raise MailReceiptMismatch("native Mailu receipt does not match its exact sent message")
+            else:
+                self._verify_headers(headers, context)
             if headers["uidvalidity"] != str(receipt["uidvalidity"]):
                 raise MailReceiptMismatch("Mailu UIDVALIDITY changed during receipt confirmation")
 
@@ -684,6 +755,119 @@ class MailuGateway:
             "generation": context.generation,
             "recipient_actor_id": recipient_actor.actor_id,
         }
+
+    def employee_sent_message_id(
+        self, sender: dict[str, Any], recipient: dict[str, Any], subject: str, body: str,
+        in_reply_to: str | None, submission_started_at: str | None,
+        *, sent_uidvalidity: str | None = None, sent_uid_next: int | None = None,
+        business_time: str | datetime | None = None, delivery_address: str | None = None,
+    ) -> str | None:
+        """Recover one native browser submission from exact Sent-folder evidence."""
+        sender_actor = self._actor(sender, "sender")
+        recipient_actor = self._actor(recipient, "recipient")
+        if self._employee_id(sender_actor) is None:
+            return None
+        credentials = self._credentials_for(sender_actor)
+        if not submission_started_at:
+            return None
+        try:
+            datetime.fromisoformat(submission_started_at)
+        except ValueError as error:
+            raise MailReceiptMismatch("outbox submission timestamp is invalid") from error
+        company_time = _company_time_label(business_time)
+        if company_time is not None:
+            body = f"{body.rstrip()}\n\nCompany time: {company_time}"
+        if (not sent_uidvalidity or isinstance(sent_uid_next, bool)
+                or not isinstance(sent_uid_next, int)):
+            return None
+        return self._employee_sent_message_id(
+            credentials, sender_actor.email, delivery_address or recipient_actor.email, subject, body,
+            in_reply_to, sent_uidvalidity, sent_uid_next,
+        )
+
+    def _employee_sent_snapshot(self, credentials: _Credentials) -> dict[str, Any]:
+        with IMAPClient(
+            self.config.mailu_imap_host,
+            port=self.config.mailu_imap_port,
+            ssl=True,
+            ssl_context=_ssl_context(self.config.tls_ca_file),
+            timeout=self.config.smtp_timeout_seconds,
+        ) as client:
+            client.login(credentials.username, credentials.password)
+            sent_folders = []
+            for flags, _delimiter, mailbox in client.list_folders():
+                flag_names = {_flag_text(flag).casefold() for flag in (flags or [])}
+                if "\\sent" in flag_names:
+                    sent_folders.append(mailbox.decode("utf-8") if isinstance(mailbox, bytes) else str(mailbox))
+            if len(sent_folders) != 1:
+                raise MailReceiptMismatch("Mailu account does not expose one unambiguous Sent folder")
+            selected = client.select_folder(sent_folders[0], readonly=True)
+            uidvalidity = self._uidvalidity(selected)
+            uid_next = selected.get(b"UIDNEXT", selected.get("UIDNEXT"))
+            if isinstance(uid_next, bytes):
+                uid_next = uid_next.decode("ascii")
+            if isinstance(uid_next, bool) or not str(uid_next).isdigit() or int(uid_next) < 1:
+                raise MailReceiptMismatch("Mailu Sent folder selection has no valid UIDNEXT")
+            return {"uidvalidity": uidvalidity, "uid_next": int(uid_next)}
+
+    def _employee_sent_message_id(
+        self, credentials: _Credentials, sender_email: str, recipient_email: str,
+        subject: str, body: str, in_reply_to: str | None,
+        sent_uidvalidity: str, sent_uid_next: int,
+    ) -> str | None:
+        matches: list[str] = []
+        with IMAPClient(
+            self.config.mailu_imap_host,
+            port=self.config.mailu_imap_port,
+            ssl=True,
+            ssl_context=_ssl_context(self.config.tls_ca_file),
+            timeout=self.config.smtp_timeout_seconds,
+        ) as client:
+            client.login(credentials.username, credentials.password)
+            sent_folders = []
+            for flags, _delimiter, mailbox in client.list_folders():
+                flag_names = {_flag_text(flag).casefold() for flag in (flags or [])}
+                if "\\sent" in flag_names:
+                    sent_folders.append(mailbox.decode("utf-8") if isinstance(mailbox, bytes) else str(mailbox))
+            if len(sent_folders) != 1:
+                raise MailReceiptMismatch("Mailu account does not expose one unambiguous Sent folder")
+            selected = client.select_folder(sent_folders[0], readonly=True)
+            if self._uidvalidity(selected) != sent_uidvalidity:
+                raise MailReceiptMismatch("Mailu Sent folder UIDVALIDITY changed since submission began")
+            for uid in client.search(["UID", f"{sent_uid_next}:*"]):
+                if int(uid) < sent_uid_next:
+                    continue
+                fetched = client.fetch([uid], [b"BODY.PEEK[]"]).get(uid)
+                if not isinstance(fetched, dict):
+                    raise MailReceiptMismatch("Mailu Sent folder returned incomplete message evidence")
+                raw = fetched.get(b"BODY[]", b"")
+                parsed = email.message_from_bytes(raw, policy=email.policy.default)
+                actual_id = _single_header({"message-id": parsed.get_all("Message-ID", [])}, "message-id")
+                if not actual_id:
+                    continue
+                actual_recipients = {
+                    address.casefold()
+                    for _name, address in getaddresses(
+                        parsed.get_all("To", []) + parsed.get_all("Cc", [])
+                    ) if address
+                }
+                actual_in_reply_to = _single_header(
+                    {"in-reply-to": parsed.get_all("In-Reply-To", [])}, "in-reply-to"
+                )
+                body_part = parsed.get_body(preferencelist=("plain",))
+                actual_body = body_part.get_content() if body_part is not None else None
+                if (
+                    _address_header(parsed.get_all("From", [])).casefold() == sender_email.casefold()
+                    and actual_recipients == {recipient_email.casefold()}
+                    and _decoded_header(parsed.get_all("Subject", [])) == subject
+                    and actual_in_reply_to == in_reply_to
+                    and isinstance(actual_body, str)
+                    and _normalize_mail_body(actual_body) == _normalize_mail_body(body)
+                ):
+                    matches.append(actual_id)
+        if len(matches) > 1:
+            raise MailReceiptMismatch("Mailu Sent folder has multiple exact matches for the uncertain submission")
+        return matches[0] if matches else None
 
     def inspect_issue_notification(
         self,

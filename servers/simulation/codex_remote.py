@@ -15,6 +15,10 @@ from servers.simulation.codex_model import (
     CodexModelAccessError, CodexModelError, CodexOutputSchemaError, CodexRateLimitError,
     ModelReply,
 )
+from servers.simulation.codex_device_auth import (
+    CodexDeviceAuthManager,
+    create_codex_auth_router,
+)
 
 
 class CodexRemoteSettings(BaseModel):
@@ -116,11 +120,18 @@ def create_codex_transport(settings):
 
 def create_codex_inference_app(settings: CodexCLISettings, bearer_token: SecretStr) -> FastAPI:
     """Expose only structured inference; all prompts and results stay out of logs."""
-    app = FastAPI(title="Codex inference transport", docs_url=None, redoc_url=None)
+    auth_manager = CodexDeviceAuthManager(settings)
+    app = FastAPI(
+        title="Codex inference transport",
+        docs_url=None,
+        redoc_url=None,
+        lifespan=auth_manager.lifespan,
+    )
     model = CodexCLIModel(settings)
     token = bearer_token.get_secret_value()
     if not token:
         raise ValueError("Codex inference bearer token is required")
+    app.include_router(create_codex_auth_router(token, manager=auth_manager))
 
     @app.get("/health")
     def health():

@@ -3,5 +3,5 @@
   "state_root": "/data/theagentcompany/enterprise/state/employee-desktops",
   "viewing_origin": "https://desktop.company.example.test",
   "web_bind_address": "192.0.2.10",
-  "image": "tac-selkies-desktop:2.1.0-ubuntu26.04-socat1"
+  "image": "ghcr.io/selkies-project/selkies/desktop:2.1.0-ubuntu26.04"
 }

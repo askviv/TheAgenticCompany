@@ -1,6 +1,6 @@
 [Unit]
 Description=Company Compose projects after virtual clock synchronization
-Requires=docker.service
+Wants=docker.service
 After=docker.service
 
 [Service]

@@ -56,10 +56,13 @@ logger = logging.getLogger(__name__)
 def _log_provider_failure(operation: str, provider: str, error: Exception) -> None:
     frames = [(frame.filename, frame.lineno, frame.name)
               for frame in traceback.extract_tb(error.__traceback__)]
-    logger.error("background provider %s failed provider=%s exception_type=%s cause_type=%s errno=%s stack=%s",
+    logger.error("background provider %s failed provider=%s exception_type=%s cause_type=%s errno=%s "
+                 "sqlite_errorcode=%s sqlite_errorname=%s stack=%s",
                  operation, provider, type(error).__name__,
                  type(error.__cause__).__name__ if error.__cause__ else None,
-                 getattr(error, "errno", None), frames)
+                 getattr(error, "errno", None),
+                 getattr(error, "sqlite_errorcode", None),
+                 getattr(error, "sqlite_errorname", None), frames)
 _PROVIDERS = {
     "coffeebench": (COFFEE_COMMIT, initialize_coffee),
     "ecommercebench": (ECOMMERCE_COMMIT, initialize_ecommerce),

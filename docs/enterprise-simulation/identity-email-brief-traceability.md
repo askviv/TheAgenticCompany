@@ -15,5 +15,4 @@ Controlled tests cover sender identity, source attachments, browser references,
 partial retries, duplicate prevention and additive receipt migrations. Native
 account/permission checks and their private operational reports are separate
 from business experiments. New runs retain old company mail and audit history;
-no clean-mailbox deletion reset is implied. GitLab employee identity work is
-outside the current scope.
+no clean-mailbox deletion reset is implied.

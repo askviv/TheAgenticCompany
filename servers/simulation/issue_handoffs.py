@@ -69,13 +69,27 @@ class IssueHandoffStore:
                 stage TEXT NOT NULL CHECK(stage IN ('waiting','read','submitting','uncertain','sent')),
                 delivered_at TEXT, deadline_at TEXT, observed_unread_real_at TEXT,
                 timing_basis TEXT, read_at TEXT,
+                handoff_eligible_at TEXT,
                 receipt_json TEXT, handoff_json TEXT, handoff_receipt_json TEXT,
+                submission_started_at TEXT, sent_uidvalidity TEXT, sent_uid_next INTEGER,
+                native_message_id TEXT,
                 last_error TEXT, updated_at TEXT NOT NULL)""")
             columns = {row[1] for row in connection.execute("PRAGMA table_info(company_issue_handoffs)")}
             if "observed_unread_real_at" not in columns:
                 connection.execute("ALTER TABLE company_issue_handoffs ADD COLUMN observed_unread_real_at TEXT")
             if "timing_basis" not in columns:
                 connection.execute("ALTER TABLE company_issue_handoffs ADD COLUMN timing_basis TEXT")
+            for name, declaration in (
+                ("submission_started_at", "TEXT"), ("sent_uidvalidity", "TEXT"),
+                ("sent_uid_next", "INTEGER"), ("native_message_id", "TEXT"),
+                ("handoff_eligible_at", "TEXT"),
+            ):
+                if name not in columns:
+                    connection.execute(f"ALTER TABLE company_issue_handoffs ADD COLUMN {name} {declaration}")
+            connection.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS company_issue_handoff_native_message_id_idx "
+                "ON company_issue_handoffs(native_message_id) WHERE native_message_id IS NOT NULL"
+            )
 
     def register(self, notification: IssueNotification, now: datetime) -> dict:
         payload = notification.model_dump(mode="json")
@@ -129,7 +143,7 @@ class IssueHandoffStore:
                 (datetime.fromisoformat(anchor) + TIMEOUT).isoformat() if anchor else
                 (received_at + TIMEOUT).isoformat())
             basis = row["timing_basis"] or ("first_unread_observation" if kernel_mode and anchor else None)
-            stage = Stage.READ if receipt["seen"] else Stage.WAITING
+            stage = Stage.READ if receipt["seen"] and row["handoff_eligible_at"] is None else Stage.WAITING
             connection.execute("""UPDATE company_issue_handoffs SET stage=?, delivered_at=?,
                 deadline_at=?,observed_unread_real_at=?,timing_basis=?,read_at=?,receipt_json=?,
                 last_error=NULL,updated_at=? WHERE issue_key=?""",
@@ -149,13 +163,55 @@ class IssueHandoffStore:
                                (encoded, utc(now).isoformat(), key))
         return self.get(key)
 
-    def mark_submitting(self, key: str, intent: dict, now: datetime) -> None:
+    def mark_submitting(
+        self, key: str, intent: dict, now: datetime,
+        *, sent_uidvalidity: str | None = None, sent_uid_next: int | None = None,
+    ) -> None:
         with self.store.transaction() as connection:
-            changed = connection.execute("""UPDATE company_issue_handoffs SET stage='submitting',updated_at=?
+            changed = connection.execute("""UPDATE company_issue_handoffs SET stage='submitting',
+                submission_started_at=?,sent_uidvalidity=?,sent_uid_next=?,updated_at=?
                 WHERE issue_key=? AND stage='waiting' AND handoff_json=?""",
-                (utc(now).isoformat(), key, json.dumps(intent, sort_keys=True))).rowcount
+                (utc(now).isoformat(), sent_uidvalidity, sent_uid_next, utc(now).isoformat(),
+                 key, json.dumps(intent, sort_keys=True))).rowcount
             if changed != 1:
                 raise StoreConflict("Issue handoff was already claimed or read")
+
+    def mark_eligible(self, key: str, intent: dict, now: datetime) -> None:
+        with self.store.transaction() as connection:
+            row = connection.execute(
+                "SELECT stage,deadline_at,handoff_json,handoff_eligible_at FROM company_issue_handoffs "
+                "WHERE issue_key=?", (key,),
+            ).fetchone()
+            if row is None:
+                raise KeyError("Tracked company issue not found")
+            if row["stage"] != Stage.WAITING or row["handoff_json"] != json.dumps(intent, sort_keys=True):
+                raise StoreConflict("Issue handoff is no longer eligible")
+            if not row["deadline_at"] or utc(now) < datetime.fromisoformat(row["deadline_at"]):
+                raise StoreConflict("Issue handoff deadline has not elapsed")
+            if row["handoff_eligible_at"] is None:
+                connection.execute(
+                    "UPDATE company_issue_handoffs SET handoff_eligible_at=?,updated_at=? WHERE issue_key=?",
+                    (utc(now).isoformat(), utc(now).isoformat(), key),
+                )
+
+    def record_native_message_id(self, key: str, message_id: str) -> None:
+        if not isinstance(message_id, str) or not re.fullmatch(r"<[^<>\s]+>", message_id):
+            raise ValueError("native Message-ID must be an RFC message identifier")
+        with self.store.transaction() as connection:
+            row = connection.execute(
+                "SELECT submission_started_at,native_message_id FROM company_issue_handoffs WHERE issue_key=?",
+                (key,),
+            ).fetchone()
+            if row is None:
+                raise KeyError("Tracked company issue not found")
+            if row["submission_started_at"] is None:
+                raise StoreConflict("native Message-ID cannot be recorded before submission starts")
+            if row["native_message_id"] not in (None, message_id):
+                raise StoreConflict("Issue handoff already has a different native Message-ID")
+            connection.execute(
+                "UPDATE company_issue_handoffs SET native_message_id=? WHERE issue_key=?",
+                (message_id, key),
+            )
 
     def complete(self, key: str, receipt: dict, now: datetime) -> None:
         with self.store.transaction() as connection:
@@ -283,7 +339,8 @@ class IssueHandoffService:
                 "body": "Please handle this,\n\n" + record.business_description
                         + "\n\nRequested outcome: " + record.requested_outcome + "\n\n" + "\n".join(links),
                 "message_id": f"<company-issue-{record.issue_key}-handoff@theagentcompany.local>",
-                "run_id": "company-issue:" + record.issue_key, "generation": 0}
+                "run_id": "company-issue:" + record.issue_key, "generation": 0,
+                "in_reply_to": record.message_id}
 
     def process(self, key: str) -> None:
         now = utc(self.now())
@@ -295,8 +352,21 @@ class IssueHandoffService:
             actor = self.actors[record.recipient_email.casefold()]
             if row["stage"] in (Stage.SUBMITTING, Stage.UNCERTAIN):
                 intent = json.loads(row["handoff_json"])
-                receipt = self.mail.find_receipt(self.viv, intent["message_id"], intent["subject"],
-                                                 intent["run_id"], intent["generation"])
+                native_message_id = row["native_message_id"]
+                if native_message_id is None:
+                    native_message_id = self.mail.employee_sent_message_id(
+                        intent["sender"], self.viv, intent["subject"], intent["body"],
+                        intent.get("in_reply_to"), row.get("submission_started_at"),
+                        sent_uidvalidity=row.get("sent_uidvalidity"),
+                        sent_uid_next=row.get("sent_uid_next"),
+                    )
+                    if native_message_id is not None:
+                        self.store.record_native_message_id(key, native_message_id)
+                receipt = self.mail.find_receipt(
+                    self.viv, native_message_id or intent["message_id"], intent["subject"],
+                    intent["run_id"], intent["generation"],
+                    native_message=native_message_id is not None,
+                )
                 if receipt:
                     self.store.complete(key, receipt, now)
                 # An uncertain SMTP boundary is never blindly resubmitted.
@@ -322,16 +392,37 @@ class IssueHandoffService:
                 return
             if self.store.observe(key, receipt, now, kernel_mode=self.kernel_mode)["stage"] == Stage.READ:
                 return
+            self.store.mark_eligible(key, intent, now)
+
+            def mark_submitting(sent_uidvalidity: str | None = None,
+                                sent_uid_next: int | None = None) -> None:
+                self.store.mark_submitting(
+                    key, intent, self.now(), sent_uidvalidity=sent_uidvalidity,
+                    sent_uid_next=sent_uid_next,
+                )
+
             def submission_started():
+                # Non-browser delivery has not opened the employee message, so
+                # retain the final read check at the SMTP submission edge.
                 latest = self.mail.inspect_issue_notification(actor, record.message_id)
                 if latest is None:
                     raise RuntimeError("Issue notification receipt disappeared before submission")
                 if self.store.observe(key, latest, self.now(), kernel_mode=self.kernel_mode)["stage"] == Stage.READ:
                     raise ReadBeforeHandoff()
-                self.store.mark_submitting(key, intent, self.now())
+                mark_submitting()
+
+            def submission_snapshot(sent_uidvalidity: str, sent_uid_next: int) -> None:
+                # The browser opens the exact message to compose its native
+                # reply. Eligibility was durably established before that read.
+                mark_submitting(sent_uidvalidity, sent_uid_next)
+
+            def native_id_captured(message_id: str) -> None:
+                self.store.record_native_message_id(key, message_id)
             result = self.mail.send(actor, self.viv, intent["subject"], intent["body"], intent["message_id"],
                                     intent["run_id"], intent["generation"], in_reply_to=record.message_id,
-                                    on_submission_started=submission_started)
+                                    on_submission_started=submission_started,
+                                    on_submission_snapshot=submission_snapshot,
+                                    on_native_message_id=native_id_captured)
             self.store.complete(key, result, self.now())
         except ReadBeforeHandoff:
             return

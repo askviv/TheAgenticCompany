@@ -1,1 +1,0 @@
-Delete the stale branch feature/ssl from http://the-agent-company.com:8929/root/OpenSearch

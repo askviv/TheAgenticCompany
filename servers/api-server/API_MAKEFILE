@@ -2,15 +2,13 @@ SHELL = /bin/bash
 
 HOSTNAME?=localhost
 FILE_SERVER_PORT?=8081
-GITLAB_PORT?=8929
 
-.PHONY: init start-all stop-all start-file-server stop-file-server start-gitlab stop-gitlab rebuild-gitlab reset-gitlab \
+.PHONY: init start-all stop-all start-file-server stop-file-server \
 		start-owncloud stop-owncloud reset-owncloud \
 		start-rocketchat stop-rocketchat rm-rocketchat rm-rocketchat-volume reset-rocketchat backup-rocketchat
 
 init:
 	$(eval export HOSTNAME)
-	$(eval export GITLAB_PORT)
 	@echo "Initialization done."
 
 start-all: init
@@ -24,19 +22,6 @@ start-all: init
 	@echo "starting plane..."
 	-cd /plane && make start-plane
 	-make reset-rocketchat
-
-# reset stops the gitlab container, destroys and starts again
-# any changes to gitlab will disappear, and the container will start
-# in a clean state (with pre-populated data)
-reset-gitlab: init
-	@echo "stopping existing gitlab instance..."
-	docker compose -p theagentcompany stop gitlab
-	@echo "remove gitlab container..."
-	docker compose -p theagentcompany rm -f gitlab
-	@echo "start gitlab and wait for its healthcheck..."
-	docker compose -p theagentcompany up --wait --wait-timeout 900 -d gitlab
-	@echo "renew expired benchmark root-token..."
-	docker compose -p theagentcompany exec -T gitlab gitlab-rails runner 'token = User.find_by!(username: "root").personal_access_tokens.find_by!(name: "root-token"); token.update!(expires_at: 365.days.from_now) if token.expired?'
 
 # Sotopia Redis
 reset-sotopia-redis: init

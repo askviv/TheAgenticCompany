@@ -21,6 +21,7 @@ from servers.simulation.actor_protocol import (
     ActorTurnRequest, ActorTurnResponse, ActorUsage, SupplierStatePatch,
     SupplierKernelStatePatch, bearer_token_matches,
 )
+from servers.simulation.clock_rate import kernel_virtual_time_rate
 from servers.simulation.actor_worker_store import ActorTurnStore, canonical_request_hash
 from servers.simulation.coffeebench_supplier import CoffeeSupplierAgent
 from servers.simulation.coffeebench_supplier import CodexCoffeeModel
@@ -58,9 +59,10 @@ class CoffeeTranscriptStore:
             self.path.chmod(0o600)
 
     def _connect(self):
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        timeout = 30 * kernel_virtual_time_rate()
+        connection = sqlite3.connect(self.path, timeout=timeout, isolation_level=None)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout=30000")
+        connection.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
         return connection
 
     def _initialize(self) -> None:

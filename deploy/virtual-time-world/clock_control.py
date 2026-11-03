@@ -316,10 +316,10 @@ class Controller:
 
     def clock_snapshot(self):
         """Read the active guest clock and require a durable, reconciled anchor."""
-        register_event_impl()
         connection = libvirt.open(CONNECTION)
         if connection is None:
             raise RuntimeError('system libvirt connection unavailable')
+        domain = None
         try:
             domain = self.domain(connection)
             if not domain.isActive():
@@ -341,6 +341,9 @@ class Controller:
                 speed = anchor[2]
                 return {'speed': speed, 'epoch_ns': epoch_ns, 'mode': 'guest-kernel'}
         finally:
+            # The Python binding releases virDomain through object lifetime;
+            # drop its reference before closing the request-scoped connection.
+            domain = None
             connection.close()
 
     def start(self, requested_rate=None):
@@ -528,10 +531,10 @@ class Controller:
     def set_rate(self, rate):
         if rate < 1:
             raise ValueError('rate must be a positive integer')
-        register_event_impl()
         connection = libvirt.open(CONNECTION)
         if connection is None:
             raise RuntimeError('system libvirt connection unavailable')
+        domain = None
         try:
             domain = self.domain(connection)
             if not domain.isActive():
@@ -574,6 +577,7 @@ class Controller:
                 db.commit()
             print(f'guest clock rate set to {rate}x')
         finally:
+            domain = None
             connection.close()
 
     def synchronize_boot_clock(self, domain):

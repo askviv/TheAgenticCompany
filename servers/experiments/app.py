@@ -15,6 +15,7 @@ from pathlib import Path
 from textwrap import shorten
 from urllib.parse import parse_qsl, quote, urlsplit
 
+import requests
 import yaml
 from flask import Flask, Response, abort, jsonify, redirect, request, session, url_for, send_file
 
@@ -28,7 +29,6 @@ COMPANY_TOOLS = (
     ('rocketchat', 'Rocket.Chat'),
     ('owncloud', 'ownCloud'),
     ('plane', 'Plane'),
-    ('gitlab', 'GitLab'),
     ('midpoint', 'midPoint'),
 )
 
@@ -92,7 +92,7 @@ def catalog(root):
         briefs.update(json.loads(brief_file.read_text()))
     for path in sorted((Path(root)/'workspaces/tasks').glob('*/task.md')):
         task_id = path.parent.name
-        if task_id.startswith('sde-') or task_id=='example':
+        if task_id == 'example':
             continue
         description = path.read_text()
         dependencies = yaml.safe_load((path.parent/'dependencies.yml').read_text()) or []
@@ -190,6 +190,8 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         EXPERIMENTS_PUBLIC_URL=os.environ.get('EXPERIMENTS_PUBLIC_URL','http://192.0.2.10:8110'),
         COMPANY_TOOLS_URLS_FILE=os.environ.get(
             'COMPANY_TOOLS_URLS_FILE', str(Path(__file__).with_name('company-tools-urls.example.json'))),
+        CODEX_AUTH_BRIDGE_URL=os.environ.get('CODEX_AUTH_BRIDGE_URL'),
+        CODEX_AUTH_BRIDGE_TOKEN_FILE=os.environ.get('CODEX_AUTH_BRIDGE_TOKEN_FILE'),
         SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', MAX_CONTENT_LENGTH=65536,
         SESSION_COOKIE_SECURE=False, EVENTS_WAIT_SECONDS=20)
     if config: app.config.update(config)
@@ -653,6 +655,89 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             logging.exception('Company tools URL mapping unavailable (%s)', type(error).__name__)
             return jsonify(error='Company tools URL mapping is unavailable or invalid.'), 503
         return jsonify(tools=links)
+
+    def codex_auth_json(payload, status=200):
+        response=jsonify(payload)
+        response.headers['Cache-Control']='no-store'
+        return response,status
+
+    def codex_auth_bridge(path, method='GET', payload=None):
+        token_file=app.config.get('CODEX_AUTH_BRIDGE_TOKEN_FILE')
+        bridge_url=app.config.get('CODEX_AUTH_BRIDGE_URL') or (
+            'http://10.0.2.2:8143' if token_file else None
+        )
+        if not bridge_url or not token_file:
+            return None, codex_auth_json({'error':{'code':'codex_auth_bridge_unconfigured'}},503)
+        try:
+            parsed=urlsplit(bridge_url)
+            if parsed.scheme not in {'http','https'} or not parsed.hostname or parsed.username or parsed.password:
+                raise ValueError('invalid bridge URL')
+            token=Path(token_file).read_text(encoding='utf-8').strip()
+            if not token:
+                raise ValueError('empty bridge bearer token')
+        except (OSError,TypeError,ValueError) as error:
+            logging.error('Codex auth bridge configuration unavailable exception_type=%s',type(error).__name__)
+            return None, codex_auth_json({'error':{'code':'codex_auth_bridge_unavailable'}},503)
+        try:
+            response=requests.request(
+                method,bridge_url.rstrip('/')+path,
+                headers={'Authorization':f'Bearer {token}','Accept':'application/json'},
+                json=payload,timeout=None,allow_redirects=False,
+            )
+        except requests.RequestException as error:
+            logging.warning('Codex auth bridge request failed exception_type=%s',type(error).__name__)
+            return None, codex_auth_json({'error':{'code':'codex_auth_bridge_unavailable'}},502)
+        if not 200 <= response.status_code < 300:
+            logging.warning('Codex auth bridge returned status=%s',response.status_code)
+            return None, codex_auth_json({'error':{'code':'codex_auth_bridge_rejected'}},502)
+        try:
+            data=response.json()
+            if (not isinstance(data,dict)
+                    or data.get('state') not in {'authenticated','unauthenticated','starting','pending','completed','failed','expired'}):
+                raise ValueError('invalid response')
+            safe={'state':data['state']}
+            if 'authenticated' in data:
+                if not isinstance(data['authenticated'],bool):
+                    raise ValueError('invalid authenticated status')
+                safe['authenticated']=data['authenticated']
+            for field in ('auth_method','login_id','user_code','expires_at'):
+                value=data.get(field)
+                if value is not None:
+                    if not isinstance(value,str):
+                        raise ValueError('invalid response field')
+                    safe[field]=value
+            verification_url=data.get('verification_url')
+            if verification_url is not None:
+                if not isinstance(verification_url,str):
+                    raise ValueError('invalid verification URL')
+                verification=urlsplit(verification_url)
+                if verification.scheme not in {'http','https'} or not verification.hostname or verification.username or verification.password:
+                    raise ValueError('invalid verification URL')
+                safe['verification_url']=verification_url
+            error_code=data.get('error')
+            if error_code is not None:
+                if not isinstance(error_code,str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_.-]{0,95}',error_code):
+                    raise ValueError('invalid error code')
+                safe['error']=error_code
+            return safe, None
+        except (ValueError,requests.JSONDecodeError) as error:
+            logging.warning('Codex auth bridge returned an invalid response exception_type=%s',type(error).__name__)
+            return None, codex_auth_json({'error':{'code':'codex_auth_bridge_invalid_response'}},502)
+
+    @app.get('/api/company/model-auth/status')
+    def api_company_model_auth_status():
+        result,failure=codex_auth_bridge('/auth/status')
+        return failure if failure else codex_auth_json(result)
+
+    @app.post('/api/company/model-auth/device/start')
+    def api_company_model_auth_device_start():
+        result,failure=codex_auth_bridge('/auth/device/start',method='POST',payload={})
+        return failure if failure else codex_auth_json(result)
+
+    @app.get('/api/company/model-auth/device/<login_id>')
+    def api_company_model_auth_device_status(login_id):
+        result,failure=codex_auth_bridge('/auth/device/'+quote(login_id,safe=''))
+        return failure if failure else codex_auth_json(result)
     @app.get('/api/company/clock')
     def api_company_clock():
         try:

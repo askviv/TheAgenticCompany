@@ -16,6 +16,7 @@ from typing import Any
 
 from servers.company.browser_chat import PlaywrightEmployeeBrowserSessionProvider
 from servers.company.scenarios import RealChatTransport
+from servers.simulation.clock_rate import kernel_virtual_time_rate
 from servers.simulation.runtime import private_json
 
 LOG = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ class ExperimentChatDispatch:
         self.rocketchat_base_url = rocketchat_base_url.rstrip("/") + "/"
         self.state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.lock_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with closing(sqlite3.connect(self.database)) as connection:
+        with closing(sqlite3.connect(self.database, timeout=5 * kernel_virtual_time_rate())) as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS attempts (
@@ -233,7 +234,7 @@ class ExperimentChatDispatch:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def _connect(self):
-        connection = sqlite3.connect(self.database, timeout=15)
+        connection = sqlite3.connect(self.database, timeout=15 * kernel_virtual_time_rate())
         connection.row_factory = sqlite3.Row
         return connection
 

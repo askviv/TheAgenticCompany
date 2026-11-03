@@ -13,11 +13,13 @@ from decimal import Decimal, InvalidOperation
 from email.utils import parseaddr
 from hashlib import sha256
 import json
+import logging
 from functools import wraps
 import fcntl
 import inspect
 import os
 import re
+import traceback
 from threading import RLock, local
 from typing import Any
 from uuid import UUID, uuid5, NAMESPACE_URL
@@ -44,6 +46,8 @@ from servers.simulation.models import (
     ModelUsageRecord,
 )
 from servers.simulation.store import SQLiteStore, StoreConflict, StoreNotFound
+
+_LOGGER = logging.getLogger(__name__)
 
 class EngineConflict(StoreConflict):
     """A requested workflow transition conflicts with simulation state."""
@@ -1622,7 +1626,8 @@ class SimulationEngine:
                 for item in self.store.list_outbox(
                     model.run_id, run["generation"], status="completed"
                 )
-                if item["private_payload"].get("message_id") == in_reply_to
+                if (item["private_payload"].get("message_id") == in_reply_to
+                    or item.get("native_message_id") == in_reply_to)
             ), None)
             if (
                 prior_message is None
@@ -1671,12 +1676,41 @@ class SimulationEngine:
         recipient = self._member(run["run_id"], payload["to_actor_id"])
         sender_ref = self._mail_actor(sender); recipient_ref = self._mail_actor(recipient)
         if item["submission_started"] or item["status"] == "uncertain":
-            receipt = self.mail.find_receipt(recipient_ref, payload["message_id"], payload["subject"], run["run_id"], run["generation"])
+            native_message_id = item.get("native_message_id")
+            if native_message_id is None:
+                native_message_id = self.mail.employee_sent_message_id(
+                    sender_ref, recipient_ref, payload["subject"], payload["body"],
+                    payload.get("in_reply_to"), item.get("submission_started_at"),
+                    sent_uidvalidity=item.get("sent_uidvalidity"),
+                    sent_uid_next=item.get("sent_uid_next"),
+                    business_time=payload.get("simulated_time"),
+                    delivery_address=payload.get("delivery_address"),
+                )
+                if native_message_id is not None:
+                    item = self.store.record_outbox_native_message_id(
+                        run["run_id"], run["generation"], item["outbox_id"], native_message_id,
+                    )
+            receipt = self.mail.find_receipt(
+                recipient_ref, native_message_id or payload["message_id"], payload["subject"],
+                run["run_id"], run["generation"], native_message=native_message_id is not None,
+            )
             if receipt is None:
                 raise MailDeliveryUncertain("message submission is uncertain; native receipt was not found")
         else:
             def started():
                 self.store.mark_outbox_submission_started(run["run_id"], run["generation"], item["outbox_id"])
+
+            def started_with_sent_snapshot(sent_uidvalidity: str, sent_uid_next: int):
+                self.store.mark_outbox_submission_started(
+                    run["run_id"], run["generation"], item["outbox_id"],
+                    sent_uidvalidity=sent_uidvalidity, sent_uid_next=sent_uid_next,
+                )
+
+            def native_id_captured(message_id: str) -> None:
+                self.store.record_outbox_native_message_id(
+                    run["run_id"], run["generation"], item["outbox_id"], message_id,
+                )
+
             try:
                 receipt = self.mail.send(sender_ref, recipient_ref, payload["subject"], payload["body"],
                     payload["message_id"], run["run_id"], run["generation"],
@@ -1684,9 +1718,23 @@ class SimulationEngine:
                     business_time=payload.get("simulated_time"),
                     **({"delivery_address": payload["delivery_address"]}
                        if payload.get("delivery_address") else {}),
-                    on_submission_started=started)
+                    on_submission_started=started,
+                    on_submission_snapshot=started_with_sent_snapshot,
+                    on_native_message_id=native_id_captured)
             except Exception as exc:
                 current = self.store.get_outbox(run["run_id"], run["generation"], item["outbox_id"])
+                frames = [(frame.filename, frame.lineno, frame.name)
+                          for frame in traceback.extract_tb(exc.__traceback__)]
+                causes = []
+                cause = exc.__cause__ or exc.__context__
+                while cause is not None:
+                    causes.append(type(cause).__name__)
+                    cause = cause.__cause__ or cause.__context__
+                _LOGGER.error(
+                    "outbox delivery failed outbox_id=%s pre_send=%s exception_type=%s causes=%s stack=%s",
+                    item["outbox_id"], not current["submission_started"],
+                    type(exc).__name__, causes, frames,
+                )
                 try:
                     self.store.mark_outbox_failure(run["run_id"], run["generation"], item["outbox_id"],
                         error_type=type(exc).__name__[:100], pre_send=not current["submission_started"])
@@ -1812,7 +1860,7 @@ class SimulationEngine:
                 payload={"actor_id": actor["actor_id"], "approval_request_outbox_id": item["outbox_id"] if actor["actor_id"] == "manager" else None,
                          "response_to_outbox_id": item["outbox_id"],
                          "from_actor_id": run["agent_id"], "subject": payload.get("subject", "Approval request"),
-                         "message_id": payload.get("message_id"), "question": payload.get("body", ""),
+                         "message_id": item.get("native_message_id") or payload.get("message_id"), "question": payload.get("body", ""),
                          "visible_context": self.store.get_case(run["run_id"], run["generation"],
                              case_id or run["manifest"]["case_id"])["visible"]}, visibility=[actor["kind"]])
             self._enqueue_actor_event(event, run, actor)
@@ -2086,11 +2134,11 @@ class SimulationEngine:
         }, connection=connection)
 
     def _poll_actor_mail(self, run: dict[str, Any], actor: dict[str, Any]) -> list[dict[str, Any]]:
-        known_ids = {item["private_payload"].get("message_id") for item in self.store.list_outbox(run["run_id"], run["generation"])
+        known_ids = {item.get("native_message_id") or item["private_payload"].get("message_id") for item in self.store.list_outbox(run["run_id"], run["generation"])
                      if item["status"] == "completed" and (item["private_payload"].get("to_actor_id") == actor["actor_id"]
                          or actor["kind"] == "approver")}
         if run["scenario_id"] == "TAU_RETAIL":
-            known_ids.update(item["private_payload"].get("message_id")
+            known_ids.update(item.get("native_message_id") or item["private_payload"].get("message_id")
                              for item in self.store.list_outbox(run["run_id"], run["generation"], status="completed")
                              if item["private_payload"].get("from_actor_id") == actor["actor_id"])
         known_ids.discard(None)
@@ -2158,7 +2206,8 @@ class SimulationEngine:
             return
         refs = set(str(message.get("references", "")).split()) | {message.get("in_reply_to")}
         outbox = [item for item in self.store.list_outbox(run["run_id"], run["generation"], status="completed")
-                  if item["private_payload"].get("message_id") in refs
+                  if (item["private_payload"].get("message_id") in refs
+                      or item.get("native_message_id") in refs)
                   and ((item["private_payload"].get("from_actor_id") == run["agent_id"]
                         and item["private_payload"].get("to_actor_id") == recipient["actor_id"])
                        or (item["private_payload"].get("from_actor_id") == recipient["actor_id"]

@@ -17,6 +17,7 @@ import logging
 import os
 from pathlib import Path
 import secrets
+import socket
 import subprocess
 import tempfile
 import threading
@@ -26,13 +27,13 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
 from urllib.request import ProxyHandler, build_opener
 
+from servers.simulation.clock_rate import kernel_virtual_time_rate
 from servers.simulation.employee_desktop_proxy import CaddyEmployeeDesktopProxy
 
 
-DEFAULT_SELKIES_IMAGE = "tac-selkies-desktop:2.1.0-ubuntu26.04-socat1"
+DEFAULT_SELKIES_IMAGE = "ghcr.io/selkies-project/selkies/desktop:2.1.0-ubuntu26.04@sha256:558fb9d6d97697f8861022bc2594e930e0bb669025360e87022b86155e1aec2e"
 EMPLOYEE_DESKTOP_IMAGE_ENV = "EMPLOYEE_DESKTOP_IMAGE"
 EMPLOYEE_DESKTOP_CA_FILE_ENV = "EMPLOYEE_DESKTOP_CA_FILE"
-EMPLOYEE_DESKTOP_CA_CONTAINER_PATH = "/run/company-clock/internal-root-ca.crt"
 EMPLOYEE_DESKTOP_CA_NSS_DB = "/home/ubuntu/.pki/nssdb"
 EMPLOYEE_DESKTOP_CA_NICKNAME = "TheAgentCompany Shared Clock Internal CA"
 MANAGED_LABEL = "tac.employee-desktop.managed"
@@ -40,6 +41,8 @@ EMPLOYEE_LABEL = "tac.employee-desktop.employee-id"
 _CDP_READY = threading.Event()
 _IDLE_SHUTDOWN_SECONDS = 10 * 60
 _IDLE_RECONCILE_SECONDS = 60
+_CDP_PROXY_UNIT_PREFIX = "tac-employee-cdp-"
+_SYSTEMD_SOCKET_PROXYD = "/usr/lib/systemd/systemd-socket-proxyd"
 _LOGGER = logging.getLogger(__name__)
 _IDLE_COORDINATORS_LOCK = threading.Lock()
 _IDLE_COORDINATORS: dict[str, "EmployeeDesktopRuntime"] = {}
@@ -137,6 +140,18 @@ class EmployeeDesktopRuntime:
             employee_id = session["id"]
             with self._lifecycle_lock(employee_id, blocking=False) as acquired:
                 if not acquired:
+                    container = self._container_name(employee_id)
+                    inspect = self._inspect_optional(container)
+                    if inspect is None or not inspect.get("State", {}).get("Running"):
+                        continue
+                    self._validate_managed_container(inspect, employee_id)
+                    self._validate_mount(inspect, self._volume_name(employee_id))
+                    network = self._network_name(employee_id)
+                    self._validate_network_isolated(network, container, employee_id)
+                    container_ip = self._container_ip(inspect, network)
+                    viewing_url = self.caddy_proxy.existing_url_for(employee_id, container_ip)
+                    if viewing_url is not None:
+                        viewers.append({"employee_id": employee_id, "viewing_url": viewing_url})
                     continue
                 container = self._container_name(employee_id)
                 inspect = self._inspect_optional(container)
@@ -170,6 +185,7 @@ class EmployeeDesktopRuntime:
         self._ensure_private_state_root()
 
         with self._lifecycle_lock(employee_id):
+            ca_nss_db = self._prepare_ca_nss_db(employee_id) if self.ca_file is not None else None
             container = self._container_name(employee_id)
             volume = self._volume_name(employee_id)
             network = self._network_name(employee_id)
@@ -183,7 +199,7 @@ class EmployeeDesktopRuntime:
                 credentials = self._credentials(employee_id)
                 env_file = self._write_env_file(credentials, employee_id)
                 try:
-                    self._create_container(container, volume, network, employee_id, env_file)
+                    self._create_container(container, volume, network, employee_id, env_file, ca_nss_db)
                 finally:
                     env_file.unlink(missing_ok=True)
                 inspect = self._inspect(container)
@@ -198,21 +214,14 @@ class EmployeeDesktopRuntime:
                 inspect = self._inspect(container)
             self._validate_managed_container(inspect, employee_id)
             self._validate_mount(inspect, volume)
-            ports = self._published_ports(inspect)
-            cdp_port = ports.get("9223")
-            if cdp_port is None:
-                raise EmployeeDesktopError("desktop container is missing its private CDP port mapping")
             container_ip = self._container_ip(inspect, network)
 
             if not self._container_port_open(container, 9222):
                 self._wait_for_display(container)
-                if self.ca_file is not None:
-                    self._install_employee_desktop_ca(container)
                 self._launch_chrome(container)
-            if not self._container_port_open(container, 9223):
-                self._launch_cdp_relay(container)
-            cdp_document = self._wait_for_cdp(container, 9223, host=container_ip)
-            cdp_endpoint = self._rewrite_cdp_endpoint(cdp_document, 9223, host=container_ip)
+            proxy_port = self._start_cdp_proxy(employee_id, int((self._inspect(container).get("State") or {}).get("Pid") or 0))
+            cdp_document = self._wait_for_cdp(container, proxy_port, host="127.0.0.1")
+            cdp_endpoint = self._rewrite_cdp_endpoint(cdp_document, proxy_port, host="127.0.0.1")
             final_inspect = self._inspect(container)
             self._validate_managed_container(final_inspect, employee_id)
             self._validate_network_isolated(network, container, employee_id)
@@ -334,7 +343,7 @@ class EmployeeDesktopRuntime:
                         self._ensure_idle_worker(session["id"])
             except Exception:
                 _LOGGER.exception("Employee desktop idle reconciliation failed")
-            self._idle_reconcile_wakeup.wait(_IDLE_RECONCILE_SECONDS)
+            self._idle_reconcile_wakeup.wait(_IDLE_RECONCILE_SECONDS * kernel_virtual_time_rate())
 
     def _ensure_idle_worker(self, employee_id: str) -> None:
         coordinator = self._idle_coordinator()
@@ -389,7 +398,7 @@ class EmployeeDesktopRuntime:
                         if not (inspect.get("State") or {}).get("Running"):
                             return
                         last_activity = self._ensure_idle_timestamp(employee_id)
-                        deadline = last_activity + _IDLE_SHUTDOWN_SECONDS
+                        deadline = last_activity + _IDLE_SHUTDOWN_SECONDS * kernel_virtual_time_rate()
 
                 remaining = deadline - time.time()
                 if remaining > 0:
@@ -408,7 +417,7 @@ class EmployeeDesktopRuntime:
                         if not (inspect.get("State") or {}).get("Running"):
                             return
                         last_activity = self._ensure_idle_timestamp(employee_id)
-                        if time.time() < last_activity + _IDLE_SHUTDOWN_SECONDS:
+                        if time.time() < last_activity + _IDLE_SHUTDOWN_SECONDS * kernel_virtual_time_rate():
                             continue
                         self._stop_session_locked(employee_id)
                         return
@@ -434,6 +443,7 @@ class EmployeeDesktopRuntime:
 
     def _stop_session_locked(self, employee_id: str) -> dict[str, str]:
         container = self._container_name(employee_id)
+        self._stop_cdp_proxy(employee_id)
         if self.caddy_proxy is not None:
             self.caddy_proxy.remove(employee_id)
         inspect = self._inspect_optional(container)
@@ -609,11 +619,9 @@ class EmployeeDesktopRuntime:
         network = self._network_name(employee_id)
         self._validate_network_isolated(network, container, employee_id)
         container_ip = self._container_ip(inspect, network)
-        cdp_port = self._published_ports(inspect).get("9223")
-        if cdp_port is None:
-            raise EmployeeDesktopError("desktop container is missing its private CDP port mapping")
-        document = self._cdp_document(9223, host=container_ip)
-        endpoint = self._rewrite_cdp_endpoint(document, 9223, host=container_ip)
+        cdp_port = self._read_cdp_proxy_port(employee_id)
+        document = self._cdp_document(cdp_port, host="127.0.0.1")
+        endpoint = self._rewrite_cdp_endpoint(document, cdp_port, host="127.0.0.1")
         return {"employee_id": employee_id, "cdp_endpoint": endpoint}
 
     def _write_env_file(self, credentials: dict[str, str], employee_id: str) -> Path:
@@ -686,57 +694,77 @@ class EmployeeDesktopRuntime:
                      "--label", f"{EMPLOYEE_LABEL}={self._employee_key(employee_id)}", network)
 
     def _create_container(self, container: str, volume: str, network: str,
-                          employee_id: str, env_file: Path) -> None:
+                          employee_id: str, env_file: Path, ca_nss_db: Path | None) -> None:
         if self.caddy_proxy is None:
             raise EmployeeDesktopError("trusted HTTPS employee desktop proxy is not configured")
         arguments = [
             "create", "--name", container,
+            "--hostname", container,
             "--label", f"{MANAGED_LABEL}=true",
             "--label", f"{EMPLOYEE_LABEL}={self._employee_key(employee_id)}",
             "--restart", "unless-stopped",
+            "--health-cmd",
+            'p="${SELKIES_SUBFOLDER-${SUBFOLDER-}}"; p="${p#/}"; p="${p%/}"; p="${p:+/${p}}"; '
+            'curl -fsS -o /dev/null "http://localhost:${SELKIES_PORT:-8080}${p}/api/health"',
             "--init", "--shm-size", "2g",
-            "--publish", "127.0.0.1::9223/tcp",
             "--network", network,
             "--volume", f"{volume}:/home/ubuntu",
             "--env-file", str(env_file),
         ]
-        if self.ca_file is not None:
+        if ca_nss_db is not None:
             arguments.extend((
                 "--mount",
-                f"type=bind,source={self.ca_file},target={EMPLOYEE_DESKTOP_CA_CONTAINER_PATH},readonly",
+                f"type=bind,source={ca_nss_db},target={EMPLOYEE_DESKTOP_CA_NSS_DB}",
             ))
         for hostname, address in self.caddy_proxy.host_mappings():
             arguments.extend(("--add-host", f"{hostname}:{address}"))
         arguments.append(self.image)
         self._docker(*arguments)
 
-    def _install_employee_desktop_ca(self, container: str) -> None:
-        """Trust the guest Caddy root in Chrome's persistent NSS profile."""
-        db = EMPLOYEE_DESKTOP_CA_NSS_DB
-        self._docker("exec", "--user", "ubuntu", container, "mkdir", "-p", db)
-        db_exists = self._docker(
-            "exec", "--user", "ubuntu", container, "test", "-f", f"{db}/cert9.db",
-            check=False,
-        )
-        if db_exists.returncode == 1:
-            self._docker("exec", "--user", "ubuntu", container,
-                         "certutil", "-N", "-d", f"sql:{db}", "--empty-password")
-        elif db_exists.returncode != 0:
-            raise EmployeeDesktopError("Chrome's internal CA trust database could not be checked")
-
-        listing = self._docker("exec", "--user", "ubuntu", container,
-                               "certutil", "-L", "-d", f"sql:{db}")
-        has_ca = any(line.rsplit(maxsplit=1)[0].strip() == EMPLOYEE_DESKTOP_CA_NICKNAME
-                     for line in listing.stdout.splitlines() if line.strip())
-        if has_ca:
-            self._docker("exec", "--user", "ubuntu", container,
-                         "certutil", "-D", "-d", f"sql:{db}",
-                         "-n", EMPLOYEE_DESKTOP_CA_NICKNAME)
-        self._docker(
-            "exec", "--user", "ubuntu", container,
-            "certutil", "-A", "-d", f"sql:{db}", "-n", EMPLOYEE_DESKTOP_CA_NICKNAME,
-            "-t", "C,,", "-i", EMPLOYEE_DESKTOP_CA_CONTAINER_PATH,
-        )
+    def _prepare_ca_nss_db(self, employee_id: str) -> Path:
+        """Create Chrome's standard NSS trust database on the coordinator host."""
+        if self.ca_file is None:
+            raise EmployeeDesktopError("employee desktop internal TLS CA is not configured")
+        db = self.state_root / "nssdb" / self._employee_key(employee_id)
+        db.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if db.is_symlink() or not db.is_dir():
+            raise EmployeeDesktopError("employee desktop NSS trust directory is invalid")
+        os.chmod(db, 0o700)
+        marker = db / ".company-ca-sha256"
+        ca_digest = hashlib.sha256(self.ca_file.read_bytes()).hexdigest()
+        if (marker.is_file() and not marker.is_symlink()
+                and marker.read_text(encoding="ascii").strip() == ca_digest
+                and (db / "cert9.db").is_file() and (db / "key4.db").is_file()):
+            return db
+        try:
+            if not (db / "cert9.db").exists():
+                subprocess.run(["certutil", "-N", "-d", f"sql:{db}", "--empty-password"],
+                               check=True, capture_output=True, text=True)
+            listing = subprocess.run(["certutil", "-L", "-d", f"sql:{db}"],
+                                     check=True, capture_output=True, text=True)
+            has_ca = any(
+                line.rsplit(maxsplit=1)[0].strip() == EMPLOYEE_DESKTOP_CA_NICKNAME
+                for line in listing.stdout.splitlines() if line.strip() and " " in line.strip()
+            )
+            if has_ca:
+                subprocess.run([
+                    "certutil", "-D", "-d", f"sql:{db}", "-n", EMPLOYEE_DESKTOP_CA_NICKNAME,
+                ], check=True, capture_output=True, text=True)
+            subprocess.run([
+                "certutil", "-A", "-d", f"sql:{db}", "-n", EMPLOYEE_DESKTOP_CA_NICKNAME,
+                "-t", "C,,", "-i", str(self.ca_file),
+            ], check=True, capture_output=True, text=True)
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise EmployeeDesktopError(
+                "Chrome's company CA trust database could not be prepared; install Ubuntu libnss3-tools on the coordinator"
+            ) from error
+        marker.write_text(ca_digest + "\n", encoding="ascii")
+        os.chmod(marker, 0o600)
+        os.chown(db, 1000, 1000)
+        for database_file in (db / "cert9.db", db / "key4.db", db / "pkcs11.txt"):
+            if database_file.exists():
+                os.chown(database_file, 1000, 1000)
+        return db
 
     def _launch_chrome(self, container: str) -> None:
         # The official Selkies desktop image installs Google Chrome and patches
@@ -748,10 +776,6 @@ class EmployeeDesktopRuntime:
             "--user-data-dir=/home/ubuntu/.employee-browser-profile", "about:blank",
         )
 
-    def _launch_cdp_relay(self, container: str) -> None:
-        self._docker("exec", "--user", "ubuntu", "--detach", container,
-                     "socat", "TCP-LISTEN:9223,bind=0.0.0.0,reuseaddr,fork", "TCP:127.0.0.1:9222")
-
     def _container_port_open(self, container: str, port: int) -> bool:
         result = self._docker("exec", "--user", "ubuntu", container,
                               "nc", "-z", "127.0.0.1", str(port), check=False)
@@ -760,6 +784,99 @@ class EmployeeDesktopRuntime:
         raise EmployeeDesktopError(f"employee desktop port {port} probe failed") from subprocess.CalledProcessError(
             result.returncode, [self.docker_binary, "exec", container, "nc", "-z", "127.0.0.1", str(port)],
         )
+
+    def _start_cdp_proxy(self, employee_id: str, container_pid: int) -> int:
+        if container_pid <= 0:
+            raise EmployeeDesktopError("employee desktop process namespace is unavailable")
+        unit = _CDP_PROXY_UNIT_PREFIX + self._employee_key(employee_id)[:24]
+        self._stop_cdp_proxy(employee_id)
+        port = self._read_cdp_proxy_port(employee_id, missing_ok=True)
+        if port is None or not self._local_port_available(port):
+            port = self._allocate_local_port()
+            self._write_cdp_proxy_port(employee_id, port)
+        command = [
+            "systemd-run", "--quiet", "--collect", f"--unit={unit}",
+            f"--property=NetworkNamespacePath=/proc/{container_pid}/ns/net",
+            f"--socket-property=ListenStream=127.0.0.1:{port}",
+            _SYSTEMD_SOCKET_PROXYD, "127.0.0.1:9222",
+        ]
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+            subprocess.run(["systemctl", "is-active", "--quiet", unit + ".socket"],
+                           check=True, capture_output=True, text=True)
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise EmployeeDesktopError("Chrome DevTools loopback proxy could not be started") from error
+        return port
+
+    def _stop_cdp_proxy(self, employee_id: str) -> None:
+        unit = _CDP_PROXY_UNIT_PREFIX + self._employee_key(employee_id)[:24]
+        socket_unit = unit + ".socket"
+        loaded = subprocess.run(["systemctl", "show", "--property=LoadState", "--value", socket_unit],
+                                check=False, capture_output=True, text=True)
+        if loaded.returncode != 0:
+            raise EmployeeDesktopError("Chrome DevTools proxy state could not be checked") from subprocess.CalledProcessError(
+                loaded.returncode, ["systemctl", "show", socket_unit],
+            )
+        if loaded.stdout.strip() == "not-found":
+            return
+        if loaded.stdout.strip() != "loaded":
+            raise EmployeeDesktopError("Chrome DevTools proxy unit state is invalid")
+        try:
+            subprocess.run(["systemctl", "stop", socket_unit, unit + ".service"],
+                           check=True, capture_output=True, text=True)
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise EmployeeDesktopError("Chrome DevTools proxy could not be stopped") from error
+
+    def _cdp_proxy_port_path(self, employee_id: str) -> Path:
+        return self.state_root / ("employee-cdp-port-" + self._employee_key(employee_id) + ".json")
+
+    def _read_cdp_proxy_port(self, employee_id: str, *, missing_ok: bool = False) -> int | None:
+        path = self._cdp_proxy_port_path(employee_id)
+        try:
+            info = path.stat()
+            if info.st_mode & 0o077:
+                raise PermissionError("CDP port state permissions are too broad")
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            if missing_ok:
+                return None
+            raise EmployeeDesktopError("Chrome DevTools proxy port state is missing")
+        except (OSError, json.JSONDecodeError) as error:
+            raise EmployeeDesktopError("Chrome DevTools proxy port state is unreadable") from error
+        port = value.get("port") if isinstance(value, dict) else None
+        if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+            raise EmployeeDesktopError("Chrome DevTools proxy port state is invalid")
+        return port
+
+    def _write_cdp_proxy_port(self, employee_id: str, port: int) -> None:
+        path = self._cdp_proxy_port_path(employee_id)
+        fd, temporary = tempfile.mkstemp(prefix=".employee-cdp-port-", dir=self.state_root)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
+                json.dump({"port": port}, output)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, path)
+            path.chmod(0o600)
+        except BaseException:
+            Path(temporary).unlink(missing_ok=True)
+            raise
+
+    @staticmethod
+    def _local_port_available(port: int) -> bool:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            try:
+                listener.bind(("127.0.0.1", port))
+            except OSError:
+                return False
+            return True
+
+    @staticmethod
+    def _allocate_local_port() -> int:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            return int(listener.getsockname()[1])
 
     def _wait_for_display(self, container: str) -> None:
         while True:
@@ -797,7 +914,7 @@ class EmployeeDesktopRuntime:
                 )
                 if service_dir.returncode == 0:
                     raise EmployeeDesktopError("Selkies Xvfb supervision status could not be read")
-            _CDP_READY.wait(0.1)
+            _CDP_READY.wait(0.1 * kernel_virtual_time_rate())
 
     def _wait_for_cdp(self, container: str, port: int, *, host: str = "127.0.0.1") -> dict[str, Any]:
         last_error: BaseException | None = None
@@ -814,7 +931,7 @@ class EmployeeDesktopRuntime:
                 raise EmployeeDesktopError(f"employee desktop exited before Chrome DevTools became ready: {detail}") from last_error
             if not self._chrome_process_running(container):
                 raise EmployeeDesktopError("Chrome exited before its DevTools endpoint became available") from last_error
-            _CDP_READY.wait(0.1)
+            _CDP_READY.wait(0.1 * kernel_virtual_time_rate())
 
     def _chrome_process_running(self, container: str) -> bool:
         result = self._docker("exec", "--user", "ubuntu", container,
@@ -874,19 +991,20 @@ class EmployeeDesktopRuntime:
             raise EmployeeDesktopError("employee desktop container name is already owned by another resource")
         if (inspect.get("Config") or {}).get("Image") != self.image:
             raise EmployeeDesktopError("employee desktop container uses a different image than configured")
-        self._validate_ca_mount(inspect)
+        self._validate_ca_mount(inspect, employee_id)
 
-    def _validate_ca_mount(self, inspect: dict[str, Any]) -> None:
+    def _validate_ca_mount(self, inspect: dict[str, Any], employee_id: str) -> None:
         mounts = [row for row in (inspect.get("Mounts") or [])
-                  if row.get("Destination") == EMPLOYEE_DESKTOP_CA_CONTAINER_PATH]
+                  if row.get("Destination") == EMPLOYEE_DESKTOP_CA_NSS_DB]
         if self.ca_file is None:
             if mounts:
                 raise EmployeeDesktopError("employee desktop has an unexpected internal TLS CA mount")
             return
+        expected_db = self.state_root / "nssdb" / self._employee_key(employee_id)
         if (len(mounts) != 1 or mounts[0].get("Type") != "bind"
-                or mounts[0].get("Source") != str(self.ca_file)
-                or mounts[0].get("RW") is not False):
-            raise EmployeeDesktopError("employee desktop internal TLS CA mount differs from configuration")
+                or mounts[0].get("Source") != str(expected_db)
+                or mounts[0].get("RW") is not True):
+            raise EmployeeDesktopError("employee desktop Chrome trust database mount differs from configuration")
 
     @staticmethod
     def _validate_mount(inspect: dict[str, Any], volume: str) -> None:
@@ -932,7 +1050,7 @@ class EmployeeDesktopRuntime:
         if web_bindings:
             raise EmployeeDesktopError("employee desktop web port must not be published on the host")
         result: dict[str, int] = {}
-        for container_port in ("9223/tcp",):
+        for container_port in ("9222/tcp",):
             bindings = ports.get(container_port)
             if not isinstance(bindings, list) or len(bindings) != 1:
                 continue

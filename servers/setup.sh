@@ -23,7 +23,6 @@ echo "Starting Pull Image..."
 docker pull ghcr.io/theagentcompany/servers-api-server:1.0.0
 docker pull ghcr.io/theagentcompany/servers-rocketchat-npc-data-population:1.0.0
 docker pull ghcr.io/theagentcompany/servers-owncloud:1.0.0
-docker pull ghcr.io/theagentcompany/servers-gitlab:1.0.0
 docker pull ghcr.io/theagentcompany/servers-plane-admin:1.0.0
 docker pull ghcr.io/theagentcompany/servers-plane-frontend:1.0.0
 docker pull ghcr.io/theagentcompany/servers-plane-backend:1.0.0
@@ -62,7 +61,7 @@ done
 echo "api-server is running on port 2999!"
 
 echo "Starting health checks..."
-for service in rocketchat owncloud gitlab plane; do \
+for service in rocketchat owncloud plane; do \
     until curl -s -o /dev/null -w "%{http_code}" localhost:2999/api/healthcheck/$service | grep -q "200"; do \
         echo "Waiting for $service to be ready..."; \
         sleep 10; \

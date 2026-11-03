@@ -90,7 +90,7 @@ class CompanyFeedback:
             )
         # Native webhooks can arrive before the source import is registered.
         # Replay the same immutable evidence through newly known mappings.
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             pending = [
                 CompanyEvidence.model_validate_json(r["payload_json"])
                 for r in db.execute(
@@ -116,7 +116,7 @@ class CompanyFeedback:
             )
 
     def mappings(self) -> list[RecordMapping]:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             result = [
                 RecordMapping.model_validate_json(r["mapping_json"])
                 for r in db.execute(
@@ -169,7 +169,7 @@ class CompanyFeedback:
         if evidence.before_document is not None:
             return evidence
         candidates = []
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             prior = db.execute(
                 "SELECT payload_json FROM company_evidence WHERE evidence_id=?",
                 (evidence.evidence_id,),
@@ -251,7 +251,7 @@ class CompanyFeedback:
             invoice_names = {
                 name for doctype, name in references if doctype == "Sales Invoice"
             }
-            with self.store.transaction() as db:
+            with self.store.transaction(write=False) as db:
                 invoice_rows = [
                     row["payload_json"]
                     for invoice_name in invoice_names
@@ -297,7 +297,7 @@ class CompanyFeedback:
             key = hashlib.sha256(
                 f"{mapping.mapping_id}:{evidence.evidence_id}".encode()
             ).hexdigest()
-            with self.store.transaction() as db:
+            with self.store.transaction(write=False) as db:
                 existing = db.execute(
                     "SELECT * FROM company_feedback_actions WHERE action_id=?", (key,)
                 ).fetchone()
@@ -381,7 +381,7 @@ class CompanyFeedback:
         ]
 
     def translate_captured(self) -> None:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             rows = [
                 CompanyEvidence.model_validate_json(row["payload_json"])
                 for row in db.execute(
@@ -412,7 +412,7 @@ class CompanyFeedback:
         }
 
     def reconcile(self) -> None:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             rows = [
                 dict(r)
                 for r in db.execute(
@@ -439,7 +439,7 @@ class CompanyFeedback:
                     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
                     continue  # Another worker owns this exact action.
-                with self.store.transaction() as db:
+                with self.store.transaction(write=False) as db:
                     current = db.execute(
                         "SELECT * FROM company_feedback_actions WHERE action_id=?",
                         (row["action_id"],),
@@ -519,8 +519,44 @@ class CompanyFeedback:
                 CompanyEvidence.model_validate_json(row["payload_json"])
                 for row in db.execute("SELECT payload_json FROM company_evidence")
             ]
+            has_native_outbox = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='company_native_message_outbox'"
+            ).fetchone()
+            native_outbox = (
+                [dict(row) for row in db.execute(
+                    "SELECT message_id,private_payload_json,receipt_json,updated_at "
+                    "FROM company_native_message_outbox "
+                    "WHERE status='delivered' AND receipt_json IS NOT NULL "
+                    "ORDER BY updated_at,message_id"
+                )]
+                if has_native_outbox else []
+            )
         changes = {}
+        email_activity = {}
         for evidence in observations:
+            if evidence.event in ("email_delivered", "email_reply"):
+                message = evidence.document
+                message_id = evidence.message_id or message.get("message_id")
+                if isinstance(message_id, str) and message_id:
+                    direction = (
+                        "sent"
+                        if evidence.authenticated_sender_actor_id == evidence.actor
+                        else "received"
+                    )
+                    subject = message.get("subject")
+                    email_activity[message_id] = {
+                        "id": message_id,
+                        "timestamp": evidence.occurred_at.isoformat(),
+                        "event": "email_delivered" if direction == "sent" else "email_received",
+                        "description": "Email sent" if direction == "sent" else "Email received",
+                        "type": "email",
+                        "actor": evidence.actor,
+                        "direction": direction,
+                        "title": subject if isinstance(subject, str) and subject else "Company email",
+                        "summary": subject if isinstance(subject, str) and subject else "Company email",
+                        "content": message.get("body", "") if isinstance(message.get("body", ""), str) else "",
+                    }
+                continue
             if evidence.event not in labels:
                 continue
             key = (
@@ -531,6 +567,29 @@ class CompanyFeedback:
             prior = changes.get(key)
             if prior is None or priority[evidence.event] > priority[prior.event]:
                 changes[key] = evidence
+        for row in native_outbox:
+            payload = json.loads(row["private_payload_json"])
+            receipt = json.loads(row["receipt_json"])
+            sender = payload.get("sender")
+            actor = sender.get("actor_id") if isinstance(sender, dict) else None
+            if not isinstance(actor, str) or not actor:
+                actor = payload.get("native_counterparty_id")
+            if not isinstance(actor, str) or not actor:
+                raise ValueError("Delivered native company email has no sender actor")
+            subject = payload.get("subject")
+            message_id = row["message_id"]
+            email_activity[message_id] = {
+                "id": message_id,
+                "timestamp": receipt.get("received_at") or row["updated_at"],
+                "event": "email_received",
+                "description": "Email received",
+                "type": "email",
+                "actor": actor,
+                "direction": "received",
+                "title": subject if isinstance(subject, str) and subject else "Company email",
+                "summary": subject if isinstance(subject, str) and subject else "Company email",
+                "content": payload.get("body", "") if isinstance(payload.get("body", ""), str) else "",
+            }
         return [
             {
                 "id": "company-evidence:" + e.evidence_id,
@@ -543,7 +602,7 @@ class CompanyFeedback:
                 "summary": f"{e.erp_doctype} {e.erp_name} was {labels[e.event]}.",
             }
             for e in changes.values()
-        ]
+        ] + list(email_activity.values())
 
     def report(
         self, experiment_id: str | None = None, *, evaluate_native: bool = True
@@ -554,7 +613,7 @@ class CompanyFeedback:
             if experiment_id is None or m.experiment_id == experiment_id
         ]
         ids = {m.mapping_id for m in mappings}
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             rows = [
                 dict(r)
                 for r in db.execute(

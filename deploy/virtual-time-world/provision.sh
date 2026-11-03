@@ -94,6 +94,7 @@ packages:
   - docker-compose-v2
   - qemu-guest-agent
   - util-linux-extra
+  - libnss3-tools
 runcmd:
   - [systemctl, disable, --now, docker.service, docker.socket]
   - [systemctl, disable, --now, systemd-timesyncd.service]

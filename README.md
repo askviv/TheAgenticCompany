@@ -143,8 +143,8 @@ Current coverage includes 114 Retail definitions and 2,432 external-provider
 cases: 50 Airline, 97 Banking and 2,285 Telecom. These are source catalogue
 counts, not completed experiments. Eight Retail definitions have references our
 importer cannot match in the pinned source data. All 200 Intake cases are
-explicitly deferred. GitLab employee identity work and coding-task support are
-outside the current scope.
+explicitly deferred. Employee identity work and coding-task support are outside
+the current scope.
 
 Deployment health, native service boundaries and controlled integration checks
 do not establish a successful live benchmark episode or agent performance.

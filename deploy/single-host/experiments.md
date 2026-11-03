@@ -25,15 +25,36 @@ Persistent data: `/data/theagentcompany/experiments-data/experiments.sqlite` (an
 - `VIV_ROCKETCHAT_USERNAME=viv`.
 - Optional `EXPERIMENTS_ROCKETCHAT_CHANNEL` (default `viv-experiments`), `EXPERIMENTS_PUBLIC_URL` (default `http://192.0.2.10:8110`).
 
+To expose the dashboard’s Codex connection control, include the optional
+`deploy/single-host/experiments.codex-auth.compose.yml` overlay when starting
+the Experiments service. It mounts the actor bootstrap’s private
+`enterprise/actors/secrets/codex-inference-token` read-only and sets
+`CODEX_AUTH_BRIDGE_TOKEN_FILE` to its container path. The file is the internal
+service bearer shared with the host Codex bridge; it is not an OpenAI API key
+or a user’s Codex login. `CODEX_AUTH_BRIDGE_URL` defaults to
+`http://10.0.2.2:8143` and may be overridden in the Compose environment. The
+dashboard’s Connect Codex action starts device sign-in for the company account;
+no existing CLI login is required. Without this overlay the dashboard remains
+available and the Codex connection control reports that its bridge is
+unconfigured.
+
+Use the overlay with the normal Compose file:
+
+```sh
+docker compose --env-file deploy/single-host/host.env -p tac-experiments \
+  -f deploy/single-host/experiments.compose.yml \
+  -f deploy/single-host/experiments.codex-auth.compose.yml up -d --pull never
+```
+
 Company tools links are deployment-specific. Copy
 `servers/experiments/company-tools-urls.example.json` to a private file outside
 the repository (default `/data/theagentcompany/enterprise/secrets/company-tools-urls.json`),
-replace the seven reserved example URLs with this deployment’s application URLs,
+replace the six reserved example URLs with this deployment’s application URLs,
 and set `COMPANY_TOOLS_URLS_SOURCE` in `deploy/single-host/host.env` if the file
 is stored elsewhere. Compose mounts that file read-only at
 `/run/config/company-tools-urls.json`; the API reads it when the Help page asks
 for links. The JSON keys must be `erpnext`, `email`, `rocketchat`, `owncloud`,
-`plane`, `gitlab`, and `midpoint`, each with an HTTP or HTTPS URL. Missing or
+`plane` and `midpoint`, each with an HTTP or HTTPS URL. Missing or
 invalid mappings produce a clear Company tools unavailable message in the UI.
 The committed example contains only generic `.example.test` addresses and is
 not the deployed mapping.

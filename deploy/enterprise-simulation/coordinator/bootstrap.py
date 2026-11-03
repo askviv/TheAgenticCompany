@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -27,10 +26,8 @@ MAIL_API = "http://127.0.0.1:8112/api/v1"
 MAIL_DOMAIN = "example.com"
 MAIL_HOST = "mail.company.example.test"
 MAIL_SMTP_PORT = 2587
-SELKIES_BASE_IMAGE = "ghcr.io/selkies-project/selkies/desktop:2.1.0-ubuntu26.04"
-EMPLOYEE_DESKTOP_IMAGE = "tac-selkies-desktop:2.1.0-ubuntu26.04-socat1"
-EMPLOYEE_DESKTOP_DOCKERFILE = Path("deploy/enterprise-simulation/coordinator/employee-desktop/Dockerfile")
-EMPLOYEE_DESKTOP_DOCKERFILE_LABEL = "com.theagentcompany.employee-desktop.dockerfile-sha256"
+SELKIES_BASE_IMAGE = "ghcr.io/selkies-project/selkies/desktop:2.1.0-ubuntu26.04@sha256:558fb9d6d97697f8861022bc2594e930e0bb669025360e87022b86155e1aec2e"
+EMPLOYEE_DESKTOP_IMAGE = SELKIES_BASE_IMAGE
 ACTORS = [
     {"actor_id": "viv", "email": "agent@agent.example.test", "kind": "agent"},
     {"actor_id": "requester", "email": "sarahjohnson@example.com", "kind": "employee"},
@@ -458,53 +455,11 @@ def verify_source(source: Path) -> None:
 
 
 def ensure_employee_desktop_image(source: Path) -> str:
-    """Build the pinned local Selkies derivative once per Dockerfile revision.
-
-    This only inspects/builds an image; it does not restart or replace running
-    containers or touch any other Docker services.
-    """
-    dockerfile = source / EMPLOYEE_DESKTOP_DOCKERFILE
-    dockerfile_digest = hashlib.sha256(dockerfile.read_bytes()).hexdigest()
-    inspect_command = [
-        "docker", "image", "inspect", EMPLOYEE_DESKTOP_IMAGE,
-        "--format", "{{json .Config.Labels}}",
-    ]
-
-    def matching_revision() -> bool:
-        result = subprocess.run(inspect_command, check=False, capture_output=True, text=True)
-        if result.returncode != 0:
-            return False
-        try:
-            labels = json.loads(result.stdout)
-        except json.JSONDecodeError as error:
-            raise RuntimeError("Docker returned invalid employee desktop image labels") from error
-        return (isinstance(labels, dict)
-                and labels.get(EMPLOYEE_DESKTOP_DOCKERFILE_LABEL) == dockerfile_digest
-                and labels.get("org.opencontainers.image.base.name") == SELKIES_BASE_IMAGE)
-
-    if matching_revision():
-        return EMPLOYEE_DESKTOP_IMAGE
+    """Pull the versioned upstream Selkies desktop image used by employees."""
     try:
-        subprocess.run(["docker", "info"], check=True, capture_output=True, text=True)
+        subprocess.run(["docker", "pull", EMPLOYEE_DESKTOP_IMAGE], check=True)
     except (OSError, subprocess.CalledProcessError) as error:
-        raise RuntimeError("Docker daemon is unavailable; the employee desktop image is required") from error
-
-    build_command = [
-        "docker", "build", "--pull",
-        "--build-arg", f"SELKIES_BASE_IMAGE={SELKIES_BASE_IMAGE}",
-        "--build-arg", f"EMPLOYEE_DESKTOP_DOCKERFILE_SHA256={dockerfile_digest}",
-        "--file", str(dockerfile),
-        "--tag", EMPLOYEE_DESKTOP_IMAGE,
-        str(dockerfile.parent),
-    ]
-    try:
-        # Leave build progress/errors visible to the operator; the context has
-        # only the Dockerfile and the build args contain no credentials.
-        subprocess.run(build_command, check=True)
-    except (OSError, subprocess.CalledProcessError) as error:
-        raise RuntimeError("Could not build the pinned Selkies employee desktop image") from error
-    if not matching_revision():
-        raise RuntimeError("Docker build completed without the expected employee desktop image labels")
+        raise RuntimeError("Could not pull the pinned Selkies employee desktop image") from error
     return EMPLOYEE_DESKTOP_IMAGE
 
 

@@ -25,13 +25,6 @@ https://{$TAC_CLOCK_PLANE_HOST} {
 	reverse_proxy 127.0.0.1:8091
 }
 
-https://{$TAC_CLOCK_GITLAB_HOST} {
-	import company_clock_tls
-	reverse_proxy 127.0.0.1:8929 {
-		header_up X-Forwarded-Ssl on
-	}
-}
-
 https://{$TAC_CLOCK_MAIL_HOST} {
 	import company_clock_tls
 	reverse_proxy 127.0.0.1:8112

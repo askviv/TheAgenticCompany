@@ -13,6 +13,7 @@ from typing import Any, Iterator
 import zlib
 
 from servers.simulation.actor_worker_store import canonical_request_hash
+from servers.simulation.clock_rate import kernel_virtual_time_rate
 
 
 def native_record_digests(agent_db: dict[str, Any], user_db: dict[str, Any] | None) -> dict[str, str]:
@@ -86,9 +87,10 @@ class NativeProviderStore:
             self.path.chmod(0o600)
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        timeout = 30 * kernel_virtual_time_rate()
+        connection = sqlite3.connect(self.path, timeout=timeout, isolation_level=None)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout=30000")
+        connection.execute(f"PRAGMA busy_timeout={int(timeout * 1000)}")
         return connection
 
     @contextmanager

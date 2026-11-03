@@ -11,10 +11,6 @@
     "summary": "Add Liu Qiang to the company help-desk channel and give him moderator responsibility.",
     "description": "Add Liu Qiang as a member of #help-desk and assign him the moderator role."
   },
-  "pm-ask-for-issue-and-create-in-gitlab": {
-    "summary": "Coordinate with Li Ming to identify the issue he wants to take on, then create it with the agreed details.",
-    "description": "For the new RisingWave sprint, ask Li Ming which issue he wants to work on. Confirm the issue description, milestone, and due date with the relevant project context, then create the GitLab issue and assign it to Li Ming."
-  },
   "pm-ask-issue-assignee-for-issue-status-and-update-in-plane": {
     "summary": "Ask the assignee for the status of RisingWave’s “Evaluate data throughput” issue and reflect completion in Plane.",
     "description": "Identify the assignee of “Evaluate data throughput” in the RisingWave project and ask them for a progress update. If they confirm the issue is complete, set its Plane status to Done."
@@ -30,10 +26,6 @@
   "pm-check-backlog-update-issues": {
     "summary": "Review blocked and backlog issues, ask assignees for updates, and align Plane statuses with their responses.",
     "description": "For every Node-RED issue in Plane marked Blocked or Backlog, record its ID, title, and assignee. Post in #project-lowcode asking whether each issue has been completed, tagging its assignee when present. When someone confirms completion, acknowledge that Plane will be updated, then update the issue to the status supported by the response."
-  },
-  "pm-copy-plane-issues-to-gitlab": {
-    "summary": "Create GitLab issues for all JanusGraph issues currently marked In Progress in Plane.",
-    "description": "Review the JanusGraph project in Plane and add every issue with In Progress status to the corresponding GitLab project, preserving the issue information needed to track the work."
   },
   "pm-create-channel-message": {
     "summary": "Create #finance-talk, invite David Wong, and welcome participants.",
@@ -55,14 +47,6 @@
     "summary": "Use the task assignment spreadsheet to create a Group2 channel and notify each teammate of their assignment.",
     "description": "Read Task_assignments.xlsx in Documents/Marketing to identify Group 2 members and their tasks. Create a public Rocket.Chat channel named Group2 with those teammates. Send each person an individual message stating their assigned task and tagging them by username."
   },
-  "pm-distribute-information": {
-    "summary": "Privately send each database group member the project information for the HyperLogLog algorithm.",
-    "description": "Use the project information for the HyperLogLog algorithm in the Bustub issue as the reference, and send its link privately to every database group member. Do not post it in a group chat."
-  },
-  "pm-monitor-new-bug-issues": {
-    "summary": "Summarize open bug-labeled issues from September 24 through October 24, 2024, including ownership, in #project-ai.",
-    "description": "Review open issues in the OpenHands repository labeled bug and created between 24 September 2024 and 24 October 2024. For each, report the issue number, title, whether it is assigned or unassigned, and its link in the #project-ai channel."
-  },
   "pm-monthly-attendance-slides": {
     "summary": "Count each person’s recorded attendance dates and prepare an “April Attendance” slide for the HR manager.",
     "description": "Review the attendance records in Documents/Human Resources Team/Attendance and count the number of recorded dates for each person. Create a slide titled “April Attendance” with one bullet per person in the format “Name: xxx times”. Save it as April Attendance.pptx and tell Chen Xinyi where it was saved."
@@ -71,17 +55,9 @@
     "summary": "Build the fastest feasible staffing plan for the JanusGraph web app and report its expected end month and salary-plus-benefits cost.",
     "description": "Plan the work assuming a start date of January 1, 2025. Required effort: Li Ming 0.5 months; project management 0.5 months; design 0.5 months; frontend 1 month; backend 1.5 months; infrastructure 0.5 months. Use the current plans and consult Xinyi for potential staff effort, competencies, and salary information as needed. Create project-plan.csv with columns month, person, effort percent, role; role must be one of li, pm, design, frontend, backend, infra. Save the plan and tell Sarah the expected ending month and total salary-plus-benefits cost."
   },
-  "pm-prepare-meeting-with-customers": {
-    "summary": "Survey the current benchmarks OpenHands can solve, group them by task domain, and prepare a customer-facing presentation.",
-    "description": "Identify the current benchmarks OpenHands can solve and categorize them into task domains. Create a presentation with one slide introducing each domain. Save it as openhands_intro.pptx and send the filename to Huang Jie, the project manager coordinating meeting materials."
-  },
   "pm-present-engineer-group-members": {
     "summary": "Prepare one slide per employee showing the engineering role and everyone in that role, then notify Chen Xinyi.",
     "description": "Use Personnell_File.odt in Documents/Human Resources Team to identify engineering employees and their roles. Create one presentation slide per employee; each slide should state the role and the names of all employees who hold that role. Save the deck as engineers.pptx and inform Chen Xinyi, who is coordinating the career fair."
-  },
-  "pm-present-gitlab-info-as-ppt": {
-    "summary": "Create an overview deck listing every GitLab repository, its description, and total issue and merge request counts.",
-    "description": "Prepare a presentation for CTO Sarah Johnson with an opening slide titled “Overview of Our Engineering Progress”. Add one slide for each GitLab repository, in the order shown in GitLab, with its name, description, and total number of issues and merge requests, including open and closed or merged items. Save the deck as Engineering_Progress.pptx."
   },
   "pm-projects-analytics": {
     "summary": "Collect six Plane workload metrics and share the structured summary with the team in #kudos.",
@@ -102,18 +78,6 @@
   "pm-send-notification-to-corresponding-user": {
     "summary": "Contact Jessica Lee and ask what action she would like you to take.",
     "description": "Ask Jessica Lee what you should do."
-  },
-  "pm-update-gitlab-issue-from-plane-status": {
-    "summary": "Check two named issues in Plane and keep their GitLab open or closed state aligned.",
-    "description": "For OpenHands issues “Model: recall rate is 0” and “Model: security problem”, check the corresponding Plane status. Keep the GitLab issue open if it is open in Plane; close it if it is closed in Plane."
-  },
-  "pm-update-plane-issue-from-gitlab-status": {
-    "summary": "Check two named JanusGraph issues in GitLab and update their Plane status and sprint placement accordingly.",
-    "description": "For the Plane sprint 1 issues “Improve Logging for Bulk Request Failures” and “Optimize Retry Mechanism for Out of Memory Errors”, check each corresponding GitLab issue. If it is open in GitLab, keep it open in Plane and move it to the next sprint. If it is closed in GitLab, close it in Plane."
-  },
-  "pm-update-project-milestones": {
-    "summary": "Close the completed Alpha Release milestone, create Beta Release, and move two issues into it.",
-    "description": "In the RisingWave GitLab project, close the completed “Alpha Release” milestone and create “Beta Release”. Assign “Implement stream processing engine” and “Integrate with Kafka” to Beta Release."
   },
   "pm-update-sprint-cycles": {
     "summary": "Move active-sprint issues that are To Do, In Progress, or Backlog to the upcoming cycle and notify their assignees.",

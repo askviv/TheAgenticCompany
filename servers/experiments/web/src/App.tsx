@@ -36,6 +36,8 @@ import {
   getCompanyDesktops,
   getCompanyEvaluations,
   getCompanyTools,
+  getCodexAuthStatus,
+  getCodexDeviceAuthorization,
   getEvaluation,
   getEvaluations,
   getLatestEvaluation,
@@ -48,12 +50,14 @@ import {
   startEvaluation,
   startCompanyEvaluation,
   setBackgroundProviderEnabled,
+  startCodexDeviceAuthorization,
   type ActivityEntry,
   type ActivityMetrics,
   type Company,
   type CompanyDesktopEmployee,
   type CompanyNativeEvaluation,
   type CompanyNativeEvaluationProvider,
+  type CodexAuthStatus,
   type CompanyToolLink,
   type Experiment,
   type ExperimentRun,
@@ -258,6 +262,7 @@ function EmployeeStreamsPage() {
   const [fullscreenError, setFullscreenError] = useState<string | null>(null)
   const focusedViewer = useRef<HTMLDivElement>(null)
   const focusedFrame = useRef<HTMLIFrameElement>(null)
+  const desktopsRequest = useRef<Promise<CompanyDesktopEmployee[]> | null>(null)
 
   useEffect(() => {
     if (!focusedId) return
@@ -297,7 +302,9 @@ function EmployeeStreamsPage() {
 
   useEffect(() => {
     let active = true
-    getCompanyDesktops().then((items) => {
+    const pending = desktopsRequest.current ?? getCompanyDesktops()
+    desktopsRequest.current = pending
+    pending.then((items) => {
       if (!active) return
       setEmployees(items)
       setError(null)
@@ -305,6 +312,7 @@ function EmployeeStreamsPage() {
       if (!active) return
       setError(reason instanceof Error ? reason.message : "Employee desktop streams could not be loaded.")
     }).finally(() => {
+      if (desktopsRequest.current === pending) desktopsRequest.current = null
       if (!active) return
       setLoading(false)
     })
@@ -602,6 +610,105 @@ function ActivityPage() {
   )
 }
 
+function CodexConnectionCard() {
+  const [auth, setAuth] = useState<CodexAuthStatus | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [connecting, setConnecting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    getCodexAuthStatus().then((status) => {
+      if (active) {
+        setAuth(status)
+        setError(null)
+      }
+    }).catch((reason) => {
+      if (active) setError(reason instanceof Error ? reason.message : "Codex connection status could not be loaded.")
+    }).finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    const loginId = auth?.login_id
+    if (!loginId || !["starting", "pending"].includes(auth?.state ?? "")) return
+    let active = true
+    let pending = false
+    const refresh = async () => {
+      if (pending) return
+      pending = true
+      try {
+        const status = await getCodexDeviceAuthorization(loginId)
+        if (active) {
+          setAuth(status)
+          setError(null)
+        }
+      } catch (reason) {
+        if (active) setError(reason instanceof Error ? reason.message : "Codex sign-in status could not be retrieved.")
+      } finally {
+        pending = false
+      }
+    }
+    const interval = window.setInterval(() => void refresh(), 3000)
+    return () => { active = false; window.clearInterval(interval) }
+  }, [auth?.login_id, auth?.state])
+
+  const connect = async () => {
+    setConnecting(true)
+    setError(null)
+    try {
+      const status = await startCodexDeviceAuthorization()
+      setAuth(status)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Codex sign-in could not be started.")
+    } finally {
+      setConnecting(false)
+    }
+  }
+
+  const pending = auth?.state === "starting" || auth?.state === "pending"
+  const connected = auth?.authenticated === true && !pending
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="font-medium">Codex</p>
+          <p className="text-sm text-muted-foreground">
+            {connected ? "Connected" : pending ? "Complete sign-in on the linked page below." : "Use the company’s Codex account for experiments."}
+          </p>
+        </div>
+        {connected ? <div className="flex shrink-0 items-center gap-3">
+          <Badge variant="secondary">Connected</Badge>
+          <Button size="sm" variant="outline" onClick={() => void connect()} disabled={connecting}>
+            {connecting ? <LoaderCircle className="animate-spin" /> : null}
+            Sign in with another account
+          </Button>
+        </div> : (
+          <Button onClick={() => void connect()} disabled={loading || connecting || pending}>
+            {connecting || pending ? <LoaderCircle className="animate-spin" /> : null}
+            {pending ? "Waiting for approval" : connecting ? "Starting sign-in" : "Connect Codex"}
+          </Button>
+        )}
+      </CardContent>
+      {(error || auth?.error) && <CardContent className="border-t pt-3">
+        {(error || auth?.error) && <ErrorNotice message={error ?? `Codex sign-in failed (${auth?.error}).`} title="Codex connection needs attention" />}
+      </CardContent>}
+      {pending && auth?.user_code && auth.verification_url && <CardContent className="border-t pt-3">
+        <div className="rounded-lg border bg-muted/40 p-4">
+          <p className="text-sm">Open the sign-in page and enter this one-time code:</p>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <code className="rounded bg-background px-3 py-2 text-lg font-semibold tracking-wider">{auth.user_code}</code>
+            <a className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline" href={auth.verification_url} target="_blank" rel="noreferrer">
+              Open sign-in page <ExternalLink className="size-3.5" />
+            </a>
+          </div>
+        </div>
+      </CardContent>}
+    </Card>
+  )
+}
+
 function SavedNativeEvaluations() {
   const refreshKey = useRefreshKey()
   const [nativeEvaluations, setNativeEvaluations] = useState<Record<string, CompanyNativeEvaluationProvider> | null>(null)
@@ -794,6 +901,7 @@ function LibraryPage() {
           </div>
         </div>
       </div>
+      <CodexConnectionCard />
 
       {providerWarning && <ErrorNotice title="Provider catalogue unavailable" message={providerWarning} />}
 

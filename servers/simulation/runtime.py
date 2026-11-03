@@ -30,6 +30,7 @@ from .background_evaluation import (
 from .background_runtime import BackgroundWorkerClient
 from .company_background import CompanyBackgroundService
 from .engine import SimulationEngine
+from .clock_rate import InvalidKernelVirtualTimeRate, kernel_virtual_time_rate
 from .evaluation_runtime import build_evaluation_service
 from .erpnext import ERPNextAdapter, ERPNextSiteAdmin
 from .erpnext import ERPNextRetailAdmin
@@ -651,16 +652,15 @@ def _company_clock_source(path: Path) -> str:
 def _kernel_company_clock_speed() -> int:
     """Read the active kernel rate used to scale company-time observations."""
     try:
-        rate = int(Path("/sys/kernel/virtual_time_rate").read_text(encoding="ascii").strip())
+        return kernel_virtual_time_rate(require_kernel=True)
+    except InvalidKernelVirtualTimeRate as error:
+        raise KernelCompanyClockConfigurationError(
+            "guest kernel virtual-time-rate capability reported an invalid rate"
+        ) from error
     except (OSError, ValueError) as error:
         raise KernelCompanyClockConfigurationError(
             "guest kernel virtual-time-rate capability is unavailable"
         ) from error
-    if rate <= 0:
-        raise KernelCompanyClockConfigurationError(
-            "guest kernel virtual-time-rate capability reported an invalid rate"
-        )
-    return rate
 
 
 def _company_clock_interval(seconds: float, engine: SimulationEngine) -> float:

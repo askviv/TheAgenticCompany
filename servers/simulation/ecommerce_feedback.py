@@ -742,6 +742,52 @@ class EcommerceNativeActionCheckpoint:
             connection.execute("""CREATE TABLE IF NOT EXISTS ecommerce_native_source_receipts (
                 source_id TEXT PRIMARY KEY, doctype TEXT NOT NULL, document_name TEXT NOT NULL,
                 acknowledged_at TEXT NOT NULL)""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS ecommerce_native_pending_source_facts (
+                source_id TEXT PRIMARY KEY, source_json TEXT NOT NULL, created_at TEXT NOT NULL)""")
+            connection.execute("""CREATE TABLE IF NOT EXISTS ecommerce_native_source_fact_migrations (
+                migration_id TEXT PRIMARY KEY, completed_at TEXT NOT NULL)""")
+        self._backfill_pending_source_facts()
+
+    def _backfill_pending_source_facts(self) -> None:
+        migration_id = "advance_receipt_source_facts_v1"
+        with self.store.transaction(write=False) as connection:
+            migrated = connection.execute(
+                "SELECT 1 FROM ecommerce_native_source_fact_migrations WHERE migration_id=?",
+                (migration_id,),
+            ).fetchone()
+            if migrated is not None:
+                return
+            pending: dict[str, dict[str, Any]] = {}
+            # The legacy receipts are immutable operation evidence. Index their
+            # still-unacknowledged facts once, outside a writer transaction.
+            for row in connection.execute(
+                    "SELECT result_json FROM ecommerce_native_advance_receipts"
+            ):
+                for source in json.loads(row["result_json"]).get("source_records", []):
+                    source_id = str(source.get("id", ""))
+                    if source_id:
+                        pending.setdefault(source_id, source)
+
+        with self.store.transaction() as connection:
+            if connection.execute(
+                "SELECT 1 FROM ecommerce_native_source_fact_migrations WHERE migration_id=?",
+                (migration_id,),
+            ).fetchone() is None:
+                for source_id, source in pending.items():
+                    acknowledged = connection.execute(
+                        "SELECT 1 FROM ecommerce_native_source_receipts WHERE source_id=?",
+                        (source_id,),
+                    ).fetchone()
+                    if acknowledged is None:
+                        connection.execute(
+                            "INSERT OR IGNORE INTO ecommerce_native_pending_source_facts VALUES(?,?,?)",
+                            (source_id, json.dumps(source, sort_keys=True, separators=(",", ":")),
+                             datetime.now(timezone.utc).isoformat()),
+                        )
+                connection.execute(
+                    "INSERT INTO ecommerce_native_source_fact_migrations VALUES(?,?)",
+                    (migration_id, datetime.now(timezone.utc).isoformat()),
+                )
 
     @staticmethod
     def _identity(
@@ -1175,9 +1221,10 @@ class EcommerceNativeActionCheckpoint:
         }
         request_json = json.dumps(request, sort_keys=True, separators=(",", ":"))
         operation_id = "clock:" + hashlib.sha256(request_json.encode()).hexdigest()
+        owned_transaction = connection is None
         transaction = (
-            self.store.transaction()
-            if connection is None
+            self.store.transaction(write=False)
+            if owned_transaction
             else self.store._connection(connection)
         )
         with transaction as connection:
@@ -1215,19 +1262,17 @@ class EcommerceNativeActionCheckpoint:
                 )
             }
             source_records_by_id: dict[str, dict[str, Any]] = {}
-            # Advance results stay available until their exact ERP receipt is
-            # acknowledged, so a restart before import can replay source facts.
             for stored in connection.execute(
-                "SELECT result_json FROM ecommerce_native_advance_receipts ORDER BY committed_at"
+                "SELECT source_id,source_json FROM ecommerce_native_pending_source_facts ORDER BY source_id"
             ):
-                for source_record in json.loads(stored["result_json"]).get("source_records", []):
-                    source_id = str(source_record.get("id", ""))
-                    if source_id and source_id not in acknowledged_source_ids:
-                        source_records_by_id.setdefault(source_id, source_record)
+                source_id = stored["source_id"]
+                if source_id not in acknowledged_source_ids:
+                    source_records_by_id[source_id] = json.loads(stored["source_json"])
             unmapped_by_id: dict[str, dict[str, Any]] = {}
             native_outcomes: list[dict[str, Any]] = []
             unmapped_outcomes: list[dict[str, Any]] = []
             batch_to_shipment: dict[int, dict[str, Any]] = {}
+            new_source_observations: dict[str, str] = {}
             action_rows = connection.execute(
                 "SELECT request_json,result_json FROM ecommerce_native_action_receipts"
             ).fetchall()
@@ -1461,10 +1506,12 @@ class EcommerceNativeActionCheckpoint:
                     ).fetchone()
                     if observation is None:
                         stable_observed_at = observed_text
-                        connection.execute(
-                            "INSERT INTO ecommerce_native_source_observations(source_id,observed_at) VALUES(?,?)",
-                            (source_id, stable_observed_at),
-                        )
+                        new_source_observations[source_id] = stable_observed_at
+                        if not owned_transaction:
+                            connection.execute(
+                                "INSERT INTO ecommerce_native_source_observations(source_id,observed_at) VALUES(?,?)",
+                                (source_id, stable_observed_at),
+                            )
                     else:
                         stable_observed_at = observation["observed_at"]
                     native_record = {
@@ -1922,21 +1969,122 @@ class EcommerceNativeActionCheckpoint:
                 },
                 "native_state_ref": self._state_ref(str(path)),
             }
-            connection.execute(
-                """UPDATE ecommerce_native_world_state
-                SET checkpoint_path=?,company_cursor=?,updated_at=? WHERE singleton=1""",
-                (str(path), target_text, datetime.now(timezone.utc).isoformat()),
-            )
-            connection.execute(
-                "INSERT INTO ecommerce_native_advance_receipts VALUES(?,?,?,?)",
-                (
-                    operation_id,
-                    request_json,
-                    json.dumps(result, sort_keys=True, separators=(",", ":")),
-                    datetime.now(timezone.utc).isoformat(),
-                ),
-            )
-            return result
+            if not owned_transaction:
+                for source in result["source_records"]:
+                    source_id = str(source.get("id", ""))
+                    if source_id and source_id not in acknowledged_source_ids:
+                        connection.execute(
+                            "INSERT OR IGNORE INTO ecommerce_native_pending_source_facts VALUES(?,?,?)",
+                            (source_id, json.dumps(source, sort_keys=True, separators=(",", ":")),
+                             datetime.now(timezone.utc).isoformat()),
+                        )
+                connection.execute(
+                    """UPDATE ecommerce_native_world_state
+                    SET checkpoint_path=?,company_cursor=?,updated_at=? WHERE singleton=1""",
+                    (str(path), target_text, datetime.now(timezone.utc).isoformat()),
+                )
+                connection.execute(
+                    "INSERT INTO ecommerce_native_advance_receipts VALUES(?,?,?,?)",
+                    (
+                        operation_id,
+                        request_json,
+                        json.dumps(result, sort_keys=True, separators=(",", ":")),
+                        datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+                return result
+
+        # Automatic clock advancement computes and writes its private checkpoint
+        # under a read snapshot. Keep only receipt/state publication in the
+        # writer transaction so SQLite's single writer is not held while native
+        # simulation, historical fact reads, or checkpoint serialization run.
+        result_json = json.dumps(result, sort_keys=True, separators=(",", ":"))
+        pending_source_json = [
+            (str(source.get("id", "")), json.dumps(source, sort_keys=True, separators=(",", ":")))
+            for source in result["source_records"]
+        ]
+        reused_result = None
+        try:
+            with self.store.transaction() as writer:
+                prior = writer.execute(
+                    "SELECT request_json,result_json FROM ecommerce_native_advance_receipts WHERE operation_id=?",
+                    (operation_id,),
+                ).fetchone()
+                if prior is not None:
+                    if prior["request_json"] != request_json:
+                        raise StoreConflict("E-Commerce native clock operation identity was reused")
+                    reused_result = json.loads(prior["result_json"])
+                else:
+                    current = writer.execute(
+                        "SELECT checkpoint_path,company_cursor FROM ecommerce_native_world_state WHERE singleton=1"
+                    ).fetchone()
+                    if (current is None or current["checkpoint_path"] != state["checkpoint_path"]
+                            or current["company_cursor"] != state["company_cursor"]):
+                        raise StoreConflict("E-Commerce native state changed during clock advancement")
+                    current_action_count = writer.execute(
+                        "SELECT COUNT(*) FROM ecommerce_native_action_receipts"
+                    ).fetchone()[0]
+                    if current_action_count != len(action_rows):
+                        raise StoreConflict("E-Commerce native actions changed during clock advancement")
+                    for source_id, observed_at in new_source_observations.items():
+                        writer.execute(
+                            "INSERT OR IGNORE INTO ecommerce_native_source_observations(source_id,observed_at) VALUES(?,?)",
+                            (source_id, observed_at),
+                        )
+                        observation = writer.execute(
+                            "SELECT observed_at FROM ecommerce_native_source_observations WHERE source_id=?",
+                            (source_id,),
+                        ).fetchone()
+                        if observation["observed_at"] != observed_at:
+                            raise StoreConflict("E-Commerce source observation changed during clock advancement")
+                    for source_id, source_json in pending_source_json:
+                        if (source_id and writer.execute(
+                                "SELECT 1 FROM ecommerce_native_source_receipts WHERE source_id=?",
+                                (source_id,),
+                        ).fetchone() is None):
+                            writer.execute(
+                                "INSERT OR IGNORE INTO ecommerce_native_pending_source_facts VALUES(?,?,?)",
+                                (source_id, source_json, datetime.now(timezone.utc).isoformat()),
+                            )
+                    writer.execute(
+                        """UPDATE ecommerce_native_world_state
+                        SET checkpoint_path=?,company_cursor=?,updated_at=? WHERE singleton=1""",
+                        (str(path), target_text, datetime.now(timezone.utc).isoformat()),
+                    )
+                    writer.execute(
+                        "INSERT INTO ecommerce_native_advance_receipts VALUES(?,?,?,?)",
+                        (operation_id, request_json, result_json,
+                         datetime.now(timezone.utc).isoformat()),
+                    )
+        except BaseException as error:
+            try:
+                self._discard_unreferenced_checkpoint(path, operation_id)
+            except Exception as cleanup_error:
+                error.add_note(
+                    "Uncommitted E-Commerce checkpoint cleanup failed: "
+                    + type(cleanup_error).__name__
+                )
+            raise
+        if reused_result is not None:
+            self._discard_unreferenced_checkpoint(path, operation_id)
+            return reused_result
+        return result
+
+    def _discard_unreferenced_checkpoint(self, path: Path, operation_id: str) -> None:
+        expected_ref = self._state_ref(str(path))
+        with self.store.transaction(write=False) as connection:
+            state = connection.execute(
+                "SELECT checkpoint_path FROM ecommerce_native_world_state WHERE singleton=1"
+            ).fetchone()
+            receipt = connection.execute(
+                "SELECT result_json FROM ecommerce_native_advance_receipts WHERE operation_id=?",
+                (operation_id,),
+            ).fetchone()
+        if (state is not None and state["checkpoint_path"] == str(path)):
+            return
+        if receipt is not None and json.loads(receipt["result_json"]).get("native_state_ref") == expected_ref:
+            return
+        path.unlink(missing_ok=True)
 
     def acknowledge_source_receipts(self, receipts: list[dict[str, Any]]) -> None:
         """Stop replaying exact E-Commerce source facts only after native ERP receipts exist."""
@@ -2009,10 +2157,18 @@ class EcommerceNativeActionCheckpoint:
                 if existing is not None:
                     if (existing["doctype"], existing["document_name"]) != (doctype, name):
                         raise StoreConflict("E-Commerce source ID was acknowledged against conflicting ERP records")
+                    connection.execute(
+                        "DELETE FROM ecommerce_native_pending_source_facts WHERE source_id=?",
+                        (source_id,),
+                    )
                     continue
                 connection.execute(
                     "INSERT INTO ecommerce_native_source_receipts VALUES(?,?,?,?)",
                     (source_id, doctype, name, datetime.now(timezone.utc).isoformat()),
+                )
+                connection.execute(
+                    "DELETE FROM ecommerce_native_pending_source_facts WHERE source_id=?",
+                    (source_id,),
                 )
 
     def apply(self, action: Any) -> dict[str, Any]:

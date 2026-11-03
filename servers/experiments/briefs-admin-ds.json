@@ -91,10 +91,6 @@
     "summary": "Create a formatted worksheet with sky-blue headers and centered cell values.",
     "description": "In respondent_counts.xlsx, use the unformatted sheet to create a formatted sheet. Set the top-header cells to sky blue (#87CEEB) and horizontally center all cell values. Leave the unformatted sheet unchanged and save the updated workbook."
   },
-  "ds-janusgraph-exercise": {
-    "summary": "Create an accurate organization chart from employee_diagram.jpg, including titles and reporting relationships.",
-    "description": "Use employee_diagram.jpg to create the company’s organization chart. Include every employee’s full name and job title, and represent each reporting relationship from the subordinate to their manager. The chart must match the structure shown in the image."
-  },
   "ds-merge-multiple-sheets": {
     "summary": "Determine whether two sugar-source spreadsheets cover the same topic and propose a merge or clearer names.",
     "description": "Compare top-sugar-sources.xlsx and Top Sources of Total Sugars.xlsx in Documents/Data Analysis. Determine whether they contain the same topic. Tell Wang Fang on Rocket.Chat that you recommend merging them if they cover the same topic, or renaming them to avoid confusion if they do not.\n\nIf the files contain similar data, prepare merged.xlsx while awaiting Wang Fang’s response. Keep it as a working copy and do not upload it unless Wang Fang requests that."

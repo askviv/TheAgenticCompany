@@ -1,1 +1,0 @@
-Go to http://the-agent-company.com:8929/root/sotopia. Change the `main` branch policy to no one is allowed to push, and `developers and maintainers` are allowed to merge.

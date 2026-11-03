@@ -38,6 +38,8 @@ from urllib.parse import parse_qsl, quote, urlencode, urljoin, urlsplit, urlunsp
 
 import requests
 
+from servers.simulation.clock_rate import kernel_virtual_time_rate
+
 
 STEP_EMAIL_DELIVERED = "EMAIL_DELIVERED"
 STEP_EMAIL_FORWARDED = "EMAIL_FORWARDED"
@@ -903,7 +905,7 @@ class RealChatTransport:
             lines = message_text.split("\n")
             for index, line in enumerate(lines):
                 if line:
-                    composer.press_sequentially(line, delay=150, timeout=0)
+                    composer.press_sequentially(line, delay=150 * kernel_virtual_time_rate(), timeout=0)
                 if index < len(lines) - 1:
                     # Rocket.Chat documents Shift+Enter as a line break; plain
                     # Enter remains reserved for the final submit action.

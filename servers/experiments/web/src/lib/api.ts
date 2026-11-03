@@ -141,6 +141,16 @@ export type CompanyNativeEvaluationProvider = {
 }
 
 export type Session = { csrf_token: string; idempotency_key: string }
+export type CodexAuthStatus = {
+  authenticated?: boolean
+  auth_method?: string | null
+  state: "authenticated" | "unauthenticated" | "starting" | "pending" | "completed" | "failed" | "expired"
+  login_id?: string | null
+  user_code?: string | null
+  verification_url?: string | null
+  expires_at?: string | null
+  error?: string | null
+}
 type RunResponse = { run_id: string; url: string }
 
 export type Company = {
@@ -227,6 +237,23 @@ export async function getCompanyTools(): Promise<CompanyToolLink[]> {
 
 export async function getSession(): Promise<Session> {
   return requestJson<Session>("/api/session")
+}
+
+export async function getCodexAuthStatus(): Promise<CodexAuthStatus> {
+  return requestJson<CodexAuthStatus>("/api/company/model-auth/status")
+}
+
+export async function startCodexDeviceAuthorization(): Promise<CodexAuthStatus> {
+  const session = await getSession()
+  return requestJson<CodexAuthStatus>("/api/company/model-auth/device/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ csrf_token: session.csrf_token }),
+  })
+}
+
+export async function getCodexDeviceAuthorization(loginId: string): Promise<CodexAuthStatus> {
+  return requestJson<CodexAuthStatus>(`/api/company/model-auth/device/${encodeURIComponent(loginId)}`)
 }
 
 export async function getRuns(): Promise<ExperimentRun[]> {

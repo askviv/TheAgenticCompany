@@ -75,10 +75,12 @@ unchanged.
 
 Employee desktop Chrome needs the guest root CA in its persistent NSS profile.
 Set `employee_desktop_ca_file` to `/etc/company-clock-tls/root-ca.crt` and
-`employee_desktop_image` to the built Selkies image in the private runtime JSON. The existing employee desktop Dockerfile installs `libnss3-tools`, which supplies `certutil`; build it with the coordinator bootstrap or `docker build` before loading its exact image into the guest. This also configures independently scheduled issue
-handoffs. `EMPLOYEE_DESKTOP_CA_FILE` and `EMPLOYEE_DESKTOP_IMAGE` remain optional
-process overrides. The runtime mounts the root read-only and imports it
-into Chrome's NSS database. Do not set a desktop fake-time clock file or inject
+`employee_desktop_image` to the upstream pinned Selkies desktop image in the
+private runtime JSON. Coordinator Ubuntu needs `libnss3-tools` (`certutil`) to
+prepare a persistent per-employee NSS database on the host; the runtime mounts
+that database at Chrome's standard NSS path. This also configures independently
+scheduled issue handoffs. `EMPLOYEE_DESKTOP_CA_FILE` and
+`EMPLOYEE_DESKTOP_IMAGE` remain optional process overrides. Do not set a desktop fake-time clock file or inject
 `LD_PRELOAD`/`FAKETIME`; the guest kernel provides the accelerated clock.
 
 Install `guest/tac-company-clock-caddy.service` only after the guest cert files,
@@ -232,7 +234,7 @@ to one so the guest clock is not accelerated twice.
 
 For an existing company, follow the [migration runbook](../../docs/enterprise-simulation/virtual-time-migration.md). A plain `docker compose up` starts application containers; VM creation, kernel preparation and the coordinated data migration are separate operator steps.
 
-The coordinator runtime JSON exposes `sqlite_busy_timeout_seconds` (existing default: 30). At 24×, use 720 guest seconds to retain a 30-real-second allowance for durable storage contention. This changes resource waiting, not the guest clock or benchmark deadlines. Health reads use a read connection, and displayed company time comes directly from the guest kernel; delayed record processing does not freeze the clock.
+The coordinator runtime JSON exposes `sqlite_busy_timeout_seconds` (existing default: 30). Keep that unscaled base value; every simulation SQLite connection multiplies it by the active kernel rate. At 24×, the resulting 720 guest seconds retain a 30-real-second allowance for durable storage contention. This changes resource waiting, not the guest clock or benchmark deadlines. Health reads use a read connection, and displayed company time comes directly from the guest kernel; delayed record processing does not freeze the clock.
 
 Clock speed is deployment configuration. Install `clock.env.example` as `$WORLD_ROOT/config/clock.env`, set `WORLD_CLOCK_RATE`, and run `sudo systemctl reload virtual-time-world-clock.service` to apply it without stopping the VM. The service uses this rate when starting a stopped VM; recovery of an already-running VM retains its durable confirmed clock state. The dashboard displays company time and has no speed editor.
 
@@ -240,8 +242,11 @@ Keep `mailbox_idle_renewal_seconds` at its existing 30-second base value. In ker
 
 Keep `company_clock_observation_seconds` at its existing one-second base value; the runtime multiplies it by the active kernel rate so database checkpoints and event-queue scans run once per real second. This is a processing cadence, not a second clock: the header and business timestamps use the guest kernel, and queued events retain their scheduled timestamps. It avoids performing 24 checkpoint writes per real second on slower persistent storage.
 
-Docker health probes are infrastructure observations, not business events. In
-the guest, after creating the company containers (or for an existing guest
+Docker health probes are infrastructure observations, not business events. The
+company Compose helper saves each image or container's baseline healthcheck and
+scales its intervals, timeouts, and startup grace by the live kernel rate. It
+applies the resulting fields through ordinary Compose configuration. In the
+guest, after creating the company containers (or for an existing guest
 deployment), run:
 
 ```sh
@@ -249,17 +254,21 @@ sudo python3 deploy/virtual-time-world/prepare-healthcheck-cadence.py \
   --config-dir /data/theagentcompany/virtual-time-world/config/migration-compose
 ```
 
-Install the helper at `/usr/local/lib/virtual-time-world/prepare-healthcheck-cadence.py` in the guest. The company Compose unit runs it before startup, reading the same kernel rate; there is no separate cadence-rate configuration. After changing the clock rate in an already-running deployment, rerun the helper and apply the prepared Compose configurations.
+Install the helper at `/usr/local/lib/virtual-time-world/prepare-healthcheck-cadence.py` in the guest. The company Compose unit runs it before startup; it reads the same kernel rate for Docker healthchecks, native service timeouts, the Mailu Dovecot proxy timeout, and the issue timer, with no separate cadence-rate configuration. After changing the rate, rerun it and apply the prepared Compose configurations to update their healthchecks.
 
-The helper captures native effective health metadata privately, scales probe
-intervals, startup intervals, and resource-wait allowances, and retains their
-commands and retry criteria. Repeated runs use the saved baseline rather than
-multiplying again. Startup probes use the saved native startup interval scaled
-by the same rate. The helper reads the active kernel rate by default (or accepts
-the same rate explicitly with `--rate`), saves the native
+The helper captures native effective health metadata privately, retains its
+commands and retries, and scales health durations from their saved baselines.
+It also scales native service timeouts and the issue timer from their saved
+baselines. Repeated runs use the saved baseline rather than multiplying again.
+The helper reads the active kernel rate by default (or
+accepts the same rate explicitly with `--rate`), saves the native
 `tac-company-issues.timer` monotonic interval privately, and installs a systemd
 drop-in scaled from that saved baseline. Repeated runs do not multiply the
 previous drop-in value. Recreate the affected containers through Compose to
 apply their health configuration, preserving volumes. This prevents
 accelerated health polling from saturating storage; business clocks, issue
 deadlines and evaluator criteria are unchanged.
+
+Use the standard Ubuntu Docker package and the standard pinned Mailu Dovecot
+image. Kernel-clock behavior comes from the timed Ubuntu VM; container health
+durations and Dovecot proxy timeouts are set by the company Compose helper.

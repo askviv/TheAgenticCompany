@@ -4,6 +4,5 @@
   "rocketchat": "https://chat.example.test",
   "owncloud": "https://files.example.test",
   "plane": "https://projects.example.test",
-  "gitlab": "https://git.example.test",
   "midpoint": "https://identity.example.test/midpoint/"
 }
