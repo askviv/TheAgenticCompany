@@ -321,3 +321,5 @@ supervisor stopped. It preserves company files and virtual disk capacities,
 flattens the boot disk backing chain, and persists an SSD bind mount at the
 existing image path. The original HDD directory is retained only until the
 operator verifies startup, then must be removed. No company reset is performed.
+
+Architecture-specific kernel entry points and Apple Silicon/UTM limitations are documented in the [build guide](../../docs/enterprise-simulation/architecture-builds.md).

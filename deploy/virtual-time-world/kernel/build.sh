@@ -2,6 +2,14 @@
 # Run inside the empty guest. This installs a candidate alongside the stock kernel.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
+# Native guest builds only: modules and initramfs are installed into this guest.
+arch=${WORLD_KERNEL_ARCH:-x86}
+case "$arch:$(uname -m)" in
+ x86:x86_64) target=bzImage; kernel_image=arch/x86/boot/bzImage ;;
+ arm64:aarch64) target=Image; kernel_image=arch/arm64/boot/Image ;;
+ *) printf 'Build architecture %s must match the Ubuntu guest architecture.\n' "$arch" >&2; exit 1 ;;
+esac
+export ARCH="$arch"
 version=6.12.115
 expected=0ec90fe4b20422b1b664b77e6d2dde22b40bd41e7eb2cad8ac8739a4749cb1bb
 build_root=${WORLD_KERNEL_BUILD_ROOT:-/opt/agentic-world-build}
@@ -11,7 +19,7 @@ patches=(
  "$here/linux-$version-runtime-epoch.patch"
 )
 # Include every input that changes the installed kernel in its identity.
-digest=$(cat "${patches[@]}" "$here/guest.config" | sha256sum | cut -d' ' -f1)
+digest=$({ printf '%s\n' "$arch"; cat "${patches[@]}" "$here/guest.config" "$here/guest-$arch.config"; } | sha256sum | cut -d' ' -f1)
 source_root=${WORLD_KERNEL_SOURCE_DIR:-"$build_root/linux-$version-${digest:0:12}"}
 install -d "$build_root"
 cd "$build_root"
@@ -34,26 +42,27 @@ fi
 cd "$source_root"
 test "$(cat .agentic-patch-sha256)" = "$digest"
 make defconfig
-scripts/kconfig/merge_config.sh -m .config "$here/guest.config"
+scripts/kconfig/merge_config.sh -m .config "$here/guest.config" "$here/guest-$arch.config"
 scripts/config --set-str LOCALVERSION "-agentic-time-${digest:0:8}"
 make olddefconfig
-make -j "${WORLD_BUILD_JOBS:-1}" bzImage modules
+make -j "${WORLD_BUILD_JOBS:-1}" "$target" modules
 make modules_install
 release=$(make -s kernelrelease)
-install -m 0644 arch/x86/boot/bzImage "/boot/vmlinuz-$release"
+install -m 0644 "$kernel_image" "/boot/vmlinuz-$release"
 install -m 0644 System.map "/boot/System.map-$release"
 install -m 0644 .config "/boot/config-$release"
 update-initramfs -c -k "$release"
-python3 - "$build_root" "$release" "$version" "$digest" <<'PY'
+python3 - "$build_root" "$release" "$version" "$digest" "$arch" <<'PY'
 import json
 import os
 from pathlib import Path
 import sys
 import tempfile
 
-root, release, version, digest = sys.argv[1:]
+root, release, version, digest, architecture = sys.argv[1:]
 manifest = {
     'kernel_release': release,
+    'architecture': architecture,
     'source_version': version,
     'patch_digest': digest,
     'features': ['runtime_rate', 'boot_epoch'],
