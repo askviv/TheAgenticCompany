@@ -118,10 +118,9 @@ or `post_init.py`.
 
 A common use case for `pre_init.py`
 is to check whether services involved in the task are ready and in a clean state.
-For example, it could check access to a wiki page, check existence 
-of some repository, issue, pull request in GitLab, and check existence of an user in
-RocketChat. If sanity checks fail, it could either fail the whole script, or
-attempt to fix/reset the environment.
+For example, it could check access to a wiki page or confirm that a required
+colleague is available in RocketChat. If sanity checks fail, it could either fail
+the whole script or attempt to fix/reset the environment.
 
 A common use case for `post_init.py` is to validate the initialization process.
 For example, in the task image, initialization step launches NPC(s). Post-init
@@ -154,8 +153,3 @@ generally pre-defined fashion. This context is defined in each individual task i
 If your task needs to involve NPCs, take a look at the example task. In a nutshell,
 all you need to do is to add a `scenarios.json` that documents the NPCs involved, their
 knowledge and their settings. For details, see [here](./NPC.md).
-
-
-## Gitlab (optional)
-Some tasks require the examinee to push the code to the gitlab. So they need to 
-figure out by themselves without providing the credential to them

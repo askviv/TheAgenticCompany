@@ -6,7 +6,6 @@ services:
     restart: unless-stopped
     environment:
       SKIP_SETUP: "True"
-      GITLAB_PORT: "8929"
       COMPOSE_FILE: /workspace/docker-compose.yml:/workspace/apps.override.yml
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

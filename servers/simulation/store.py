@@ -20,6 +20,7 @@ from uuid import UUID
 
 from pydantic import BaseModel
 
+from servers.simulation.clock_rate import kernel_virtual_time_rate
 from servers.simulation.models import CanonicalEvent, StartScenario
 
 
@@ -65,7 +66,8 @@ def _now() -> str:
 class SQLiteStore:
     """SQLite-backed run state with explicit generation-scoped records."""
 
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, *, busy_timeout_seconds: float = 30):
+        self.busy_timeout_seconds = busy_timeout_seconds
         self.db_path = Path(db_path)
         if str(db_path) == ":memory:":
             raise ValueError("SQLiteStore requires a durable database path")
@@ -75,17 +77,20 @@ class SQLiteStore:
             self.db_path.chmod(0o600)
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path, timeout=30, isolation_level=None)
+        # SQLite's native sleep/retry timers follow the accelerated guest kernel.
+        # Every coordinator/actor connection uses the same unscaled base setting.
+        timeout = self.busy_timeout_seconds * kernel_virtual_time_rate()
+        connection = sqlite3.connect(self.db_path, timeout=timeout, isolation_level=None)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout = 30000")
+        connection.execute(f"PRAGMA busy_timeout = {int(timeout * 1000)}")
         connection.execute("PRAGMA foreign_keys = ON")
         return connection
 
     @contextmanager
-    def transaction(self) -> Iterator[sqlite3.Connection]:
-        """Open a writer transaction that serializes competing mutations."""
+    def transaction(self, *, write: bool = True) -> Iterator[sqlite3.Connection]:
+        """Use a reserved writer or a consistent deferred read snapshot."""
         with closing(self._connect()) as connection:
-            connection.execute("BEGIN IMMEDIATE")
+            connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             try:
                 yield connection
                 connection.commit()
@@ -162,6 +167,10 @@ class SQLiteStore:
                     private_payload_json TEXT NOT NULL,
                     payload_hash TEXT NOT NULL,
                     submission_started INTEGER NOT NULL DEFAULT 0 CHECK(submission_started IN (0,1)),
+                    submission_started_at TEXT,
+                    sent_uidvalidity TEXT,
+                    sent_uid_next INTEGER,
+                    native_message_id TEXT,
                     error_type TEXT,
                     status TEXT NOT NULL CHECK(status IN ('pending','uncertain','completed')),
                     outcome_json TEXT,
@@ -216,7 +225,6 @@ class SQLiteStore:
                     status TEXT NOT NULL CHECK(status IN ('running','paused')),
                     simulated_time TEXT NOT NULL,
                     wall_anchor TEXT NOT NULL,
-                    clock_rate INTEGER NOT NULL DEFAULT 1 CHECK(clock_rate > 0),
                     paused INTEGER NOT NULL CHECK(paused IN (0,1)),
                     erp_binding_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -446,11 +454,6 @@ class SQLiteStore:
                 );
                 """
             )
-            company_columns = {row["name"] for row in connection.execute("PRAGMA table_info(company_runtime)")}
-            if "clock_rate" not in company_columns:
-                connection.execute(
-                    "ALTER TABLE company_runtime ADD COLUMN clock_rate INTEGER NOT NULL DEFAULT 1 CHECK(clock_rate > 0)"
-                )
             self._migrate_existing_schema(connection)
             outbox_columns = {row["name"] for row in connection.execute("PRAGMA table_info(outbox)")}
             if "completed_at" not in outbox_columns:
@@ -484,6 +487,10 @@ class SQLiteStore:
                 private_payload_json TEXT NOT NULL,
                 payload_hash TEXT NOT NULL,
                 submission_started INTEGER NOT NULL DEFAULT 0 CHECK(submission_started IN (0,1)),
+                submission_started_at TEXT,
+                sent_uidvalidity TEXT,
+                sent_uid_next INTEGER,
+                native_message_id TEXT,
                 error_type TEXT,
                 status TEXT NOT NULL CHECK(status IN ('pending','uncertain','completed')),
                 outcome_json TEXT,
@@ -550,9 +557,21 @@ class SQLiteStore:
         else:
             if "submission_started" not in outbox_columns:
                 connection.execute("ALTER TABLE outbox ADD COLUMN submission_started INTEGER NOT NULL DEFAULT 0")
+            if "submission_started_at" not in outbox_columns:
+                connection.execute("ALTER TABLE outbox ADD COLUMN submission_started_at TEXT")
+            if "sent_uidvalidity" not in outbox_columns:
+                connection.execute("ALTER TABLE outbox ADD COLUMN sent_uidvalidity TEXT")
+            if "sent_uid_next" not in outbox_columns:
+                connection.execute("ALTER TABLE outbox ADD COLUMN sent_uid_next INTEGER")
+            if "native_message_id" not in outbox_columns:
+                connection.execute("ALTER TABLE outbox ADD COLUMN native_message_id TEXT")
             if "error_type" not in outbox_columns:
                 connection.execute("ALTER TABLE outbox ADD COLUMN error_type TEXT")
             connection.execute("CREATE INDEX IF NOT EXISTS outbox_pending_idx ON outbox(run_id,generation,status,created_at)")
+        connection.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS outbox_native_message_id_idx "
+            "ON outbox(run_id,generation,native_message_id) WHERE native_message_id IS NOT NULL"
+        )
 
     @staticmethod
     def _run_id(run_id: UUID | str) -> str:
@@ -619,7 +638,6 @@ class SQLiteStore:
                 return None
             return {"company_id": row["company_id"], "status": row["status"],
                     "simulated_time": row["simulated_time"], "wall_anchor": row["wall_anchor"],
-                    "clock_rate": row["clock_rate"],
                     "paused": bool(row["paused"]), "erp_binding": _decode(row["erp_binding_json"]),
                     "updated_at": row["updated_at"]}
 
@@ -628,37 +646,16 @@ class SQLiteStore:
         simulated_value = simulated_time.isoformat() if isinstance(simulated_time, datetime) else simulated_time
         anchor_value = wall_anchor.isoformat() if isinstance(wall_anchor, datetime) else wall_anchor
         with self._write(connection) as conn:
-            conn.execute("""INSERT INTO company_runtime(company_id,status,simulated_time,wall_anchor,clock_rate,paused,erp_binding_json,updated_at)
-                VALUES(?,'running',?,?,1,0,?,?) ON CONFLICT(company_id) DO NOTHING""",
+            conn.execute("""INSERT INTO company_runtime(company_id,status,simulated_time,wall_anchor,paused,erp_binding_json,updated_at)
+                VALUES(?,'running',?,?,0,?,?) ON CONFLICT(company_id) DO NOTHING""",
                 (company_id, simulated_value, anchor_value, _json(erp_binding), _now()))
-            return self.get_company(company_id, connection=conn)
-
-    def set_company_clock_rate(self, company_id: str, clock_rate: int, wall_anchor: datetime,
-                               *, connection: sqlite3.Connection | None = None) -> dict[str, Any]:
-        """Accrue elapsed time at the old rate and atomically change the rate."""
-        if clock_rate <= 0:
-            raise ValueError("company clock rate must be positive")
-        with self._write(connection) as conn:
-            row = conn.execute("SELECT clock_rate,simulated_time,wall_anchor,paused FROM company_runtime WHERE company_id=?", (company_id,)).fetchone()
-            if row is None:
-                raise StoreNotFound("company not found")
-            if row["clock_rate"] != clock_rate:
-                old_anchor = datetime.fromisoformat(row["wall_anchor"])
-                effective_anchor = max(wall_anchor, old_anchor)
-                simulated = datetime.fromisoformat(row["simulated_time"])
-                if not row["paused"]:
-                    simulated += (effective_anchor - old_anchor) * row["clock_rate"]
-                conn.execute("UPDATE company_runtime SET clock_rate=?,simulated_time=?,wall_anchor=?,updated_at=? WHERE company_id=?",
-                             (clock_rate, simulated.isoformat(), effective_anchor.isoformat(), _now(), company_id))
             return self.get_company(company_id, connection=conn)
 
     def update_company(self, company_id: str, *, status: str | None = None,
                        simulated_time: datetime | str | None = None,
-                       wall_anchor: datetime | str | None = None, clock_rate: int | None = None,
-                       paused: bool | None = None,
+                       wall_anchor: datetime | str | None = None, paused: bool | None = None,
                        connection: sqlite3.Connection | None = None) -> dict[str, Any]:
         updates = {"status": status, "simulated_time": simulated_time, "wall_anchor": wall_anchor,
-                   "clock_rate": clock_rate,
                    "paused": int(paused) if paused is not None else None}
         values = {key: value for key, value in updates.items() if value is not None}
         if not values:
@@ -1838,6 +1835,9 @@ class SQLiteStore:
             "event_id": row["event_id"], "actor_id": row["actor_id"],
             "private_payload": _decode(row["private_payload_json"]), "payload_hash": row["payload_hash"],
             "submission_started": bool(row["submission_started"]), "error_type": row["error_type"],
+            "submission_started_at": row["submission_started_at"],
+            "sent_uidvalidity": row["sent_uidvalidity"], "sent_uid_next": row["sent_uid_next"],
+            "native_message_id": row["native_message_id"],
             "status": row["status"], "outcome": _decode(row["outcome_json"]) if row["outcome_json"] else None,
             "created_at": row["created_at"], "completed_at": row["completed_at"],
         }
@@ -1892,6 +1892,7 @@ class SQLiteStore:
 
     def mark_outbox_submission_started(
         self, run_id: UUID | str, generation: int, outbox_id: str,
+        *, sent_uidvalidity: str | None = None, sent_uid_next: int | None = None,
     ) -> dict[str, Any]:
         """Atomically claim the one-way external submission boundary.
 
@@ -1902,10 +1903,11 @@ class SQLiteStore:
         with self.transaction() as conn:
             self._require_generation(conn, rid, generation)
             cursor = conn.execute(
-                """UPDATE outbox SET submission_started=1,error_type=NULL
+                """UPDATE outbox SET submission_started=1,submission_started_at=?,
+                    sent_uidvalidity=?,sent_uid_next=?,error_type=NULL
                 WHERE run_id=? AND generation=? AND outbox_id=?
                 AND status='pending' AND submission_started=0""",
-                (rid, generation, outbox_id),
+                (_now(), sent_uidvalidity, sent_uid_next, rid, generation, outbox_id),
             )
             if cursor.rowcount != 1:
                 row = conn.execute(
@@ -1915,6 +1917,38 @@ class SQLiteStore:
                 if row is None:
                     raise StoreNotFound("outbox item not found in requested run generation")
                 raise StoreConflict("outbox item was already claimed or is not retryable")
+            return self.get_outbox(rid, generation, outbox_id, connection=conn)
+
+    def record_outbox_native_message_id(
+        self, run_id: UUID | str, generation: int, outbox_id: str, message_id: str,
+    ) -> dict[str, Any]:
+        """Persist the Message-ID generated by the native mail client."""
+        if not isinstance(message_id, str) or not message_id.startswith("<") or not message_id.endswith(">"):
+            raise ValueError("native Message-ID must be an RFC message identifier")
+        rid = self._run_id(run_id)
+        with self.transaction() as conn:
+            self._require_generation(conn, rid, generation)
+            row = conn.execute(
+                "SELECT * FROM outbox WHERE run_id=? AND generation=? AND outbox_id=?",
+                (rid, generation, outbox_id),
+            ).fetchone()
+            if row is None:
+                raise StoreNotFound("outbox item not found in requested run generation")
+            if not row["submission_started"]:
+                raise StoreConflict("native Message-ID cannot be recorded before submission starts")
+            if row["native_message_id"] not in (None, message_id):
+                raise StoreConflict("outbox item already has a different native Message-ID")
+            existing = conn.execute(
+                "SELECT outbox_id FROM outbox WHERE run_id=? AND generation=? "
+                "AND native_message_id=? AND NOT (outbox_id=?)",
+                (rid, generation, message_id, outbox_id),
+            ).fetchone()
+            if existing is not None:
+                raise StoreConflict("native Message-ID is already assigned to another outbox item")
+            conn.execute(
+                "UPDATE outbox SET native_message_id=? WHERE run_id=? AND generation=? AND outbox_id=?",
+                (message_id, rid, generation, outbox_id),
+            )
             return self.get_outbox(rid, generation, outbox_id, connection=conn)
 
     def mark_outbox_failure(

@@ -11,7 +11,7 @@ UMask=0077
 WorkingDirectory=/data/theagentcompany/enterprise/source
 Environment=PYTHONPATH=/data/theagentcompany/enterprise/source
 Environment=PROVIDER_PORTAL_CONFIG_FILE=/data/theagentcompany/enterprise/config/provider-portal.json
-ExecStart=/data/theagentcompany/enterprise/venv/bin/uvicorn servers.company.provider_portal_runtime:app_from_environment --factory --host 192.0.2.10 --port 8132 --workers 1 --no-access-log --no-server-header
+ExecStart=/data/theagentcompany/enterprise/venv/bin/uvicorn servers.company.provider_portal_runtime:app_from_environment --factory --host 127.0.0.1 --port 8132 --workers 1 --no-access-log --no-server-header
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=30

@@ -88,17 +88,12 @@ sudo python3.12 /data/theagentcompany/enterprise/source/deploy/enterprise-simula
 ```
 
 The script creates private runtime configuration, an agent-only client file,
-the venv, and attempts to prepare the pinned local Selkies desktop image. Image
-setup skips when the existing local image carries the current Dockerfile
-digest; a source image change triggers a build. The build only reads the pinned
-official base and tags the local derivative. It does not restart or replace
-any running host service. If Docker cannot build or pull the image, bootstrap
-prints a warning and completes core company setup; desktop start then reports
-that the image is unavailable. Rerun bootstrap after Docker connectivity is
-restored. See `employee-desktop/README.md` for image details. The script prints
-file locations and account outcomes, never passwords,
-principal tokens, API bodies, or message content. It does not start the API or
-install/enable the unit.
+and the Python environment. It pulls the pinned published Selkies desktop image
+and installs the checksum-pinned official Cua Driver binary. No custom desktop
+image is built. Employee actions use native CUA tools in that employee's X11
+session; the observer stream is view-only by default. File locations and account
+outcomes are reported without passwords, tokens or message content.
+The script does not start the API or install/enable its unit.
 
 `secrets/principals.json` contains three generated credentials: controller,
 evaluator, and agent. `secrets/agent-client.json` contains only the agent
@@ -130,13 +125,11 @@ sudo systemctl status tac-enterprise-simulation.service
 
 Inspect safe service status with `journalctl -u tac-enterprise-simulation.service`.
 The API's unauthenticated `/health` response reports only component status, not
-private actor state or provider response bodies. Workers wait for native Mailu
-IMAP IDLE notifications and smtp4dev's native SignalR `messageschanged` event
-on `/hubs/notifications`; they never poll smtp4dev or advance simulated time.
-The live Mini hub negotiation and client handshake were verified without
-sending a test message. The event is mailbox-wide, so the handler wakes one
-coalescing worker which pumps active runs and applies each run's exact
-run/generation correlation. Clock advancement remains controller-only.
+private actor state or provider response bodies. Employee mailbox workers use
+native Mailu IMAP IDLE notifications and wake a coalescing processor. The
+coordinator does not subscribe to or poll Viv's inbox. Employees receive and
+respond to replies in their own Mailu browser sessions through native CUA.
+Outbound email completes on SMTP acceptance, without recipient inbox checks.
 
 The employee-facing provider portal is a separate FastAPI service on port
 8132. It authenticates staff against each existing Mailu mailbox and only shows
@@ -171,11 +164,6 @@ bootstrap, service management, and the frozen dependency versions. Neither
 worker exposes its port beyond loopback. The Codex adapter does not resubmit a
 whole actor turn after an uncertain result; this describes the adapter's
 behavior, not retry behavior inside the underlying CLI/provider protocol.
-
-The source project's [SignalR testing guide](https://github.com/rnwood/smtp4dev/blob/master/docs/Testing.md)
-documents the hub endpoint and `messageschanged` callback. The coordinator uses
-the pinned Python [SignalR Core client](https://pypi.org/project/signalrcore/)
-in `servers/simulation/requirements.txt`.
 
 ## Operator API client
 
@@ -441,3 +429,46 @@ old requests are not rewritten or backdated. Missing/conflicting proof or a
 changed/corrupt checkpoint remains an explicit integrity failure for operator
 repair. Do not delete pending rows, reset the company, or clear inference caches
 to bypass it.
+
+Employee stream access is controlled in the coordinator runtime JSON:
+
+```json
+{"employee_desktop_view_only": true}
+```
+
+The default is `true`. Selkies enforces the viewer role on the server: keyboard,
+mouse, clipboard, gamepad, command input and file transfers are blocked for the
+stream credentials. Employee automation uses its private native CUA MCP connection.
+Set the value to `false` to allow viewer control through the direct stream URL;
+the dashboard's embedded streams remain inert and unfocusable so its viewers
+cannot send mouse or keyboard input to an employee desktop.
+
+Streaming audio and microphone forwarding are disabled with Selkies' native
+`SELKIES_AUDIO_ENABLED=false|locked` setting. Dashboard embeds also deny autoplay.
+Docker environment settings apply when a desktop container is created; existing
+containers must be recreated to apply changed server settings, retaining their
+profile volumes. This does not affect native CUA input.
+
+Employee desktops use Selkies' native fixed 1920 × 1080 resolution with dynamic
+resize locked off. Grid thumbnails and focused viewers scale the same desktop;
+connecting, focusing or disconnecting a viewer does not change its resolution.
+
+Employee agents use Codex's native MCP support connected directly to the official
+Cua Driver in their own desktop container. Codex owns the agent/tool loop and
+receives native screenshots and accessibility state directly from CUA. There is
+no application tool dispatcher, custom finish tool, screenshot adapter or
+Playwright action path. The application's existing submission state and native
+mail submission evidence and chat receipts remain responsible for idempotency.
+SMTP acceptance completes outbound email; no recipient inbox is queried for confirmation.
+Private login credentials use the authenticated inference connection and are not
+written to application logs.
+
+Runtime configuration uses `employee_cua_driver_file`, `employee_cua_inference_url`,
+`employee_cua_inference_token_file` and `employee_cua_model`. The pinned driver is
+mounted read-only into new desktops; existing desktops receive it when their CUA
+session is opened. Native `at-spi2-core` accessibility support is installed
+through the desktop image’s package manager when absent. The driver uses its native
+standard automation mode inside the isolated employee container, and the runtime
+exposes only its CUA tool allowlist. Chrome managed policy disables its password
+manager through `employee-chrome-policy.json`. No model-backed action is executed
+by installation or tool-catalog discovery.

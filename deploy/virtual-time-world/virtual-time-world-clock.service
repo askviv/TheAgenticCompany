@@ -1,0 +1,25 @@
+[Unit]
+Description=Supervise the isolated virtual-time guest
+After=libvirtd.service
+
+[Service]
+Type=simple
+User=root
+Environment=WORLD_ROOT=/data/theagentcompany/virtual-time-world
+Environment=WORLD_NAME=tac-virtual-time-world
+Environment=WORLD_SSH_PORT=22220
+EnvironmentFile=/data/theagentcompany/virtual-time-world/config/clock.env
+Environment=VIRTUAL_TIME_SOURCE_ROOT=/data/theagentcompany/virtual-time-world/company-source
+Environment=PYTHONPATH=/data/theagentcompany/virtual-time-world/company-source
+ExecStart=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py --root ${WORLD_ROOT} --name ${WORLD_NAME} --ssh-port ${WORLD_SSH_PORT} run --rate ${WORLD_CLOCK_RATE}
+ExecReload=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py --root ${WORLD_ROOT} --name ${WORLD_NAME} --ssh-port ${WORLD_SSH_PORT} set-rate ${WORLD_CLOCK_RATE}
+ExecStop=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py --root ${WORLD_ROOT} --name ${WORLD_NAME} --ssh-port ${WORLD_SSH_PORT} stop
+Restart=on-failure
+RestartSec=5
+UMask=0077
+TimeoutStopSec=infinity
+SendSIGKILL=no
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target

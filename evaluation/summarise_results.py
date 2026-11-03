@@ -335,7 +335,7 @@ def main():
         print("\n## Statistics per Service Category\n")
         print("| Metric | Value |")
         print("|---------|--------|")
-        for service_category in ['gitlab', 'plane', 'rocketchat', 'owncloud']:
+        for service_category in ['plane', 'rocketchat', 'owncloud']:
             num_of_tasks = len(service_to_tasks.get(service_category, []))
             service_category_score = 0 if num_of_tasks == 0 else sum(score for task_name, _, _, score, _, _ in detailed_results if task_name in service_to_tasks[service_category]) / num_of_tasks
             perfect_completions = sum(1 for task_name, _, _, _, is_perfect, _ in detailed_results if task_name in service_to_tasks.get(service_category, []) and is_perfect)

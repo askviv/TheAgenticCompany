@@ -110,6 +110,10 @@ class PauseCompany(Input):
     paused: bool
 
 
+class SetCompanyClockSpeed(Input):
+    speed: float = Field(gt=0, allow_inf_nan=False)
+
+
 class StartCompany(Input):
     pass
 

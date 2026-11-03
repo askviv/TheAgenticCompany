@@ -1,0 +1,150 @@
+--- a/kernel/time/timekeeping.c
++++ b/kernel/time/timekeeping.c
+@@ -69,6 +69,125 @@
+ }
+ early_param("virtual_time", virtual_time_setup);
+ 
++static struct timespec64 virtual_time_epoch;
++static struct timespec64 virtual_time_host_epoch;
++static bool virtual_time_epoch_sec_set;
++static bool virtual_time_epoch_nsec_set;
++static bool virtual_time_host_epoch_sec_set;
++static bool virtual_time_host_epoch_nsec_set;
++
++static int __init virtual_time_epoch_sec_setup(char *str)
++{
++	s64 sec;
++
++	if (kstrtos64(str, 0, &sec) || sec < 0)
++		panic("virtual_time_epoch_sec: invalid Unix timestamp");
++	virtual_time_epoch.tv_sec = sec;
++	virtual_time_epoch_sec_set = true;
++	return 0;
++}
++early_param("virtual_time_epoch_sec", virtual_time_epoch_sec_setup);
++
++static int __init virtual_time_epoch_nsec_setup(char *str)
++{
++	u32 nsec;
++
++	if (kstrtouint(str, 0, &nsec) || nsec >= NSEC_PER_SEC)
++		panic("virtual_time_epoch_nsec: expected nanoseconds in [0, 999999999]");
++	virtual_time_epoch.tv_nsec = nsec;
++	virtual_time_epoch_nsec_set = true;
++	return 0;
++}
++early_param("virtual_time_epoch_nsec", virtual_time_epoch_nsec_setup);
++
++static int __init virtual_time_host_epoch_sec_setup(char *str)
++{
++	s64 sec;
++
++	if (kstrtos64(str, 0, &sec) || sec < 0)
++		panic("virtual_time_host_epoch_sec: invalid Unix timestamp");
++	virtual_time_host_epoch.tv_sec = sec;
++	virtual_time_host_epoch_sec_set = true;
++	return 0;
++}
++early_param("virtual_time_host_epoch_sec", virtual_time_host_epoch_sec_setup);
++
++static int __init virtual_time_host_epoch_nsec_setup(char *str)
++{
++	u32 nsec;
++
++	if (kstrtouint(str, 0, &nsec) || nsec >= NSEC_PER_SEC)
++		panic("virtual_time_host_epoch_nsec: expected nanoseconds in [0, 999999999]");
++	virtual_time_host_epoch.tv_nsec = nsec;
++	virtual_time_host_epoch_nsec_set = true;
++	return 0;
++}
++early_param("virtual_time_host_epoch_nsec", virtual_time_host_epoch_nsec_setup);
++
++static void virtual_time_set_boot_epoch(struct timespec64 *wall_time,
++					bool wall_time_valid)
++{
++	struct timespec64 elapsed;
++	u64 guest_sec_delta, fractional_delta, guest_sec;
++	u32 guest_nsec_delta;
++
++	if (virtual_time_epoch_nsec_set && !virtual_time_epoch_sec_set)
++		panic("virtual_time_epoch_nsec requires virtual_time_epoch_sec");
++	if (virtual_time_host_epoch_sec_set != virtual_time_host_epoch_nsec_set)
++		panic("virtual_time_host_epoch_sec and _nsec must be provided together");
++	if (virtual_time_host_epoch_sec_set && !virtual_time_epoch_sec_set)
++		panic("virtual_time_host_epoch requires virtual_time_epoch_sec");
++
++	if (!virtual_time_epoch_sec_set)
++		return;
++	if (!timespec64_valid_settod(&virtual_time_epoch))
++		panic("virtual_time_epoch: timestamp is outside CLOCK_REALTIME range");
++
++	if (!virtual_time_host_epoch_sec_set) {
++		*wall_time = virtual_time_epoch;
++		return;
++	}
++
++	if (!timespec64_valid_settod(&virtual_time_host_epoch))
++		panic("virtual_time_host_epoch: timestamp is outside CLOCK_REALTIME range");
++	if (!wall_time_valid)
++		panic("virtual_time_host_epoch: host wall clock is invalid");
++	if (timespec64_compare(wall_time, &virtual_time_host_epoch) < 0)
++		panic("virtual_time_host_epoch: host wall clock moved backwards");
++
++	elapsed = timespec64_sub(*wall_time, virtual_time_host_epoch);
++	if (check_mul_overflow((u64)elapsed.tv_sec,
++			       (u64)timekeeping_virtual_rate,
++			       &guest_sec_delta) ||
++	    check_mul_overflow((u64)elapsed.tv_nsec,
++			       (u64)timekeeping_virtual_rate,
++			       &fractional_delta) ||
++	    check_add_overflow(guest_sec_delta,
++			       div_u64(fractional_delta, NSEC_PER_SEC),
++			       &guest_sec_delta))
++		panic("virtual_time_epoch: elapsed host interval overflow");
++
++	if (elapsed.tv_sec < 0 || elapsed.tv_nsec < 0 ||
++	    elapsed.tv_nsec >= NSEC_PER_SEC)
++		panic("virtual_time_epoch: invalid elapsed host interval");
++
++	guest_nsec_delta = fractional_delta % NSEC_PER_SEC;
++	if (check_add_overflow((u64)virtual_time_epoch.tv_sec,
++			       guest_sec_delta, &guest_sec))
++		panic("virtual_time_epoch: projected guest timestamp overflow");
++	guest_nsec_delta += (u32)virtual_time_epoch.tv_nsec;
++	if (guest_nsec_delta >= NSEC_PER_SEC) {
++		guest_nsec_delta -= NSEC_PER_SEC;
++		if (check_add_overflow(guest_sec, 1ULL, &guest_sec))
++			panic("virtual_time_epoch: projected guest timestamp overflow");
++	}
++	if (guest_sec >= TIME_SETTOD_SEC_MAX)
++		panic("virtual_time_epoch: projected guest timestamp is out of range");
++
++	wall_time->tv_sec = guest_sec;
++	wall_time->tv_nsec = guest_nsec_delta;
++}
++
+ /*
+  * The most important data for readout fits into a single 64 byte
+  * cache line.
+@@ -1905,15 +2024,19 @@
+ 	struct timekeeper *tk = &tk_core.timekeeper;
+ 	struct clocksource *clock;
+ 	unsigned long flags;
++	bool wall_time_valid;
+ 
+ 	read_persistent_wall_and_boot_offset(&wall_time, &boot_offset);
+-	if (timespec64_valid_settod(&wall_time) &&
+-	    timespec64_to_ns(&wall_time) > 0) {
++	wall_time_valid = timespec64_valid_settod(&wall_time) &&
++			timespec64_to_ns(&wall_time) > 0;
++	if (wall_time_valid) {
+ 		persistent_clock_exists = true;
+ 	} else if (timespec64_to_ns(&wall_time) != 0) {
+ 		pr_warn("Persistent clock returned invalid value");
+ 		wall_time = (struct timespec64){0};
+ 	}
++
++	virtual_time_set_boot_epoch(&wall_time, wall_time_valid);
+ 
+ 	if (timespec64_compare(&wall_time, &boot_offset) < 0)
+ 		boot_offset = (struct timespec64){0};

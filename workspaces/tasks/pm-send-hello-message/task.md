@@ -1,4 +1,4 @@
-Find the #general channel in our company's platform's directory at http://the-agent-company.com:3000/home
+Find the #general channel in our company's platform's directory at {{ company_tools.rocketchat }}/home
 Send a message on the channel. The message should 
 (1) include  'Hi',
 (2) include a kissing_smiling_eyes emoji, and 

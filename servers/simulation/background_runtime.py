@@ -108,10 +108,10 @@ class BackgroundWorkerClient:
         base_url: AnyHttpUrl | str,
         bearer_token: SecretStr | str,
         *,
-        timeout_seconds: float,
+        timeout_seconds: float | None = None,
         session: requests.Session | None = None,
     ):
-        if timeout_seconds <= 0:
+        if timeout_seconds is not None and timeout_seconds <= 0:
             raise ValueError("background worker timeout must be positive")
         token = bearer_token.get_secret_value() if isinstance(bearer_token, SecretStr) else bearer_token
         if not token:

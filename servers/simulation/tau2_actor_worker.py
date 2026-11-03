@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, model_validator
+
+from servers.simulation.codex_remote import CodexRemoteSettings, create_codex_transport
 
 from servers.simulation.actor_protocol import (
     ActorEvaluateRequest, ActorEvaluateResponse, ActorTurnRequest, ActorTurnResponse,
@@ -33,7 +35,15 @@ class Tau2CustomerSettings(BaseModel):
     codex_executable: str | None = Field(default=None, min_length=1, max_length=500)
     codex_home: Path | None = None
     codex_timeout_seconds: float | None = Field(default=None, gt=0)
+    codex_inference_url: str | None = None
+    codex_inference_token: SecretStr | None = Field(default=None, min_length=1)
     bearer_token: SecretStr | None = Field(default=None, min_length=32, max_length=256)
+
+    @model_validator(mode="after")
+    def paired_remote_settings(self):
+        if bool(self.codex_inference_url) != bool(self.codex_inference_token):
+            raise ValueError("remote Codex inference requires both URL and bearer token")
+        return self
 
     @classmethod
     def from_environment(cls) -> "Tau2CustomerSettings":
@@ -45,6 +55,8 @@ class Tau2CustomerSettings(BaseModel):
                 float(os.environ["TAU2_CODEX_TIMEOUT_SECONDS"])
                 if os.getenv("TAU2_CODEX_TIMEOUT_SECONDS") else None
             ),
+            codex_inference_url=os.getenv("TAU2_CODEX_INFERENCE_URL"),
+            codex_inference_token=os.getenv("TAU2_CODEX_INFERENCE_BEARER_TOKEN"),
             bearer_token=os.getenv("TAU2_ACTOR_BEARER_TOKEN"),
         )
 
@@ -103,15 +115,23 @@ def create_app(
     native_provider = Tau2ExternalProvider(NativeProviderStore(database_path))
     app = FastAPI(title="τ2 customer actor worker", version="1")
     app.state.settings = settings
-    if codex_model is None and settings.model and settings.codex_executable and settings.codex_home and settings.codex_timeout_seconds:
-        from servers.simulation.codex_model import CodexCLIModel, CodexCLISettings
-
-        codex_model = CodexCLIModel(CodexCLISettings(
-            executable=settings.codex_executable,
+    remote_configured = bool(settings.codex_inference_url and settings.codex_inference_token)
+    cli_configured = bool(settings.codex_executable and settings.codex_home)
+    model_settings = None
+    if settings.model and remote_configured:
+        model_settings = CodexRemoteSettings(
+            url=settings.codex_inference_url, bearer_token=settings.codex_inference_token,
             model=settings.model,
-            codex_home=settings.codex_home,
-            timeout_seconds=settings.codex_timeout_seconds,
-        ))
+        )
+    elif settings.model and cli_configured:
+        from servers.simulation.codex_model import CodexCLISettings
+
+        model_settings = CodexCLISettings(
+            executable=settings.codex_executable, model=settings.model,
+            codex_home=settings.codex_home, timeout_seconds=settings.codex_timeout_seconds,
+        )
+    if codex_model is None and model_settings is not None:
+        codex_model = create_codex_transport(model_settings)
     if codex_model is not None:
         from servers.simulation.tau2_codex_provider import register_codex_provider
 
@@ -122,9 +142,9 @@ def create_app(
     @app.get("/health")
     def health():
         configured = bool(
-            settings.model and settings.codex_executable and settings.codex_home
-            and settings.codex_timeout_seconds and settings.bearer_token
-            and settings.codex_home.is_dir()
+            settings.model and settings.bearer_token and (
+                remote_configured or bool(cli_configured and settings.codex_home.is_dir())
+            )
         )
         return {
             "status": "ok",
@@ -308,9 +328,8 @@ def create_app(
         require_worker_auth(authorization)
         if request.actor_type != "customer":
             raise HTTPException(status_code=422, detail="actor_type is not supported by this worker")
-        if not (settings.model and settings.codex_executable and settings.codex_home
-                and settings.codex_timeout_seconds and settings.codex_home.is_dir()):
-            raise HTTPException(status_code=503, detail="Codex CLI model environment is not configured")
+        if not app.state.codex_provider_registered:
+            raise HTTPException(status_code=503, detail="Codex inference transport is not configured")
 
         from tau2.data_model.tasks import Task
 

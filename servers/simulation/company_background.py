@@ -275,8 +275,10 @@ class CompanyBackgroundService:
         while cause is not None:
             causes.append(type(cause).__name__)
             cause = cause.__cause__ or cause.__context__
-        LOG.error("%s exception_type=%s causes=%s stack=%s",
-                  message, type(error).__name__, causes, frames)
+        LOG.error("%s exception_type=%s causes=%s sqlite_errorcode=%s sqlite_errorname=%s stack=%s",
+                  message, type(error).__name__, causes,
+                  getattr(error, "sqlite_errorcode", None),
+                  getattr(error, "sqlite_errorname", None), frames)
 
     def control(self, enabled: bool, key: str, *, provider_id: str = "coffeebench") -> dict[str, Any]:
         with self._lock:
@@ -478,8 +480,10 @@ class CompanyBackgroundService:
                     self.errors["company_background"] = {"code": type(error).__name__}
                     frames = [(frame.filename, frame.lineno, frame.name)
                               for frame in traceback.extract_tb(error.__traceback__)]
-                    LOG.error("company background worker failed exception_type=%s stack=%s",
-                              type(error).__name__, frames)
+                    LOG.error("company background worker failed exception_type=%s sqlite_errorcode=%s "
+                              "sqlite_errorname=%s stack=%s",
+                              type(error).__name__, getattr(error, "sqlite_errorcode", None),
+                              getattr(error, "sqlite_errorname", None), frames)
                     self._retry_at = now + timedelta(seconds=30)
             elif finance_retry_due:
                 self._retry_finance(now)
@@ -507,7 +511,7 @@ class CompanyBackgroundService:
         self.stopped.set()
         self.changed.set()
         if self.thread is not None:
-            self.thread.join(timeout=2)
+            self.thread.join()
 
     def status(self) -> dict[str, Any]:
         with self._lock:

@@ -14,8 +14,9 @@ import traceback
 from datetime import datetime, timezone
 from typing import Any
 
-from servers.company.browser_chat import PlaywrightEmployeeBrowserSessionProvider
-from servers.company.scenarios import RealChatTransport
+from servers.company.cua_chat import CuaChatTransport, ChatMessageNotConfirmed
+from servers.simulation.codex_model import CodexNoDesktopActionsError
+from servers.simulation.clock_rate import kernel_virtual_time_rate
 from servers.simulation.runtime import private_json
 
 LOG = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ class ExperimentChatDispatch:
         self.rocketchat_base_url = rocketchat_base_url.rstrip("/") + "/"
         self.state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.lock_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with closing(sqlite3.connect(self.database)) as connection:
+        with closing(sqlite3.connect(self.database, timeout=5 * kernel_virtual_time_rate())) as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS attempts (
@@ -150,11 +151,12 @@ class ExperimentChatDispatch:
                     response = {"status": "sent", "employee_id": employee_id, **receipt}
                     self._finish(key_hash, response)
                     return response
-                self._set_status(key_hash, "uncertain", "browser_send_outcome_uncertain")
+                failure_code = row["error_code"] or "browser_send_outcome_uncertain"
+                self._set_status(key_hash, "uncertain", failure_code)
                 return {
                     "status": "uncertain", "employee_id": employee_id, "room_id": room_id,
                     "message_id": row["native_message_id"],
-                    "error_code": "browser_send_outcome_uncertain",
+                    "error_code": failure_code,
                 }
 
             self._set_status(key_hash, "prepared", None)
@@ -184,11 +186,16 @@ class ExperimentChatDispatch:
                               for frame in traceback.extract_tb(error.__traceback__)]
                     LOG.error("Employee chat submission outcome uncertain exception_type=%s stack=%s",
                               error_code, frames)
-                    self._set_status(key_hash, "uncertain", "browser_send_outcome_uncertain")
+                    failure_code = (
+                        "agent_no_cua_actions" if isinstance(error, CodexNoDesktopActionsError)
+                        else "agent_chat_message_not_confirmed" if isinstance(error, ChatMessageNotConfirmed)
+                        else "browser_send_outcome_uncertain"
+                    )
+                    self._set_status(key_hash, "uncertain", failure_code)
                     return {
                         "status": "uncertain", "employee_id": employee_id, "room_id": room_id,
                         "message_id": current["native_message_id"],
-                        "error_code": "browser_send_outcome_uncertain",
+                        "error_code": failure_code,
                     }
                 self._set_status(key_hash, "retryable", error_code)
                 raise ExperimentChatError("browser_send_failed_before_submit") from error
@@ -217,9 +224,8 @@ class ExperimentChatDispatch:
             raise ExperimentChatError("employee_chat_credentials_unavailable")
         return {"username": username, "password": password}
 
-    def _transport(self) -> RealChatTransport:
-        provider = PlaywrightEmployeeBrowserSessionProvider(lambda: self.desktop_manager)
-        return RealChatTransport(browser_session_provider=provider)
+    def _transport(self) -> CuaChatTransport:
+        return CuaChatTransport(self.desktop_manager)
 
     @contextmanager
     def _attempt_lock(self, key_hash: str):
@@ -233,7 +239,7 @@ class ExperimentChatDispatch:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def _connect(self):
-        connection = sqlite3.connect(self.database, timeout=15)
+        connection = sqlite3.connect(self.database, timeout=15 * kernel_virtual_time_rate())
         connection.row_factory = sqlite3.Row
         return connection
 

@@ -4,9 +4,7 @@ Target audience: benchmark developers. You want to create/modify tasks, and/or m
 
 ## Contribute to server data
 
-All services (GitLab, ownCloud, Rocket.Chat, Plane) are pre-baked with data. If you do not need to modify the data, you can skip this section. We generally don't accept contributions to change of data since most of them is in binary format. You could, however, modify the data and host your own server with the modified data for your own use.
-
-**GitLab:** Please refer to [this](../servers/gitlab/README.md) for more details.
+ownCloud, Rocket.Chat, and Plane are pre-baked with data. If you do not need to modify the data, you can skip this section. We generally don't accept contributions to change of data since most of them is in binary format. You could, however, modify the data and host your own server with the modified data for your own use.
 
 **OwnCloud** Please create a GitHub issue if you want to modify the data on your self-hosted server.
 

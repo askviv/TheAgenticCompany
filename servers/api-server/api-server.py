@@ -2,8 +2,6 @@ from flask import Flask, jsonify
 from utils import *
 
 app = Flask(__name__)
-GITLAB_HEALTH_URL = "http://localhost:8929/api/v4/projects"
-GITLAB_HEALTH_HEADERS = {"PRIVATE-TOKEN": "root-token"}
 
 @app.route('/api/reset-owncloud', methods=['POST'])
 def reset_owncloud():
@@ -23,23 +21,9 @@ def reset_plane():
     async_execute_command('make reset-plane')
     return jsonify({"message": "Plane reset accepted"}), 202
 
-@app.route('/api/reset-gitlab', methods=['POST'])
-def reset_gitlab():
-    # gitlab reset is essentially a restart
-    # since it takes a while to stop, we need to make sure this is synchronous
-    # devnote: health check + polling on client side is still needed because
-    # gitlab service takes a while to fully function after the container starts
-    execute_command('make reset-gitlab')
-    return jsonify({"message": "GitLab reset command completed"}), 200
-
 @app.route('/api/healthcheck/owncloud', methods=['GET'])
 def healthcheck_owncloud():
     code, msg = check_url("http://localhost:8092")
-    return jsonify({"message":msg}), code
-
-@app.route('/api/healthcheck/gitlab', methods=['GET'])
-def healthcheck_gitlab():
-    code, msg = check_url(GITLAB_HEALTH_URL, headers=GITLAB_HEALTH_HEADERS)
     return jsonify({"message":msg}), code
 
 @app.route('/api/healthcheck/rocketchat', methods=['GET'])

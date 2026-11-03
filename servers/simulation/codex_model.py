@@ -1,12 +1,14 @@
 """Codex CLI model transport for upstream actor runtimes, not an actor policy.
 
-The upstream runtime owns its prompts, history and tools. Codex returns proposed
-tool calls as structured data; it must never execute those tools itself.
+Upstream benchmark runtimes receive proposed tool calls as structured data.
+Employee desktop actions use Codex's native MCP integration directly.
 """
 
 from __future__ import annotations
 
 import json
+import logging
+import base64
 import os
 from pathlib import Path
 import subprocess
@@ -16,8 +18,15 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
+LOG = logging.getLogger("uvicorn.error.employee_cua")
+
+
 class CodexModelError(RuntimeError):
     """A failed inference transport; never replace this with a canned response."""
+
+
+class CodexNoDesktopActionsError(CodexModelError):
+    """The native desktop turn ended without invoking CUA."""
 
 
 class CodexConfigurationError(CodexModelError):
@@ -64,7 +73,7 @@ class CodexCLISettings(BaseModel):
     model: str = Field(min_length=1)
     codex_home: Path
     reasoning_effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
-    timeout_seconds: float = Field(default=180, gt=0)
+    timeout_seconds: float | None = Field(default=None, gt=0)
 
 
 class ProposedToolCall(BaseModel):
@@ -107,38 +116,134 @@ class CodexCLIModel:
 
     def complete(
         self, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None,
-        *, on_submission_started=None,
+        *, on_submission_started=None, mcp_servers: dict[str, dict[str, Any]] | None = None,
     ) -> dict:
         """Make one CLI invocation; failures/uncertain outcomes are not retried."""
-        settings = self.settings
         tools = tools or []
-        prompt = (
-            "Act only as the inference provider for the supplied conversation. "
-            "Follow its system/developer instructions and reply to its latest turn. "
-            "The supplied tools belong to the calling runtime: return tool calls as data, "
-            "never execute commands, inspect files, or contact services. "
-            "Return content and tool_calls matching the output schema.\n"
-            + json.dumps({"messages": messages, "tools": tools}, ensure_ascii=False)
+        images = []
+        model_messages = []
+        for message in messages:
+            content = message.get("content")
+            if not isinstance(content, list):
+                model_messages.append(message)
+                continue
+            parts = []
+            for part in content:
+                if isinstance(part, dict) and part.get("type") in {"image_url", "input_image"}:
+                    address = part.get("image_url")
+                    if isinstance(address, dict):
+                        address = address.get("url")
+                    header, encoded = address.split(",", 1)
+                    extension = {"data:image/png;base64": ".png", "data:image/jpeg;base64": ".jpg"}[header]
+                    images.append((base64.b64decode(encoded, validate=True), "screenshot" + extension))
+                    parts.append({"type": "text", "text": f"[Attached screenshot {len(images)}]"})
+                else:
+                    parts.append(part)
+            model_messages.append({**message, "content": parts})
+        if mcp_servers:
+            prompt = (
+                "Carry out the supplied conversation using the connected native CUA MCP tools. "
+                "Codex owns tool execution; do not return tool calls as text or JSON proposals. "
+                "Use native foreground mouse and keyboard actions in the employee's visible Chrome. "
+                "Use foreground input and keep Chrome focused and full screen. "
+                "Use the native tool descriptions to decide how to observe and interact. "
+                "Never reveal account credentials in your final response. "
+                "Only report completion after observing the requested UI outcome.\n"
+                + json.dumps({"messages": model_messages}, ensure_ascii=False)
+            )
+        else:
+            prompt = (
+                "Act only as the inference provider for the supplied conversation. "
+                "Follow its system/developer instructions and reply to its latest turn. "
+                "The supplied tools belong to the calling runtime: return tool calls as data, "
+                "never execute commands, inspect files, or contact services. "
+                "Return content and tool_calls matching the output schema.\n"
+                + json.dumps({"messages": model_messages, "tools": tools}, ensure_ascii=False)
+            )
+        output, usage = self._run_structured_cli(
+            prompt, None if mcp_servers else ModelReply.model_json_schema(), images=images,
+            on_submission_started=on_submission_started,
+            reasoning_effort=self.settings.reasoning_effort,
+            reject_native_tools=not bool(mcp_servers), validate_usage=True,
+            mcp_servers=mcp_servers,
         )
+        try:
+            reply = ModelReply(content=output, tool_calls=[]) if mcp_servers else ModelReply.model_validate_json(output)
+            names = {tool["function"]["name"] for tool in tools}
+            if any(call.name not in names for call in reply.tool_calls):
+                raise ValueError("model proposed an unregistered runtime tool")
+            if not reply.tool_calls and not reply.content:
+                raise ValueError("model returned neither text nor runtime tool calls")
+            return {**reply.model_dump(), "usage": usage, "model": self.settings.model,
+                    "reasoning_effort": self.settings.reasoning_effort}
+        except (ValueError, TypeError, AttributeError) as error:
+            raise CodexModelError("Codex CLI did not return a valid structured runtime response") from error
+
+    def complete_structured_prompt(
+        self, prompt: str, output_schema: dict[str, Any], *,
+        image: bytes | None = None, image_filename: str | None = None,
+    ) -> dict[str, Any]:
+        """Run a schema-constrained host-side judge prompt, optionally with an image."""
+        images = [] if image is None else [(image, image_filename or "evidence")]
+        output, _ = self._run_structured_cli(
+            prompt, output_schema, images=images,
+            reasoning_effort=None,
+            reject_native_tools=False, validate_usage=False,
+        )
+        try:
+            return json.loads(output)
+        except (ValueError, TypeError) as error:
+            raise CodexModelError("Codex CLI did not return a valid structured judge response") from error
+
+    def _run_structured_cli(
+        self, prompt: str, output_schema: dict[str, Any] | None, *,
+        images: list[tuple[bytes, str]] | None = None,
+        on_submission_started=None, reasoning_effort: str | None,
+        reject_native_tools: bool, validate_usage: bool,
+        mcp_servers: dict[str, dict[str, Any]] | None = None,
+    ) -> tuple[str, dict[str, int] | None]:
+        """Shared CLI JSON-schema execution and turn confirmation boundary."""
+        settings = self.settings
         with tempfile.TemporaryDirectory(prefix="tac-model-") as directory:
             root = Path(directory)
             schema = root / "response-schema.json"
             output = root / "response.json"
-            schema.write_text(json.dumps(ModelReply.model_json_schema()), encoding="utf-8")
-            schema.chmod(0o600)
+            if output_schema is not None:
+                schema.write_text(json.dumps(output_schema), encoding="utf-8")
+                schema.chmod(0o600)
             command = [settings.executable, "--ask-for-approval", "never", "exec",
                 "--ignore-user-config", "--ignore-rules", "--strict-config",
                 "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral",
                 "--model", settings.model, "--cd", str(root), "--json",
-                "--output-schema", str(schema), "--output-last-message", str(output)]
+                "--output-last-message", str(output)]
+            if output_schema is not None:
+                command.extend(["--output-schema", str(schema)])
             for feature in DISABLED_FEATURES:
+                # Native Codex tool dispatch needs its standard execution host.
+                # Benchmark inference still executes no native tools.
+                if mcp_servers and feature in {"code_mode", "code_mode_host"}:
+                    continue
                 command.extend(["--disable", feature])
+            for server_name, server in (mcp_servers or {}).items():
+                for key, value in server.items():
+                    command.extend(["--config", f"mcp_servers.{server_name}.{key}={json.dumps(value)}"])
             for override in (
                 'web_search="disabled"', "project_doc_max_bytes=0",
                 'shell_environment_policy.inherit="none"',
-                f'model_reasoning_effort="{settings.reasoning_effort}"',
             ):
                 command.extend(["--config", override])
+            # Existing judges leave the CLI's reasoning default unchanged;
+            # actor workers retain their explicitly configured effort.
+            if reasoning_effort is not None:
+                command.extend(["--config", f'model_reasoning_effort="{reasoning_effort}"'])
+            for image_index, (image, filename) in enumerate(images or []):
+                suffix = Path(filename).suffix
+                if "/" in suffix or "\\" in suffix:
+                    raise ValueError("image filename suffix is invalid")
+                image_path = root / (f"evidence-{image_index}" + suffix)
+                image_path.write_bytes(image)
+                image_path.chmod(0o600)
+                command.extend(["--image", str(image_path)])
             command.append("-")
             environment = {
                 "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
@@ -146,9 +251,8 @@ class CodexCLIModel:
                 "NO_COLOR": "1", "LANG": "C.UTF-8",
             }
             try:
-                # The write-ahead caller flips its model-turn phase only after
-                # all framework-native messages/tools are serialized and just
-                # before the external process can begin.
+                # The callback follows complete request serialization and runs
+                # immediately before the single external inference request.
                 if on_submission_started is not None:
                     on_submission_started()
                 completed = subprocess.run(command, input=prompt, text=True,
@@ -169,26 +273,30 @@ class CodexCLIModel:
                 events = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
                 if any(event.get("type") in {"turn.failed", "error"} for event in events):
                     raise ValueError("Codex CLI reported an unsuccessful turn")
-                if any(event.get("item", {}).get("type") in {
+                if mcp_servers:
+                    calls = [event["item"] for event in events
+                             if event.get("type") == "item.completed"
+                             and event.get("item", {}).get("type") == "mcp_tool_call"]
+                    LOG.info("Employee native CUA turn completed tool_calls=%d tool_statuses=%s item_types=%s",
+                             len(calls), [(item.get("server"), item.get("tool"), item.get("status"))
+                                          for item in calls],
+                             sorted({event.get("item", {}).get("type", "unknown") for event in events
+                                     if event.get("type") == "item.completed"}))
+                if mcp_servers and not calls:
+                    raise CodexNoDesktopActionsError("Employee agent ended without using CUA")
+                if reject_native_tools and any(event.get("item", {}).get("type") in {
                     "command_execution", "file_change", "mcp_tool_call", "web_search",
                 } for event in events):
                     raise ValueError("Codex CLI attempted a native tool instead of returning runtime data")
-                reply = ModelReply.model_validate_json(output.read_text(encoding="utf-8"))
-                names = {tool["function"]["name"] for tool in tools}
-                if any(call.name not in names for call in reply.tool_calls):
-                    raise ValueError("model proposed an unregistered runtime tool")
-                if not reply.tool_calls and not reply.content:
-                    raise ValueError("model returned neither text nor runtime tool calls")
                 terminal = next((event for event in reversed(events)
                                  if event.get("type") == "turn.completed"), None)
                 if terminal is None:
                     raise ValueError("Codex CLI did not confirm turn completion")
-                usage = terminal.get("usage")
+                usage = terminal.get("usage") if validate_usage else None
                 if usage is not None:
                     usage = {key: usage[key] for key in ("input_tokens", "output_tokens")}
                     if any(type(value) is not int or value < 0 for value in usage.values()):
                         raise ValueError("Codex CLI returned invalid token counts")
-                return {**reply.model_dump(), "usage": usage, "model": settings.model,
-                        "reasoning_effort": settings.reasoning_effort}
+                return output.read_text(encoding="utf-8"), usage
             except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
-                raise CodexModelError("Codex CLI did not return a valid structured runtime response") from error
+                raise CodexModelError("Codex CLI did not return a valid structured response") from error

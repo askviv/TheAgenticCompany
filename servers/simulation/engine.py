@@ -7,18 +7,15 @@ visible case, native mailbox messages, and permitted ERP reads to callers.
 from __future__ import annotations
 
 from copy import deepcopy
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from email.utils import parseaddr
 from hashlib import sha256
 import json
-from functools import wraps
-import fcntl
-import inspect
-import os
+import logging
 import re
-from threading import RLock, local
+import traceback
+from threading import local
 from typing import Any
 from uuid import UUID, uuid5, NAMESPACE_URL
 
@@ -45,8 +42,7 @@ from servers.simulation.models import (
 )
 from servers.simulation.store import SQLiteStore, StoreConflict, StoreNotFound
 
-COMPANY_CLOCK_RATE = 1
-
+_LOGGER = logging.getLogger(__name__)
 
 class EngineConflict(StoreConflict):
     """A requested workflow transition conflicts with simulation state."""
@@ -148,29 +144,6 @@ _E1_INITIAL_CUSTOMER_MESSAGE = (
 )
 
 
-def _serialize_run(method):
-    """Serialize operations by run across threads and coordinator processes."""
-    @wraps(method)
-    def wrapped(self, *args, **kwargs):
-        bound = inspect.signature(method).bind(self, *args, **kwargs)
-        bound.apply_defaults()
-        if method.__name__ == "start":
-            model, key, principal, company_id = (bound.arguments[name] for name in
-                ("model", "key", "principal_actor_id", "shared_company_id"))
-            scope = f"tac-company:{company_id}:{principal}:{key.strip()}" if company_id else f"tac-simulation:{principal}:{key.strip()}"
-            run_id = uuid5(NAMESPACE_URL, scope)
-            company_scoped = bool(company_id)
-        else:
-            first = next(value for name, value in bound.arguments.items() if name != "self")
-            run_id = getattr(first, "run_id", first)
-            company_scoped = self.store.is_company_experiment(run_id)
-        if company_scoped:
-            with self._operation_guard("company-clock"):
-                with self._operation_guard(run_id):
-                    return method(self, *args, **kwargs)
-        with self._operation_guard(run_id):
-            return method(self, *args, **kwargs)
-    return wrapped
 
 
 class SimulationEngine:
@@ -188,49 +161,9 @@ class SimulationEngine:
         self.support_actor_id = "requester"
         self.support_address = "support@example.com"
         self._actor_config = {str(a["actor_id"]): a for a in self.actors}
-        self._locks_guard = RLock()
-        self._run_locks: dict[str, RLock] = {}
-        self._operation_depth = local()
         self._evaluation_local = local()
-        self._lock_directory = self.store.db_path.parent / "locks"
-        self._lock_directory.mkdir(parents=True, exist_ok=True, mode=0o700)
 
-    def _run_lock(self, run_id: UUID | str) -> RLock:
-        rid = str(run_id)
-        with self._locks_guard:
-            return self._run_locks.setdefault(rid, RLock())
 
-    @contextmanager
-    def _operation_guard(self, run_id: UUID | str):
-        """Hold a run-scoped OS lock; nested calls in this thread reuse it."""
-        rid = str(run_id)
-        depths = getattr(self._operation_depth, "by_run", None)
-        if depths is None:
-            depths = self._operation_depth.by_run = {}
-        with self._run_lock(rid):
-            if depths.get(rid, 0):
-                depths[rid] += 1
-                try:
-                    yield
-                finally:
-                    depths[rid] -= 1
-                return
-
-            lock_path = self._lock_directory / f"{rid}.lock"
-            descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-            try:
-                try:
-                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError as exc:
-                    raise EngineConflict("another operation currently owns this simulation run") from exc
-                depths[rid] = 1
-                try:
-                    yield
-                finally:
-                    depths.pop(rid, None)
-                    fcntl.flock(descriptor, fcntl.LOCK_UN)
-            finally:
-                os.close(descriptor)
 
     @staticmethod
     def _scope(run_id: UUID | str, generation: int, actor_id: str, operation: str) -> str:
@@ -594,7 +527,12 @@ class SimulationEngine:
         return str(UUID(hex=match.group(1)))
 
     def company_state(self) -> dict[str, Any] | None:
-        return self.store.get_company("company")
+        company = self.store.get_company("company")
+        if company is not None and getattr(self, "company_clock_mode", None) == "kernel":
+            # The kernel owns current time. The saved value is a processing
+            # checkpoint and must not freeze the display while work is pending.
+            company["simulated_time"] = datetime.now(timezone.utc).isoformat()
+        return company
 
     def start_company(self, binding: dict[str, Any], key: str) -> dict[str, Any]:
         key = self._key(key)
@@ -608,7 +546,8 @@ class SimulationEngine:
             raise EngineConflict("company ERP binding is missing native baseline documents")
         if not binding.get("credentials_ref"):
             raise EngineConflict("company ERP credentials reference is unavailable")
-        now = datetime.now(timezone.utc)
+        clock_provider = getattr(self, "company_time_provider", None)
+        now = self._time(clock_provider() if callable(clock_provider) else datetime.now(timezone.utc))
         def operation(connection):
             existing = self.store.get_company("company", connection=connection)
             if existing:
@@ -622,33 +561,23 @@ class SimulationEngine:
             wake()
         return self.store.get_company("company") or result
 
-    def configure_company_clock_rate(self, rate: int = COMPANY_CLOCK_RATE,
-                                     *, now: datetime | None = None) -> dict[str, Any] | None:
-        """Apply a clock-rate transition at the current wall instant."""
-        wall_now = self._time(now or datetime.now(timezone.utc))
-        with self._operation_guard("company-time"):
-            company = self.store.get_company("company")
-            if company is None:
-                return None
-            return self.store.set_company_clock_rate("company", rate, wall_now)
-
     def pause_company(self, paused: bool, key: str, *, now: datetime | None = None) -> dict[str, Any]:
         key = self._key(key)
-        wall_now = self._time(now or datetime.now(timezone.utc))
+        clock_provider = getattr(self, "company_time_provider", None)
+        wall_now = self._time(now or (clock_provider() if callable(clock_provider) else datetime.now(timezone.utc)))
         if paused:
             # Reserve elapsed time and dispatch outside the short clock-state
             # lock. A slow mailbox/provider call must not hold the clock.
             self.tick_company_clock(wall_now)
-        with self._operation_guard("company-time"):
-            request = {"paused": bool(paused)}
-            def operation(connection):
-                company = self.store.get_company("company", connection=connection)
-                if company is None:
-                    raise EngineConflict("company has not been started")
-                return self.store.update_company("company", status="paused" if paused else "running",
-                                                 paused=paused, wall_anchor=wall_now,
-                                                 connection=connection)
-            result = self.store.execute_idempotent("company.pause", key, request, operation)
+        request = {"paused": bool(paused)}
+        def operation(connection):
+            company = self.store.get_company("company", connection=connection)
+            if company is None:
+                raise EngineConflict("company has not been started")
+            return self.store.update_company("company", status="paused" if paused else "running",
+                                             paused=paused, wall_anchor=wall_now,
+                                             connection=connection)
+        result = self.store.execute_idempotent("company.pause", key, request, operation)
         wake = getattr(self, "company_clock_wake", None)
         if wake:
             wake()
@@ -657,65 +586,74 @@ class SimulationEngine:
     def tick_company_clock(self, now: datetime | None = None) -> dict[str, Any] | None:
         """Advance every company experiment to the common wall-clock instant.
 
-        Time reservation is durable and independent of event dispatch. Pending
-        events are the durable dispatch queue; a separate cross-process lock
-        serializes their processing in scheduled order. If processing fails,
-        the advanced clock remains committed and the pending event is retried
-        on the next tick or after restart.
+        Time reservation uses one short database transaction. Event dispatch
+        and external I/O do not hold application-wide connection locks.
         """
-        now = self._time(now or datetime.now(timezone.utc))
-        with self._operation_guard("company-time"):
-            company = self.store.get_company("company")
-            if company is None or company["paused"]:
+        clock_provider = getattr(self, "company_time_provider", None)
+        with self.store.transaction() as connection:
+            if getattr(self, "company_clock_mode", None) == "kernel":
+                now = None  # Sample the kernel after acquiring the clock-state lock.
+            now = self._time(now or (clock_provider() if callable(clock_provider) else datetime.now(timezone.utc)))
+            company = self.store.get_company("company", connection=connection)
+            if company is None:
                 return company
             before = self._time(company["simulated_time"])
-            anchor = self._time(company["wall_anchor"])
-            effective_now = max(now, anchor)
-            target = before + (effective_now - anchor) * company["clock_rate"]
+            if getattr(self, "company_clock_mode", None) == "kernel":
+                if now < before:
+                    raise EngineConflict(
+                        "guest kernel time precedes persisted company time; seed the guest clock at or after company time"
+                    )
+                # The guest kernel already advances the absolute UTC epoch at
+                # the selected rate. Applying the prior wall-anchor delta would
+                # retain an offset from the previous company clock.
+                effective_now = now
+                target = now
+            else:
+                anchor = self._time(company["wall_anchor"])
+                effective_now = max(now, anchor)
+                target = before + (effective_now - anchor)
             # Commit first so another tick can advance the shared clock even
             # while the ordered dispatcher waits on external I/O.
-            reserved = self.store.update_company("company", simulated_time=target, wall_anchor=effective_now)
+            reserved = self.store.update_company("company", simulated_time=target, wall_anchor=effective_now, connection=connection)
 
         return reserved
 
     def dispatch_company_events(self) -> None:
         """Process the durable company event queue in global scheduled order.
 
-        This runs separately from the ticker. The OS lock serializes dispatch
-        across threads and coordinator processes, while the ticker only takes
-        the independent short-lived company-time lock.
+        This runs separately from the ticker. Durable event and outbox
+        transactions provide idempotency without locking scans or external I/O.
         """
-        with self._operation_guard("company-dispatch"), self._operation_guard("company-clock"):
-            company = self.store.get_company("company")
-            if company is None:
-                return
-            target = self._time(company["simulated_time"])
+        company = self.store.get_company("company")
+        if company is None:
+            return
+        target = self._time(company["simulated_time"])
+        while True:
             experiments = [item for item in self.store.company_experiments("company")
                            if item["status"] == "running"]
             runs = {item["experiment_id"]: self.store.get_run(item["experiment_id"]) for item in experiments}
-            while True:
-                for run in runs.values():
-                    self._schedule_policy_responses(run)
-                due = []
+            for run in runs.values():
+                self._schedule_policy_responses(run)
+            due = []
+            for experiment_id, run in runs.items():
+                for event in self.store.list_events(experiment_id, run["generation"], status="pending"):
+                    due_time = max(self._time(event["simulated_time"]), self._time(run["simulated_time"]))
+                    if due_time <= target:
+                        due.append((due_time, experiment_id, event["sequence"], event["event_id"]))
+            if not due:
                 for experiment_id, run in runs.items():
-                    for event in self.store.list_events(experiment_id, run["generation"], status="pending"):
-                        due_time = max(self._time(event["simulated_time"]), self._time(run["simulated_time"]))
-                        if due_time <= target:
-                            due.append((due_time, experiment_id, event["sequence"], event["event_id"]))
-                if not due:
-                    for experiment_id, run in runs.items():
-                        if self._time(run["simulated_time"]) < target:
-                            self.store.update_run(experiment_id, run["generation"], simulated_time=target)
-                    break
-                due_time, experiment_id, _sequence, event_id = min(due)
-                for other_id, run in runs.items():
-                    if other_id != experiment_id and self._time(run["simulated_time"]) < due_time:
-                        self.store.update_run(other_id, run["generation"], simulated_time=due_time)
-                        runs[other_id] = self.store.get_run(other_id)
-                event_key = f"company-clock:{experiment_id}:{event_id}"
-                self.advance(AdvanceClock(run_id=UUID(experiment_id), until=due_time), event_key,
-                             company_tick=True, company_event_id=event_id)
-                runs[experiment_id] = self.store.get_run(experiment_id)
+                    if self._time(run["simulated_time"]) < target:
+                        self.store.update_run(experiment_id, run["generation"], simulated_time=target)
+                break
+            due_time, experiment_id, _sequence, event_id = min(due)
+            for other_id, run in runs.items():
+                if other_id != experiment_id and self._time(run["simulated_time"]) < due_time:
+                    self.store.update_run(other_id, run["generation"], simulated_time=due_time)
+                    runs[other_id] = self.store.get_run(other_id)
+            event_key = f"company-clock:{experiment_id}:{event_id}"
+            self.advance(AdvanceClock(run_id=UUID(experiment_id), until=due_time), event_key,
+                         company_tick=True, company_event_id=event_id)
+            runs[experiment_id] = self.store.get_run(experiment_id)
 
     def start_company_experiment(self, model: StartScenario, key: str, principal_actor_id: str) -> dict[str, Any]:
         self.tick_company_clock()
@@ -724,7 +662,6 @@ class SimulationEngine:
             raise EngineConflict("company has not been started")
         return self.start(model, key, principal_actor_id, shared_company_id="company")
 
-    @_serialize_run
     def start(self, model: StartScenario, key: str, principal_actor_id: str,
               shared_company_id: str | None = None) -> dict[str, Any]:
         key = self._key(key)
@@ -1105,7 +1042,6 @@ class SimulationEngine:
                            "related_entities": [case_id], "payload": payload, "visibility": [source]})
         return events
 
-    @_serialize_run
     def enqueue_event(self, model: CanonicalEvent, key: str) -> dict[str, Any]:
         key = self._key(key)
         run = self._run(model.run_id)
@@ -1119,12 +1055,10 @@ class SimulationEngine:
         return self.store.execute_idempotent(self._scope(model.run_id, run["generation"], "controller", "event"),
                                              key, model.model_dump(mode="json"), operation)
 
-    @_serialize_run
     def list_pending(self, run_id: UUID) -> list[dict[str, Any]]:
         run = self._run(run_id)
         return self.store.pending_events(run_id, run["generation"])
 
-    @_serialize_run
     def pause(self, model: PauseClock, key: str) -> dict[str, Any]:
         key = self._key(key); run = self._run(model.run_id)
         def operation(conn):
@@ -1133,7 +1067,6 @@ class SimulationEngine:
         return self.store.execute_idempotent(self._scope(model.run_id, run["generation"], "controller", "pause"),
                                              key, model.model_dump(mode="json"), operation)
 
-    @_serialize_run
     def advance(self, model: AdvanceClock, key: str, *, company_tick: bool = False,
                 company_event_id: str | None = None) -> dict[str, Any]:
         key = self._key(key); run = self._run(model.run_id)
@@ -1571,7 +1504,7 @@ class SimulationEngine:
         if related_document is None:
             return
         reference = related_document.model_dump(mode="json")
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             table = db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='company_record_mappings'"
             ).fetchone()
@@ -1598,7 +1531,6 @@ class SimulationEngine:
         ):
             raise ValueError("Related email document is not mapped to this CoffeeBench recipient")
 
-    @_serialize_run
     def send_message(self, model: SendMessage, key: str, sender_id: str) -> dict[str, Any]:
         key = self._key(key); run = self._run(model.run_id)
         sender = self._member(model.run_id, sender_id)
@@ -1614,7 +1546,8 @@ class SimulationEngine:
                 for item in self.store.list_outbox(
                     model.run_id, run["generation"], status="completed"
                 )
-                if item["private_payload"].get("message_id") == in_reply_to
+                if (item["private_payload"].get("message_id") == in_reply_to
+                    or item.get("native_message_id") == in_reply_to)
             ), None)
             if (
                 prior_message is None
@@ -1663,21 +1596,65 @@ class SimulationEngine:
         recipient = self._member(run["run_id"], payload["to_actor_id"])
         sender_ref = self._mail_actor(sender); recipient_ref = self._mail_actor(recipient)
         if item["submission_started"] or item["status"] == "uncertain":
-            receipt = self.mail.find_receipt(recipient_ref, payload["message_id"], payload["subject"], run["run_id"], run["generation"])
+            native_message_id = item.get("native_message_id")
+            if native_message_id is None:
+                native_message_id = self.mail.employee_sent_message_id(
+                    sender_ref, recipient_ref, payload["subject"], payload["body"],
+                    payload.get("in_reply_to"), item.get("submission_started_at"),
+                    sent_uidvalidity=item.get("sent_uidvalidity"),
+                    sent_uid_next=item.get("sent_uid_next"),
+                    business_time=payload.get("simulated_time"),
+                    delivery_address=payload.get("delivery_address"),
+                )
+                if native_message_id is not None:
+                    item = self.store.record_outbox_native_message_id(
+                        run["run_id"], run["generation"], item["outbox_id"], native_message_id,
+                    )
+            receipt = self.mail.find_receipt(
+                recipient_ref, native_message_id or payload["message_id"], payload["subject"],
+                run["run_id"], run["generation"], native_message=native_message_id is not None,
+            )
             if receipt is None:
                 raise MailDeliveryUncertain("message submission is uncertain; native receipt was not found")
         else:
             def started():
                 self.store.mark_outbox_submission_started(run["run_id"], run["generation"], item["outbox_id"])
+
+            def started_with_sent_snapshot(sent_uidvalidity: str, sent_uid_next: int):
+                self.store.mark_outbox_submission_started(
+                    run["run_id"], run["generation"], item["outbox_id"],
+                    sent_uidvalidity=sent_uidvalidity, sent_uid_next=sent_uid_next,
+                )
+
+            def native_id_captured(message_id: str) -> None:
+                self.store.record_outbox_native_message_id(
+                    run["run_id"], run["generation"], item["outbox_id"], message_id,
+                )
+
             try:
                 receipt = self.mail.send(sender_ref, recipient_ref, payload["subject"], payload["body"],
                     payload["message_id"], run["run_id"], run["generation"],
                     in_reply_to=payload.get("in_reply_to"), automated=payload.get("automated", False),
+                    business_time=payload.get("simulated_time"),
                     **({"delivery_address": payload["delivery_address"]}
                        if payload.get("delivery_address") else {}),
-                    on_submission_started=started)
+                    on_submission_started=started,
+                    on_submission_snapshot=started_with_sent_snapshot,
+                    on_native_message_id=native_id_captured)
             except Exception as exc:
                 current = self.store.get_outbox(run["run_id"], run["generation"], item["outbox_id"])
+                frames = [(frame.filename, frame.lineno, frame.name)
+                          for frame in traceback.extract_tb(exc.__traceback__)]
+                causes = []
+                cause = exc.__cause__ or exc.__context__
+                while cause is not None:
+                    causes.append(type(cause).__name__)
+                    cause = cause.__cause__ or cause.__context__
+                _LOGGER.error(
+                    "outbox delivery failed outbox_id=%s pre_send=%s exception_type=%s causes=%s stack=%s",
+                    item["outbox_id"], not current["submission_started"],
+                    type(exc).__name__, causes, frames,
+                )
                 try:
                     self.store.mark_outbox_failure(run["run_id"], run["generation"], item["outbox_id"],
                         error_type=type(exc).__name__[:100], pre_send=not current["submission_started"])
@@ -1689,7 +1666,6 @@ class SimulationEngine:
         completed = self.store.complete_outbox(run["run_id"], run["generation"], item["outbox_id"], receipt)
         return completed["outcome"]
 
-    @_serialize_run
     def pump(self, run_id: UUID | str, *, company_tick: bool = False,
              company_event_id: str | None = None) -> dict[str, Any]:
         run = self._run(run_id)
@@ -1742,6 +1718,11 @@ class SimulationEngine:
                 with self.store.transaction() as connection:
                     latest = self.store.get_run(run["run_id"], connection=connection)
                     self._assert_running(connection, run["run_id"], latest["generation"])
+                    if connection.execute(
+                        "SELECT 1 FROM events WHERE run_id=? AND generation=? AND event_id=? AND status='pending'",
+                        (run["run_id"], current["generation"], event_id),
+                    ).fetchone() is None:
+                        continue
                     self._queue_manager_response(run["run_id"], current, actor, event,
                                                  response, decision, connection)
                     self.store.complete_event(run["run_id"], current["generation"], event_id,
@@ -1764,6 +1745,11 @@ class SimulationEngine:
                 )
             with self.store.transaction() as connection:
                 current = self.store.get_run(run["run_id"], connection=connection)
+                if connection.execute(
+                    "SELECT 1 FROM events WHERE run_id=? AND generation=? AND event_id=? AND status='pending'",
+                    (run["run_id"], current["generation"], event_id),
+                ).fetchone() is None:
+                    continue
                 event = next(item for item in pending if item["event_id"] == event_id)
                 outcome = self._apply_event(UUID(run["run_id"]), current, event, connection)
                 self.store.complete_event(run["run_id"], current["generation"], event_id,
@@ -1803,7 +1789,7 @@ class SimulationEngine:
                 payload={"actor_id": actor["actor_id"], "approval_request_outbox_id": item["outbox_id"] if actor["actor_id"] == "manager" else None,
                          "response_to_outbox_id": item["outbox_id"],
                          "from_actor_id": run["agent_id"], "subject": payload.get("subject", "Approval request"),
-                         "message_id": payload.get("message_id"), "question": payload.get("body", ""),
+                         "message_id": item.get("native_message_id") or payload.get("message_id"), "question": payload.get("body", ""),
                          "visible_context": self.store.get_case(run["run_id"], run["generation"],
                              case_id or run["manifest"]["case_id"])["visible"]}, visibility=[actor["kind"]])
             self._enqueue_actor_event(event, run, actor)
@@ -2077,11 +2063,11 @@ class SimulationEngine:
         }, connection=connection)
 
     def _poll_actor_mail(self, run: dict[str, Any], actor: dict[str, Any]) -> list[dict[str, Any]]:
-        known_ids = {item["private_payload"].get("message_id") for item in self.store.list_outbox(run["run_id"], run["generation"])
+        known_ids = {item.get("native_message_id") or item["private_payload"].get("message_id") for item in self.store.list_outbox(run["run_id"], run["generation"])
                      if item["status"] == "completed" and (item["private_payload"].get("to_actor_id") == actor["actor_id"]
                          or actor["kind"] == "approver")}
         if run["scenario_id"] == "TAU_RETAIL":
-            known_ids.update(item["private_payload"].get("message_id")
+            known_ids.update(item.get("native_message_id") or item["private_payload"].get("message_id")
                              for item in self.store.list_outbox(run["run_id"], run["generation"], status="completed")
                              if item["private_payload"].get("from_actor_id") == actor["actor_id"])
         known_ids.discard(None)
@@ -2116,26 +2102,8 @@ class SimulationEngine:
                 }, connection=connection)
         return messages
 
-    @_serialize_run
     def inbox(self, run_id: UUID | str, actor_id: str) -> list[dict[str, Any]]:
         run = self._run(run_id); actor = self._member(run_id, actor_id)
-        if actor["kind"] == "agent":
-            known_ids = {item["private_payload"]["message_id"]
-                         for item in self.store.list_outbox(run_id, run["generation"], status="completed")
-                         if item["private_payload"].get("from_actor_id") == actor_id}
-            messages = self.mail.poll_viv(run_id=str(run_id), generation=run["generation"],
-                                          known_ids=known_ids)
-            with self.store.transaction() as connection:
-                self.store.append_audit(run_id, run["generation"], {
-                    "event": "agent_tool_call", "actor_id": actor_id,
-                    "operation": "inbox", "message_count": len(messages),
-                }, connection=connection)
-                for message in messages:
-                    self.store.append_audit(run_id, run["generation"],
-                        {"event": "agent_inbox_read", "actor_id": actor_id,
-                         "message_id": message.get("message_id"),
-                         "in_reply_to": message.get("in_reply_to")}, connection=connection)
-            return messages
         return self._poll_actor_mail(run, actor)
 
     def _ingest_message(self, run: dict[str, Any], recipient: dict[str, Any], message: dict[str, Any], connection: Any) -> None:
@@ -2149,7 +2117,8 @@ class SimulationEngine:
             return
         refs = set(str(message.get("references", "")).split()) | {message.get("in_reply_to")}
         outbox = [item for item in self.store.list_outbox(run["run_id"], run["generation"], status="completed")
-                  if item["private_payload"].get("message_id") in refs
+                  if (item["private_payload"].get("message_id") in refs
+                      or item.get("native_message_id") in refs)
                   and ((item["private_payload"].get("from_actor_id") == run["agent_id"]
                         and item["private_payload"].get("to_actor_id") == recipient["actor_id"])
                        or (item["private_payload"].get("from_actor_id") == recipient["actor_id"]
@@ -2292,7 +2261,6 @@ class SimulationEngine:
     def _mail_actor(actor: dict[str, Any]) -> dict[str, Any]:
         return {"actor_id": actor["actor_id"], "email": actor["email"]}
 
-    @_serialize_run
     def case(self, run_id: UUID | str, case_id: str) -> dict[str, Any]:
         run = self._run(run_id)
         visible = self.store.get_case(run_id, run["generation"], case_id)["visible"]
@@ -2301,7 +2269,6 @@ class SimulationEngine:
             as_of = self._time(as_of).isoformat()
         return {**visible, "as_of": as_of}
 
-    @_serialize_run
     def update_case(self, run_id: UUID, case_id: str, model: UpdateCase, key: str, actor_id: str) -> dict[str, Any]:
         key = self._key(key); run = self._run(run_id); self._check_agent_owner(run_id, actor_id)
         updates = model.model_dump(mode="json", exclude_none=True)
@@ -2346,7 +2313,6 @@ class SimulationEngine:
         return self.store.execute_idempotent(self._scope(run_id, run["generation"], actor_id, f"case:{case_id}"),
                                              key, request, update)
 
-    @_serialize_run
     def erp_read(self, run_id: UUID | str, operation: str, entity_id: str, actor_id: str) -> dict[str, Any]:
         run = self._run(run_id); self._check_agent_owner(run_id, actor_id)
         adapter = self._erp(run)
@@ -2370,7 +2336,6 @@ class SimulationEngine:
         self.store.append_audit(run_id, run["generation"], read_audit)
         return result
 
-    @_serialize_run
     def request_review(self, run_id: UUID, invoice_id: str, key: str, actor_id: str) -> dict[str, Any]:
         key = self._key(key); run = self._run(run_id); self._check_agent_owner(run_id, actor_id)
         scope = self._scope(run_id, run["generation"], actor_id, "review")
@@ -2399,11 +2364,9 @@ class SimulationEngine:
             return safe_result
         return self.store.execute_idempotent(scope + ":result", key, request, record)
 
-    @_serialize_run
     def approve(self, model: ApprovalDecision, key: str, actor_id: str) -> dict[str, Any]:
         raise EngineConflict("finance decisions are issued by the simulated manager after a policy review email")
 
-    @_serialize_run
     def erp_action(self, model: ERPAction, operation: str, key: str, actor_id: str) -> dict[str, Any]:
         """Consume an exact manager grant through the native ERP adapter."""
         key = self._key(key)
@@ -2704,7 +2667,6 @@ class SimulationEngine:
             and case.get("purchase_order_id") == _document_id(run["erp_binding"].get("documents", {}).get("purchase_order"))
             for row in self.store.list_events(run["run_id"], run["generation"]))
 
-    @_serialize_run
     def reset(self, run_id: UUID, key: str, actor_id: str) -> dict[str, Any]:
         key = self._key(key)
         key_digest = sha256(f"{actor_id}:{key}".encode("utf-8")).hexdigest()
@@ -2855,7 +2817,6 @@ class SimulationEngine:
                 return True
         return False
 
-    @_serialize_run
     def record_human_intervention(
         self, run_id: UUID | str, model: HumanIntervention, key: str, actor_id: str,
     ) -> dict[str, Any]:
@@ -2884,7 +2845,6 @@ class SimulationEngine:
         return self.store.execute_idempotent(
             self._scope(run_id, run["generation"], actor_id, "human-intervention"), key, request, persist)
 
-    @_serialize_run
     def record_model_usage(
         self, run_id: UUID | str, model: ModelUsageRecord, key: str, actor_id: str,
     ) -> dict[str, Any]:
@@ -2906,7 +2866,6 @@ class SimulationEngine:
             self._scope(run_id, run["generation"], actor_id, "model-usage"), key,
             {"model": model.model_dump(mode="json", exclude_none=True), "actor_id": actor_id}, persist)
 
-    @_serialize_run
     def trajectory(self, run_id: UUID | str) -> dict[str, Any]:
         """Return evaluator-only private trajectory records, without ERP bindings or credentials."""
         run = self.store.get_run(run_id)
@@ -2933,7 +2892,6 @@ class SimulationEngine:
             } for generation in range(run["generation"])],
         }
 
-    @_serialize_run
     def evaluate(self, run_id: UUID | str) -> dict[str, Any]:
         evaluation_store = getattr(self._evaluation_local, "store", None) or self.store
         run = evaluation_store.get_run(run_id)

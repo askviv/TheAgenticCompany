@@ -1,1 +1,0 @@
-Clone OpenHands repository from http://the-agent-company.com:8929/root/openhands/ to /workspace folder and run all unit tests

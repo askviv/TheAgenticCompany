@@ -1,0 +1,35 @@
+[Unit]
+Description=Private Codex CLI inference transport for guest actor workers
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=company
+Group=company
+UMask=0077
+WorkingDirectory=/data/theagentcompany/virtual-time-world/company-source
+EnvironmentFile=/home/company/.codex-inference.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONPATH=/data/theagentcompany/virtual-time-world/company-source
+ExecStart=/data/theagentcompany/virtual-time-world/host-venv/bin/uvicorn servers.simulation.codex_inference_server:app --host 127.0.0.1 --port 8143 --workers 1 --no-access-log --no-server-header
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=infinity
+SendSIGKILL=no
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+PrivateDevices=yes
+ReadWritePaths=/home/company/.codex
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

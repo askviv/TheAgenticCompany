@@ -156,7 +156,7 @@ class ProviderPortalStore:
         return result
 
     def case(self, case_id: str) -> dict[str, Any] | None:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             row = db.execute(
                 "SELECT * FROM company_provider_cases WHERE case_id=?", (case_id,)
             ).fetchone()
@@ -167,7 +167,7 @@ class ProviderPortalStore:
         return None
 
     def case_for_notification_message_id(self, message_id: str) -> dict[str, Any] | None:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             row = db.execute(
                 "SELECT c.* FROM company_provider_cases c JOIN company_provider_case_notifications n "
                 "ON n.case_id=c.case_id WHERE n.message_id=? AND n.status='sent'", (message_id,),
@@ -175,7 +175,7 @@ class ProviderPortalStore:
         return dict(row) if row else None
 
     def registered_email_cases(self) -> list[dict[str, Any]]:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             rows = db.execute(
                 "SELECT c.case_id,c.provider_id,c.responsible_actor_id,n.message_id "
                 "FROM company_provider_cases c JOIN company_provider_case_notifications n "
@@ -205,7 +205,7 @@ class ProviderPortalStore:
                 "body": body, "created_at": notification["updated_at"],
                 "direction": "outbound", "received_at": received_at,
             })
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             rows = db.execute(
                 "SELECT message_id,reply_message_id,status,body,reply_body,created_at,"
                 "outbound_receipt_json,send_receipt_json FROM company_provider_messages "
@@ -254,7 +254,7 @@ class ProviderPortalStore:
         return "\n\nCustomer-provided context:\n" + "\n".join(lines) if lines else ""
 
     def mail_cursor(self, provider_actor_id: str, case_id: str) -> dict[str, int] | None:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             row = db.execute(
                 "SELECT uidvalidity,after_uid FROM company_provider_mail_cursors "
                 "WHERE provider_actor_id=? AND case_id=?", (provider_actor_id, case_id),
@@ -329,7 +329,7 @@ class ProviderPortalStore:
             )
 
     def cases_for_actor(self, actor_id: str) -> list[dict[str, Any]]:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             return [dict(row) for row in db.execute(
                 "SELECT case_id,provider_id,responsible_actor_id,subject,business_description,"
                 "requested_outcome,created_at FROM company_provider_cases "
@@ -337,7 +337,7 @@ class ProviderPortalStore:
             )]
 
     def messages(self, case_id: str) -> list[dict[str, Any]]:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             rows = db.execute(
                 "SELECT client_message_id,message_id,reply_message_id,status,body,reply_body,created_at "
                 "FROM company_provider_messages WHERE case_id=? ORDER BY created_at,client_message_id",
@@ -346,7 +346,7 @@ class ProviderPortalStore:
             return [dict(row) for row in rows]
 
     def message(self, case_id: str, client_message_id: str) -> dict[str, Any] | None:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             row = db.execute(
                 "SELECT * FROM company_provider_messages WHERE case_id=? AND client_message_id=?",
                 (case_id, client_message_id),
@@ -487,7 +487,7 @@ class ProviderPortalStore:
             )
 
     def session(self, session_hash: str, now: str) -> dict[str, str] | None:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             row = db.execute(
                 "SELECT actor_id,csrf_token,expires_at FROM company_provider_portal_sessions "
                 "WHERE session_hash=? AND expires_at>?", (session_hash, now),
@@ -499,7 +499,7 @@ class ProviderPortalStore:
             db.execute("DELETE FROM company_provider_portal_sessions WHERE session_hash=?", (session_hash,))
 
     def notification(self, case_id: str) -> dict[str, Any] | None:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             row = db.execute("SELECT * FROM company_provider_case_notifications WHERE case_id=?", (case_id,)).fetchone()
         return dict(row) if row else None
 

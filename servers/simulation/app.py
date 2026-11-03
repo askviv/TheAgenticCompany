@@ -31,6 +31,7 @@ from servers.simulation.models import (
     StartScenario,
     ModelUsageRecord,
     PauseCompany,
+    SetCompanyClockSpeed,
     StartCompany,
     UpdateCase,
 )
@@ -144,6 +145,7 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
             )
             return {"company_id": "company", "status": "not_started", "simulated_time": None,
                     "paused": False, "erp_site_id": None,
+                    "clock_mode": getattr(engine, "company_clock_mode", "shared"),
                     "experiments": provider_experiments, "activity": provider_activity}
         experiments = []
         for record in engine.store.company_experiments("company"):
@@ -215,10 +217,19 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         if callable(feedback_activity):
             activity.extend(feedback_activity())
         activity.sort(key=lambda item: (str(item.get("timestamp", "")), str(item["id"])))
-        return {"company_id": "company", "background": background_status, "status": company["status"],
-                "simulated_time": company["simulated_time"], "paused": company["paused"],
-                "erp_site_id": company["erp_binding"]["site_name"],
-                "experiments": experiments, "activity": activity}
+        result = {"company_id": "company", "background": background_status, "status": company["status"],
+                  "simulated_time": company["simulated_time"], "paused": company["paused"],
+                  "clock_mode": getattr(engine, "company_clock_mode", "shared"),
+                  "erp_site_id": company["erp_binding"]["site_name"],
+                  "experiments": experiments, "activity": activity}
+        speed_reader = getattr(engine, "company_clock_speed_reader", None)
+        if callable(speed_reader):
+            try:
+                result["clock_speed"] = speed_reader()
+            except Exception as error:
+                logger.exception("Company clock speed read failed exception_type=%s",
+                                 type(error).__name__)
+        return result
 
     @app.post("/company/evidence/native")
     async def observe_company_evidence(request: Request):
@@ -310,6 +321,14 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
     def get_company(principal: Principal = Depends(authenticate)):
         require_role(principal, "controller")
         return company_payload()
+
+    @app.get("/company/clock")
+    async def get_company_clock(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        provider = getattr(engine, "company_time_provider", None)
+        instant = provider() if callable(provider) else (engine.company_state() or {}).get("simulated_time")
+        return {"simulated_time": instant.isoformat() if hasattr(instant, "isoformat") else instant,
+                "clock_mode": getattr(engine, "company_clock_mode", "real")}
 
     @app.get("/company/desktops")
     def list_employee_desktops(principal: Principal = Depends(authenticate)):
@@ -615,6 +634,24 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         engine.pause_company(model.paused, key)
         return company_payload()
 
+    @app.post("/company/clock/speed")
+    def set_company_clock_speed(model: SetCompanyClockSpeed, key: str = Depends(idempotency_key),
+                                principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        setter = getattr(engine, "company_clock_speed_setter", None)
+        if not callable(setter):
+            raise HTTPException(status_code=503, detail="Company clock speed control is unavailable")
+        if getattr(engine, "company_clock_mode", None) == "kernel":
+            if not model.speed.is_integer():
+                raise HTTPException(status_code=422, detail="Kernel clock speed must be a positive integer")
+            result = setter(int(model.speed), key)
+        else:
+            result = setter(model.speed, key)
+        wake = getattr(engine, "company_clock_wake", None)
+        if wake:
+            wake()
+        return {**company_payload(), "clock_speed": result["speed"]}
+
     @app.post("/company/experiments")
     def start_company_experiment(model: StartScenario, key: str = Depends(idempotency_key),
                                  principal: Principal = Depends(authenticate)):
@@ -784,16 +821,6 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         load_run(run_id)
         return engine.list_pending(run_id)
 
-    @app.get("/agents/{actor_id}/inbox")
-    def inbox(
-        actor_id: str, run_id: UUID = Query(...), principal: Principal = Depends(authenticate),
-    ):
-        if principal.role not in ("controller", "agent"):
-            raise HTTPException(status_code=403, detail="Operation is not permitted for this principal")
-        authorize_run(run_id, principal, agent_allowed=True, privileged_roles=("controller",))
-        if principal.role == "agent" and actor_id != principal.actor_id:
-            raise HTTPException(status_code=404, detail="Inbox not found")
-        return engine.inbox(run_id, actor_id)
 
     @app.get("/cases/{case_id}")
     def case(

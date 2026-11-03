@@ -1,4 +1,4 @@
-On our office cloud at http://the-agent-company.com:8092/, analyze the stock trend in /Documents/Financials/stock_data_raw.csv, create an informative, business-style presentation of stock price data for the company board members.
+On our office cloud at {{ company_tools.owncloud }}/, analyze the stock trend in /Documents/Financials/stock_data_raw.csv, create an informative, business-style presentation of stock price data for the company board members.
 
 * Data Preparation: Use the provided stock data, ensuring it is clean and suitable for analysis. Handle any missing or inconsistent values appropriately. Save the cleaned data as /Documents/Financials/stock_presentation/stock_cleaned.csv
 

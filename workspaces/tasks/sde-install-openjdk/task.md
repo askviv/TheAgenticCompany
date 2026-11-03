@@ -1,1 +1,0 @@
-Install OpenJDK 17

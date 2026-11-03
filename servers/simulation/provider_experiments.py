@@ -144,7 +144,7 @@ class ProviderExperimentStore:
         return dict(row), True
 
     def get(self, experiment_id: str) -> dict | None:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             row = db.execute("SELECT * FROM company_provider_experiments WHERE experiment_id=?",
                              (experiment_id,)).fetchone()
             if row is None:
@@ -156,7 +156,7 @@ class ProviderExperimentStore:
         return value
 
     def list(self) -> list[dict]:
-        with self.store.transaction() as db:
+        with self.store.transaction(write=False) as db:
             rows = db.execute(
                 "SELECT experiment_id,company_id,provider_id,task_id,upstream_commit,conversation_id,status,created_at,updated_at "
                 "FROM company_provider_experiments WHERE company_id='company' ORDER BY created_at DESC,experiment_id"

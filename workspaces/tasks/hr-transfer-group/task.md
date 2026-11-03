@@ -1,4 +1,4 @@
-Navigate to the Rocketchat web at http://the-agent-company.com:3000/home
+Navigate to the Rocketchat web at {{ company_tools.rocketchat }}/home
 
 Transfer Li Ming from his current database group to AI group. 
 

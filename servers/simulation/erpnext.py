@@ -9,9 +9,9 @@ import re
 import sqlite3
 import subprocess
 import tempfile
-import threading
+import fcntl
 import uuid
-from contextlib import closing
+from contextlib import ExitStack, closing, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -101,7 +101,7 @@ class ERPNextAdapter:
         receipt_api_secret: str | None = None,
         shipping_api_key: str | None = None,
         shipping_api_secret: str | None = None,
-        timeout: tuple[float, float] = (3.05, 20.0),
+        timeout: tuple[float, float] | None = None,
         review_action: str = "Request Review",
         review_state: str = "Review Requested",
     ):
@@ -147,7 +147,18 @@ class ERPNextAdapter:
         if os.name == "posix":
             self.idempotency_path.parent.chmod(0o700)
         self._init_idempotency_store()
-        self._review_lock = threading.Lock()
+
+    @contextmanager
+    def _operation_locks(self, identities):
+        # Serialize only competing requests for the same native operation.
+        # No database connection exists while waiting or performing ERP HTTP calls.
+        with ExitStack() as stack:
+            for identity in sorted(set(identities)):
+                digest = hashlib.sha256(identity.encode()).hexdigest()
+                path = self.idempotency_path.with_name(self.idempotency_path.name + "." + digest + ".lock")
+                handle = stack.enter_context(os.fdopen(os.open(path, os.O_CREAT | os.O_RDWR, 0o600), "a+b"))
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            yield
 
     def _connect_idempotency(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.idempotency_path, timeout=30, isolation_level=None)
@@ -490,53 +501,48 @@ class ERPNextAdapter:
         if not idempotency_key or not idempotency_key.strip():
             raise ValueError("idempotency_key is required")
         key_hash = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
-        with self._review_lock, closing(self._connect_idempotency()) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            existing = connection.execute(
-                "SELECT invoice_id FROM invoice_review_requests WHERE key_hash = ?", (key_hash,)
-            ).fetchone()
+        with self._operation_locks(["key:" + key_hash, "invoice:" + invoice_id]):
+            with closing(self._connect_idempotency()) as connection:
+                existing = connection.execute(
+                    "SELECT invoice_id FROM invoice_review_requests WHERE key_hash = ?", (key_hash,)
+                ).fetchone()
             if existing:
                 if existing[0] != invoice_id:
                     raise ERPNextConflict("invoice review idempotency key reused for a different invoice")
                 invoice = self.get_purchase_invoice(invoice_id)
                 if invoice.get("workflow_state") != self.review_state or int(invoice.get("docstatus", 0)) != 0:
                     raise ERPNextConflict("invoice review result no longer matches the recorded request")
-                connection.commit()
                 return invoice
 
             invoice = self.get_purchase_invoice(invoice_id)
             if int(invoice.get("docstatus", 0)) != 0:
                 raise ERPNextConflict("invoice review is allowed only before invoice submission")
             if invoice.get("workflow_state") == self.review_state:
+                with closing(self._connect_idempotency()) as connection, connection:
+                    connection.execute(
+                        "INSERT INTO invoice_review_requests VALUES (?, ?, ?)",
+                        (key_hash, invoice_id, self.review_state),
+                    )
+                return invoice
+
+            self._request(
+                "POST",
+                "/api/method/frappe.model.workflow.apply_workflow",
+                operation="request invoice review",
+                data={
+                    "doc": json.dumps({"doctype": "Purchase Invoice", "name": invoice_id}),
+                    "action": self.review_action,
+                },
+            )
+            reviewed = self.get_purchase_invoice(invoice_id)
+            if int(reviewed.get("docstatus", 0)) != 0 or reviewed.get("workflow_state") != self.review_state:
+                raise ERPNextConflict("invoice workflow did not enter the requested pre-submit review state")
+
+            with closing(self._connect_idempotency()) as connection, connection:
                 connection.execute(
                     "INSERT INTO invoice_review_requests VALUES (?, ?, ?)",
                     (key_hash, invoice_id, self.review_state),
                 )
-                connection.commit()
-                return invoice
-
-            try:
-                self._request(
-                    "POST",
-                    "/api/method/frappe.model.workflow.apply_workflow",
-                    operation="request invoice review",
-                    data={
-                        "doc": json.dumps({"doctype": "Purchase Invoice", "name": invoice_id}),
-                        "action": self.review_action,
-                    },
-                )
-                reviewed = self.get_purchase_invoice(invoice_id)
-                if int(reviewed.get("docstatus", 0)) != 0 or reviewed.get("workflow_state") != self.review_state:
-                    raise ERPNextConflict("invoice workflow did not enter the requested pre-submit review state")
-            except Exception:
-                connection.rollback()
-                raise
-
-            connection.execute(
-                "INSERT INTO invoice_review_requests VALUES (?, ?, ?)",
-                (key_hash, invoice_id, self.review_state),
-            )
-            connection.commit()
             return reviewed
 
     def assess_invoice(self, invoice_id: str) -> dict[str, Any]:
@@ -634,13 +640,13 @@ class ERPNextAdapter:
             approval.quote_id, approval.shipment_id, approval.supplier, str(amount), approval.currency,
             approval.policy_version, approval.delivery_commitment, approval.posting_date, approval.posting_time,
         )
-        with self._review_lock, closing(self._connect_idempotency()) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            prior = connection.execute(
-                """SELECT approval_id,purchase_order_id,expected_modified,quote_id,shipment_id,supplier,
-                          amount,currency,policy_version,delivery_commitment,posting_date,posting_time,shipping_order_id
-                   FROM approved_shipping_orders WHERE key_hash=?""", (key_hash,),
-            ).fetchone()
+        with self._operation_locks(["key:" + key_hash, "shipping:" + approval.approval_id]):
+            with closing(self._connect_idempotency()) as connection:
+                prior = connection.execute(
+                    """SELECT approval_id,purchase_order_id,expected_modified,quote_id,shipment_id,supplier,
+                              amount,currency,policy_version,delivery_commitment,posting_date,posting_time,shipping_order_id
+                       FROM approved_shipping_orders WHERE key_hash=?""", (key_hash,),
+                ).fetchone()
             if prior:
                 if prior[:12] != expected_row:
                     raise ERPNextConflict("shipping idempotency key was reused for a different approval")
@@ -650,11 +656,11 @@ class ERPNextAdapter:
                     raise ERPNextConflict("original purchase order no longer matches the shipping approval")
                 result = self.get_purchase_order(prior[12])
                 result = self._shipping_result(result, approval, amount, expected_company=original.get("company"))
-                connection.commit()
                 return result
-            consumed = connection.execute(
-                "SELECT key_hash FROM approved_shipping_orders WHERE approval_id=?", (approval.approval_id,),
-            ).fetchone()
+            with closing(self._connect_idempotency()) as connection:
+                consumed = connection.execute(
+                    "SELECT key_hash FROM approved_shipping_orders WHERE approval_id=?", (approval.approval_id,),
+                ).fetchone()
             if consumed:
                 raise ERPNextConflict("shipping approval has already been consumed")
             matches = self._get_list(
@@ -702,14 +708,14 @@ class ERPNextAdapter:
                 )
                 service_order = self.get_purchase_order(str(created["name"]))
             self._shipping_result(service_order, approval, amount, expected_company=original["company"])
-            connection.execute(
-                """INSERT INTO approved_shipping_orders
-                   (key_hash,approval_id,purchase_order_id,expected_modified,quote_id,shipment_id,supplier,
-                    amount,currency,policy_version,delivery_commitment,posting_date,posting_time,shipping_order_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (key_hash, *expected_row, str(service_order["name"])),
-            )
-            connection.commit()
+            with closing(self._connect_idempotency()) as connection, connection:
+                connection.execute(
+                    """INSERT INTO approved_shipping_orders
+                       (key_hash,approval_id,purchase_order_id,expected_modified,quote_id,shipment_id,supplier,
+                        amount,currency,policy_version,delivery_commitment,posting_date,posting_time,shipping_order_id)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (key_hash, *expected_row, str(service_order["name"])),
+                )
             return self._shipping_result(service_order, approval, amount, expected_company=original["company"])
 
     @staticmethod
@@ -789,14 +795,14 @@ class ERPNextAdapter:
 
         key_hash = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
         marker = "TAC-GR:" + hashlib.sha256(verified_approval.approval_id.encode("utf-8")).hexdigest()
-        with self._review_lock, closing(self._connect_idempotency()) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            existing = connection.execute(
-                """SELECT approval_id, purchase_order_id, quantity, expected_modified, policy_version,
-                          posting_date, posting_time, receipt_id
-                   FROM approved_purchase_receipts WHERE key_hash = ?""",
-                (key_hash,),
-            ).fetchone()
+        with self._operation_locks(["key:" + key_hash, "receipt:" + verified_approval.approval_id]):
+            with closing(self._connect_idempotency()) as connection:
+                existing = connection.execute(
+                    """SELECT approval_id, purchase_order_id, quantity, expected_modified, policy_version,
+                              posting_date, posting_time, receipt_id
+                       FROM approved_purchase_receipts WHERE key_hash = ?""",
+                    (key_hash,),
+                ).fetchone()
             if existing:
                 if existing[:7] != (
                     verified_approval.approval_id, purchase_order_id, str(requested),
@@ -805,13 +811,13 @@ class ERPNextAdapter:
                 ):
                     raise ERPNextConflict("goods receipt idempotency key was reused for a different approval")
                 result = self.get_purchase_receipt(existing[7])
-                connection.commit()
                 return result
 
-            reused = connection.execute(
-                "SELECT key_hash FROM approved_purchase_receipts WHERE approval_id = ?",
-                (verified_approval.approval_id,),
-            ).fetchone()
+            with closing(self._connect_idempotency()) as connection:
+                reused = connection.execute(
+                    "SELECT key_hash FROM approved_purchase_receipts WHERE approval_id = ?",
+                    (verified_approval.approval_id,),
+                ).fetchone()
             if reused:
                 raise ERPNextConflict("goods receipt approval has already been consumed")
 
@@ -910,16 +916,16 @@ class ERPNextAdapter:
                 raise ERPNextConflict("submitted goods receipt does not match a native purchase order row")
             if self._decimal(receipt_lines[0].get("received_qty"), "received quantity") != requested:
                 raise ERPNextConflict("submitted goods receipt quantity does not match approval")
-            connection.execute(
-                """INSERT INTO approved_purchase_receipts
-                   (key_hash, approval_id, purchase_order_id, quantity, expected_modified, policy_version,
-                    posting_date, posting_time, receipt_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (key_hash, verified_approval.approval_id, purchase_order_id, str(requested),
-                 verified_approval.expected_modified, verified_approval.policy_version,
-                 verified_approval.posting_date, verified_approval.posting_time, str(receipt["name"])),
-            )
-            connection.commit()
+            with closing(self._connect_idempotency()) as connection, connection:
+                connection.execute(
+                    """INSERT INTO approved_purchase_receipts
+                       (key_hash, approval_id, purchase_order_id, quantity, expected_modified, policy_version,
+                        posting_date, posting_time, receipt_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (key_hash, verified_approval.approval_id, purchase_order_id, str(requested),
+                     verified_approval.expected_modified, verified_approval.policy_version,
+                     verified_approval.posting_date, verified_approval.posting_time, str(receipt["name"])),
+                )
             return receipt
 
 
@@ -947,11 +953,9 @@ class ERPNextSiteAdmin:
             "run", "--rm", "site-admin", operation, canonical_id,
         ]
         try:
-            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=900)
+            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=None)
         except subprocess.CalledProcessError as error:
             raise ERPNextError(f"{operation} owned ERP site") from error
-        except subprocess.TimeoutExpired as error:
-            raise ERPNextError(f"{operation} owned ERP site timed out") from error
         except OSError as error:
             raise ERPNextError(f"{operation} owned ERP site") from error
         try:
@@ -995,14 +999,12 @@ class ERPNextSiteAdmin:
             os.replace(temporary, manifest_path)
             command = [
                 "docker", "compose", "-f", str(self.compose_file), "--profile", "admin",
-                "run", "--rm", "site-admin", operation, operation_id,
+                "run", "--rm", "--no-deps", "site-admin", operation, operation_id,
             ]
             try:
-                completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=900)
+                completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=None)
             except subprocess.CalledProcessError as error:
                 raise ERPNextError(f"{operation} native company ERPNext") from error
-            except subprocess.TimeoutExpired as error:
-                raise ERPNextError(f"{operation} native company ERPNext timed out") from error
             except OSError as error:
                 raise ERPNextError(f"{operation} native company ERPNext") from error
             try:
@@ -1161,11 +1163,9 @@ class ERPNextRetailAdmin:
             "run", "--rm", "site-admin", "seed-tau-retail", experiment_id, task_id,
         ]
         try:
-            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=900)
+            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=None)
         except subprocess.CalledProcessError as error:
             raise ERPNextError("seed τ retail task in company ERPNext") from error
-        except subprocess.TimeoutExpired as error:
-            raise ERPNextError("seed τ retail task in company ERPNext timed out") from error
         except OSError as error:
             raise ERPNextError("seed τ retail task in company ERPNext") from error
         try:
@@ -1189,11 +1189,9 @@ class ERPNextRetailAdmin:
         command = ["docker", "compose", "-f", str(self.compose_file), "--profile", "admin",
                    "run", "--rm", "site-admin", "observe-tau-retail", experiment_id, task_id]
         try:
-            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=900)
+            completed = subprocess.run(command, check=True, capture_output=True, text=True, timeout=None)
         except subprocess.CalledProcessError as error:
             raise ERPNextError("observe τ retail task in company ERPNext") from error
-        except subprocess.TimeoutExpired as error:
-            raise ERPNextError("observe τ retail task in company ERPNext timed out") from error
         except OSError as error:
             raise ERPNextError("observe τ retail task in company ERPNext") from error
         try:

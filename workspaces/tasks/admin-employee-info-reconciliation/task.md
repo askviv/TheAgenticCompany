@@ -5,7 +5,7 @@ In your /workspace folder you can find a CSV file called `employees.csv` that co
 for all of our employees. Unfortunately, this file hasn't been updated in a while, so it might be missing
 some employees, have outdated or even wrong information.
 
-You could find all current employees on RocketChat (http://the-agent-company.com:3000/). If you need any
+You could find all current employees on RocketChat ({{ company_tools.rocketchat }}/). If you need any
 information from them, just DM them on RocketChat!
 
 Your task is to update the `employees.csv` file with the most up-to-date information, and make sure that

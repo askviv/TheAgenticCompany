@@ -77,8 +77,7 @@ Caveat: all services require username and password. We allow benchmark users to 
 ways they want to provide the username and password. You could add username and password to
 the prompt, or cache the login session cookie in the browser. For reference, in the
 baseline evaluation, we use OpenHands platform to deterministically login to all services
-before letting the agent work on the task. We still provide GitLab username and password
-in the system prompt since running `git` commands sometimes requires the username and password.
+before letting the agent work on the task. Service-specific credentials are supplied through the deployment’s existing secure login flow.
 The legacy automatic-login helper is no longer included.
 
 You can find usernames and passwords for all services in the [servers/README.md](../servers/README.md).

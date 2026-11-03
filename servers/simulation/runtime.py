@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.metadata
+import imaplib
 import json
 import logging
 import os
@@ -28,7 +29,8 @@ from .background_evaluation import (
 )
 from .background_runtime import BackgroundWorkerClient
 from .company_background import CompanyBackgroundService
-from .engine import COMPANY_CLOCK_RATE, SimulationEngine
+from .engine import SimulationEngine
+from .clock_rate import InvalidKernelVirtualTimeRate, kernel_virtual_time_rate
 from .evaluation_runtime import build_evaluation_service
 from .erpnext import ERPNextAdapter, ERPNextSiteAdmin
 from .erpnext import ERPNextRetailAdmin
@@ -42,6 +44,9 @@ LOG = logging.getLogger(__name__)
 class RuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     state_root: Path
+    sqlite_busy_timeout_seconds: float = Field(default=30, gt=0)
+    mailbox_idle_renewal_seconds: float = Field(default=30, gt=0)
+    company_clock_observation_seconds: float = Field(default=1, gt=0)
     erp_compose: Path
     erp_base_url: str = "http://192.0.2.10:8130"
     erp_credentials_root: Path
@@ -51,8 +56,20 @@ class RuntimeConfig(BaseModel):
     employee_chat_credentials_file: Path | None = None
     rocketchat_base_url: str = "https://chat.company.example.test"
     background_model_id: str = "gpt-6-luna"
-    company_clock_rate: int = Field(default=COMPANY_CLOCK_RATE, ge=1)
     company_background_enabled: bool = True
+    shared_company_clock_enabled: bool = True
+    shared_company_clock_file: Path = Path("/data/theagentcompany/enterprise/state/company-clock/time")
+    shared_company_clock_state: Path | None = None
+    kernel_company_clock_enabled: bool = False
+    kernel_company_clock_url: str = "http://10.0.2.2:8133"
+    kernel_company_clock_token_file: Path = Path("/run/secrets/clock-api-token")
+    employee_cua_driver_file: Path = Path("/data/theagentcompany/enterprise/tools/cua-driver/bin/cua-driver")
+    employee_cua_inference_url: str = "http://10.0.2.2:8143"
+    employee_cua_inference_token_file: Path = Path("/data/theagentcompany/enterprise/actors/secrets/codex-inference-token")
+    employee_cua_model: str = "gpt-6.1-terra"
+    employee_desktop_view_only: bool = True
+    employee_desktop_image: str | None = None
+    employee_desktop_ca_file: Path | None = None
     company_issues_enabled: bool = True
     issue_config_path: Path = Path("/data/theagentcompany/enterprise/config/runtime.json")
     erp_public_url: str = "https://erp.company.example.test"
@@ -65,6 +82,10 @@ class RuntimeConfig(BaseModel):
     support_address: str = "support@example.com"
     host: str = "192.0.2.10"
     port: int = Field(default=8131, gt=0, le=65535)
+
+
+class KernelCompanyClockConfigurationError(RuntimeError):
+    """The running guest does not satisfy the native kernel clock contract."""
 
 
 class ERPServiceCredentials(BaseModel):
@@ -97,18 +118,50 @@ def private_secret(path: Path) -> str:
     return value
 
 
+def employee_cua_model() -> Any:
+    from pydantic import SecretStr
+
+    from .codex_remote import CodexRemoteModel, CodexRemoteSettings
+
+    config_path = Path(os.environ.get(
+        "SIMULATION_CONFIG", str(RuntimeConfig.model_fields["issue_config_path"].default)
+    ))
+    config = RuntimeConfig.model_validate(private_json(config_path))
+    url = config.employee_cua_inference_url
+    token_file = config.employee_cua_inference_token_file
+    model_name = config.employee_cua_model
+    token = private_secret(token_file)
+    return CodexRemoteModel(CodexRemoteSettings(
+        url=url,
+        bearer_token=SecretStr(token),
+        model=model_name,
+        reasoning_effort="low",
+    ))
+
+
 def employee_desktop_manager(config: RuntimeConfig | None = None):
     """Use the coordinator's private settings for host-local employee browsers."""
-    from .employee_desktops import EmployeeDesktopRuntime
+    from .employee_desktops import (
+        DEFAULT_SELKIES_IMAGE,
+        EMPLOYEE_DESKTOP_CA_FILE_ENV,
+        EMPLOYEE_DESKTOP_IMAGE_ENV,
+        EmployeeDesktopRuntime,
+    )
     from .employee_desktop_proxy import CaddyEmployeeDesktopProxy
 
     if config is None:
         config_path = os.environ.get(
             "SIMULATION_CONFIG", str(RuntimeConfig.model_fields["issue_config_path"].default))
         config = RuntimeConfig.model_validate(private_json(Path(config_path)))
+    desktop_image = os.environ.get(EMPLOYEE_DESKTOP_IMAGE_ENV, "").strip() or config.employee_desktop_image
+    desktop_ca_file = os.environ.get(EMPLOYEE_DESKTOP_CA_FILE_ENV, "").strip() or config.employee_desktop_ca_file
     manager = EmployeeDesktopRuntime(
         config.company_profile_file, config.state_root / "employee-desktops",
         caddy_proxy=CaddyEmployeeDesktopProxy(),
+        image=desktop_image or DEFAULT_SELKIES_IMAGE,
+        view_only=config.employee_desktop_view_only,
+        cua_driver_file=config.employee_cua_driver_file,
+        ca_file=Path(desktop_ca_file) if desktop_ca_file else None,
     )
     manager.start_idle_shutdown()
     return manager
@@ -142,13 +195,11 @@ def _erp_service_credentials(path: Path) -> ERPServiceCredentials:
         ) from error
 
 
-def initialize_company_runtime(engine: SimulationEngine, binding: dict[str, Any] | None,
-                               clock_rate: int = COMPANY_CLOCK_RATE) -> dict[str, Any] | None:
+def initialize_company_runtime(engine: SimulationEngine, binding: dict[str, Any] | None) -> dict[str, Any] | None:
     """Ensure the configured company metadata exists without provisioning ERP or experiments."""
     if binding is None:
         return None
-    company = engine.start_company(binding, "configured-company-v1")
-    return engine.configure_company_clock_rate(clock_rate, now=datetime.now(timezone.utc)) or company
+    return engine.start_company(binding, "configured-company-v1")
 
 
 def environment_manifest() -> dict:
@@ -194,7 +245,7 @@ def environment_manifest() -> dict:
         "source_revision": source_revision,
         "source_dirty": source_dirty,
         "packages": {name: importlib.metadata.version(name) for name in
-                     ("fastapi", "pydantic", "simpy", "numpy", "requests", "IMAPClient", "signalrcore")},
+                     ("fastapi", "pydantic", "simpy", "numpy", "requests", "IMAPClient")},
         "actor_mode": "upstream_model_backed",
         "deterministic_components": ["simpy", "ecommercebench_negotiation", "ecommercebench_market"],
         "agent_execution": "not_measured",
@@ -206,45 +257,22 @@ class MailWorkers:
 
     No worker advances simulation time. A failed mailbox watcher is reported
     and stopped; its siblings and unrelated API operations remain available.
-    Restarting the service after repairing that provider restarts its watcher.
+    Transient IMAP transport/authentication failures reconnect after the next
+    listener renewal interval; programming/configuration failures remain visible.
     """
-    def __init__(self, engine: SimulationEngine, actors: list[dict], *, hub_connection_factory=None,
-                 viv_mailbox_name: str = "Default"):
+    def __init__(self, engine: SimulationEngine, actors: list[dict], *,
+                 mailbox_idle_renewal_seconds: float = 30):
         self.engine = engine
         self.actors = [actor for actor in actors if actor.get("kind") != "agent"]
-        self.viv_mailbox_name = viv_mailbox_name
-        self._hub_connection_factory = hub_connection_factory
+        self.mailbox_idle_renewal_seconds = mailbox_idle_renewal_seconds
         self.changed = threading.Event()
         self.stopped = threading.Event()
         self.errors: dict[str, str] = {}
         self.threads: list[threading.Thread] = []
-        self._hub_connection = None
-        self._hub_closed = threading.Event()
-        self._hub_connected = threading.Event()
-        self._viv_activity_condition = threading.Condition()
-        self._viv_activity_sequence = 0
         self._employee_inbox_worker_lock = threading.Lock()
         self._employee_inbox_queues: dict[str, queue.Queue[dict[str, Any] | None]] = {}
         self.employee_inbox_coalesced_events: dict[str, int] = {}
 
-    def viv_activity_version(self) -> int:
-        with self._viv_activity_condition:
-            return self._viv_activity_sequence
-
-    def wait_for_viv_activity(self, after_version: int, timeout: float = 30) -> bool:
-        """Wait for a native Viv mailbox notification newer than a cursor."""
-        with self._viv_activity_condition:
-            notified = self._viv_activity_condition.wait_for(
-                lambda: self._viv_activity_sequence > after_version or self.stopped.is_set(),
-                timeout=timeout,
-            )
-            return notified and self._viv_activity_sequence > after_version
-
-    def _signal_viv_activity(self) -> None:
-        with self._viv_activity_condition:
-            self._viv_activity_sequence += 1
-            self._viv_activity_condition.notify_all()
-        self.changed.set()
 
     def _failure(self, component: str, error: BaseException) -> None:
         self.errors[component] = type(error).__name__
@@ -259,14 +287,28 @@ class MailWorkers:
                   component, type(error).__name__, causes, frames)
 
     def _watch(self, actor: dict) -> None:
-        try:
-            while not self.stopped.is_set():
-                if self.engine.mail.wait_for_activity(actor, timeout=30):
+        component = "mailbox:" + actor["actor_id"]
+        while not self.stopped.is_set():
+            try:
+                renewal_seconds = _company_clock_interval(
+                    self.mailbox_idle_renewal_seconds, self.engine
+                )
+                changed = self.engine.mail.wait_for_activity(actor, timeout=renewal_seconds)
+                self.errors.pop(component, None)
+                if changed:
                     self.changed.set()
                     if actor.get("kind") == "employee":
                         self._enqueue_employee_inbox(actor)
-        except Exception as error:
-            self._failure("mailbox:" + actor["actor_id"], error)
+            except (OSError, imaplib.IMAP4.error) as error:
+                if self.stopped.is_set():
+                    return
+                self._failure(component, error)
+                self.stopped.wait(_company_clock_interval(
+                    self.mailbox_idle_renewal_seconds, self.engine
+                ))
+            except Exception as error:
+                self._failure(component, error)
+                return
 
     def _enqueue_employee_inbox(self, actor: dict[str, Any]) -> None:
         actor_id = actor["actor_id"]
@@ -316,70 +358,6 @@ class MailWorkers:
             if self.stopped.is_set():
                 return
 
-    def _viv_notification(self, arguments: Any) -> None:
-        # signalrcore 1.0.2 invokes handlers with HubMessage.arguments (a list),
-        # even when the hub method has only one parameter.
-        mailbox = arguments[0] if isinstance(arguments, (list, tuple)) and len(arguments) == 1 else arguments
-        if isinstance(mailbox, str) and mailbox.casefold() == self.viv_mailbox_name.casefold():
-            self._signal_viv_activity()
-
-    def _watch_viv(self) -> None:
-        try:
-            api_base = self.engine.mail.config.smtp4dev_api_base_url.rstrip("/")
-            if self._hub_connection_factory is None:
-                from signalrcore.hub_connection_builder import HubConnectionBuilder
-
-                connection = (
-                    HubConnectionBuilder()
-                    .with_url(api_base + "/hubs/notifications")
-                    .with_automatic_reconnect({
-                        "type": "raw",
-                        "keep_alive_interval": 15,
-                        "reconnect_interval": 5,
-                        "max_attempts": 10,
-                    })
-                    .build()
-                )
-            else:
-                connection = self._hub_connection_factory(api_base + "/hubs/notifications")
-            self._hub_connection = connection
-            connection.on("messageschanged", self._viv_notification)
-            connection.on_open(self._viv_opened)
-            connection.on_close(self._viv_closed_callback)
-            connection.on_error(self._viv_error)
-            connection.start()
-            self._hub_closed.wait()
-            if not self.stopped.is_set() and "smtp4dev_notifications" not in self.errors:
-                self._failure("smtp4dev_notifications", ConnectionError("SignalR connection closed"))
-        except Exception as error:
-            if not self.stopped.is_set() and "smtp4dev_notifications" not in self.errors:
-                self._failure("smtp4dev_notifications", error)
-
-    def _viv_opened(self) -> None:
-        self._hub_connected.set()
-        self.errors.pop("smtp4dev_notifications", None)
-        self._signal_viv_activity()
-
-    def _viv_closed_callback(self) -> None:
-        self._hub_closed.set()
-
-    def _viv_error(self, error: Any) -> None:
-        # Transport callbacks can carry provider-specific text. Keep diagnostics
-        # to exception classes and stack locations only.
-        self.errors["smtp4dev_notifications"] = "SignalRTransportError"
-        if isinstance(error, BaseException):
-            frames = [(frame.filename, frame.lineno, frame.name)
-                      for frame in traceback.extract_tb(error.__traceback__)]
-            causes = []
-            cause = error.__cause__ or error.__context__
-            while cause is not None:
-                causes.append(type(cause).__name__)
-                cause = cause.__cause__ or cause.__context__
-            LOG.error("simulation worker failed component=smtp4dev_notifications exception_type=%s causes=%s stack=%s",
-                      type(error).__name__, causes, frames)
-        else:
-            LOG.error("simulation worker failed component=smtp4dev_notifications callback_type=%s",
-                      type(error).__name__)
 
     def _process(self) -> None:
         while not self.stopped.is_set():
@@ -413,8 +391,6 @@ class MailWorkers:
             components["mailu_mailboxes"] = "failed"
         if any(key.startswith("employee_inbox:") for key in self.errors):
             components["employee_inboxes"] = "failed"
-        if "smtp4dev_notifications" in self.errors:
-            components["viv_notifications"] = "failed"
         if any(key.startswith("run:") for key in self.errors):
             components["run_processor"] = "failed"
         try:
@@ -436,9 +412,6 @@ class MailWorkers:
         self.threads += [threading.Thread(target=self._watch, args=(actor,),
                                         name="simulation-mail-" + actor["actor_id"], daemon=True)
                          for actor in self.actors]
-        if hasattr(self.engine.mail, "config") and hasattr(self.engine.mail.config, "smtp4dev_api_base_url"):
-            self.threads.append(threading.Thread(target=self._watch_viv,
-                                                 name="simulation-viv-notifications", daemon=True))
         startup_threads = tuple(self.threads)
         for thread in startup_threads:
             thread.start()
@@ -447,6 +420,7 @@ class MailWorkers:
     def stop(self) -> None:
         self.stopped.set()
         self.changed.set()
+        self.engine.mail.stop_activity_waits()
         with self._employee_inbox_worker_lock:
             inbox_queues = list(self._employee_inbox_queues.values())
         for event_queue in inbox_queues:
@@ -455,24 +429,23 @@ class MailWorkers:
             except queue.Full:
                 # The worker will exit after finishing its already queued event.
                 pass
-        if self._hub_connection is not None:
-            try:
-                self._hub_connection.stop()
-            except Exception as error:
-                self._failure("smtp4dev_notifications_stop", error)
         for thread in self.threads:
-            thread.join(timeout=1)
+            thread.join()
 
 
 class CompanyClockWorker:
     """Resume the persisted company clock and dispatch due SimPy events.
 
     The worker sleeps on an event and checks at a bounded one-second cadence so
-    wall time remains the default company clock without busy looping. A paused
-    or never-started company remains idle until an API operation wakes it.
+    the configured shared company source advances without busy looping. A
+    never-started company remains idle until an API operation wakes it.
     """
-    def __init__(self, engine: SimulationEngine):
+    def __init__(self, engine: SimulationEngine, *, shared_time_enabled: bool = False,
+                 observation_seconds: float = 1):
         self.engine = engine
+        self.observation_seconds = observation_seconds
+        self.shared_time_enabled = shared_time_enabled
+        self.time_provider = None
         self.wake_event = threading.Event()
         self.dispatch_event = threading.Event()
         self.stopped = threading.Event()
@@ -487,21 +460,23 @@ class CompanyClockWorker:
 
     def _run(self) -> None:
         while not self.stopped.is_set():
-            self.wake_event.wait(timeout=1.0)
+            self.wake_event.wait(timeout=_company_clock_interval(
+                self.observation_seconds, self.engine
+            ))
             self.wake_event.clear()
             if self.stopped.is_set():
                 return
             try:
                 company = self.engine.company_state()
-                if company is None or company["paused"]:
-                    if company is not None:
-                        # A pause can follow a durable time reservation whose
-                        # due events still need ordered processing.
-                        self.dispatch_event.set()
+                if company is None:
                     if self.on_company_time is not None:
                         self.on_company_time()
                     continue
-                self.engine.tick_company_clock()
+                if self.shared_time_enabled and self.time_provider is None:
+                    raise RuntimeError("shared company clock publisher is unavailable")
+                self.engine.tick_company_clock(
+                    self.time_provider() if self.time_provider is not None else None,
+                )
                 self.error = None
                 self.dispatch_event.set()
                 if self.on_company_time is not None:
@@ -514,7 +489,9 @@ class CompanyClockWorker:
 
     def _dispatch(self) -> None:
         while not self.stopped.is_set():
-            self.dispatch_event.wait(timeout=1.0)
+            self.dispatch_event.wait(timeout=_company_clock_interval(
+                self.observation_seconds, self.engine
+            ))
             self.dispatch_event.clear()
             if self.stopped.is_set():
                 return
@@ -543,16 +520,115 @@ class CompanyClockWorker:
         self.wake_event.set()
         self.dispatch_event.set()
         if self.thread is not None:
-            self.thread.join(timeout=2)
+            self.thread.join()
         if self.dispatch_thread is not None:
-            self.dispatch_thread.join(timeout=2)
+            self.dispatch_thread.join()
+
+
+class SharedCompanyClockPublisherWorker:
+    """Own the shared follow-file publisher for the app lifespan."""
+
+    def __init__(self, clock):
+        self.clock = clock
+        self.stop_event = threading.Event()
+        self.thread: threading.Thread | None = None
+        self.error: Exception | None = None
+
+    def _run(self) -> None:
+        try:
+            self.clock.publish_forever(self.stop_event)
+        except Exception as error:
+            self.error = error
+            frames = [(frame.filename, frame.lineno, frame.name)
+                      for frame in traceback.extract_tb(error.__traceback__)]
+            LOG.error("shared company clock publisher failed exception_type=%s stack=%s",
+                      type(error).__name__, frames)
+
+    def start(self) -> None:
+        if self.thread is None:
+            self.thread = threading.Thread(target=self._run, name="shared-company-clock-publisher", daemon=True)
+            self.thread.start()
+
+    def now(self) -> datetime:
+        if self.error is not None:
+            raise RuntimeError("shared company clock publisher failed") from self.error
+        return self.clock.now()
+
+    def set_speed(self, speed: float, idempotency_key: str) -> dict[str, float]:
+        if self.error is not None:
+            raise RuntimeError("shared company clock publisher failed") from self.error
+        return self.clock.set_speed(speed, idempotency_key)
+
+    def speed(self) -> float:
+        if self.error is not None:
+            raise RuntimeError("shared company clock publisher failed") from self.error
+        return self.clock.speed()
+
+    def stop(self) -> None:
+        self.stop_event.set()
+        if self.thread is not None:
+            self.thread.join()
+        if self.thread is None or not self.thread.is_alive():
+            self.clock.close()
+
+
+def _company_clock_source(path: Path) -> str:
+    if not path.exists():
+        return "real"
+    source = path.read_text(encoding="utf-8").strip()
+    if source not in {"real", "shared", "kernel", "transition:real", "transition:shared"}:
+        raise ValueError("persisted company clock source is invalid")
+    return source
+
+
+def _kernel_company_clock_speed() -> int:
+    """Read the active kernel rate used to scale company-time observations."""
+    try:
+        return kernel_virtual_time_rate(require_kernel=True)
+    except InvalidKernelVirtualTimeRate as error:
+        raise KernelCompanyClockConfigurationError(
+            "guest kernel virtual-time-rate capability reported an invalid rate"
+        ) from error
+    except (OSError, ValueError) as error:
+        raise KernelCompanyClockConfigurationError(
+            "guest kernel virtual-time-rate capability is unavailable"
+        ) from error
+
+
+def _company_clock_interval(seconds: float, engine: SimulationEngine) -> float:
+    """Keep a configured real interval stable across accelerated kernel timers."""
+    if getattr(engine, "company_clock_mode", None) != "kernel":
+        return seconds
+    return seconds * _kernel_company_clock_speed()
+
+
+def _kernel_company_clock_now() -> datetime:
+    """Confirm the patched guest kernel rate control is active, then read UTC."""
+    _kernel_company_clock_speed()
+    return datetime.now(timezone.utc)
+
+
+def _persist_company_clock_source(path: Path, source: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_name(path.name + f".{os.getpid()}.tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        stream.write(source + "\n")
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temporary, path)
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def build_app(config_path: str | Path):
     config = RuntimeConfig.model_validate(private_json(Path(config_path)))
     config.issue_config_path = Path(config_path).resolve()
     config.state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    store = SQLiteStore(config.state_root / "state.sqlite")
+    store = SQLiteStore(config.state_root / "state.sqlite", busy_timeout_seconds=config.sqlite_busy_timeout_seconds)
     gateway = MailuGateway(config.mail, private_json(config.mail_credentials_file))
     cache: dict[str, ERPNextAdapter] = {}
 
@@ -625,6 +701,7 @@ def build_app(config_path: str | Path):
     }
     engine.environment_manifest = environment_manifest()
     engine.environment_manifest_provider = environment_manifest
+    engine.company_clock_mode = "shared" if config.shared_company_clock_enabled else "real"
     evaluation_evidence_directory = config.state_root / "evaluation-evidence"
     engine.evaluation_service = build_evaluation_service(
         engine, store, evaluation_evidence_directory,
@@ -652,9 +729,12 @@ def build_app(config_path: str | Path):
             engine.company_issue_activity = issue_workflow.service.activity
     app = create_app(engine, private_json(config.principals_file))
     workers = MailWorkers(engine, config.mail["actors"],
-                          viv_mailbox_name=config.mail.get("smtp4dev_mailbox_name", "Default"))
-    company_clock = CompanyClockWorker(engine)
+                          mailbox_idle_renewal_seconds=config.mailbox_idle_renewal_seconds)
+    company_clock = CompanyClockWorker(engine, shared_time_enabled=config.shared_company_clock_enabled,
+                                       observation_seconds=config.company_clock_observation_seconds)
     engine.company_clock_wake = company_clock.wake
+    shared_clock_publisher = None
+    guest_kernel_clock = None
     background_worker = None
     if config.actor_workers.supplier_url is not None and config.actor_workers.supplier_token is not None:
         background_worker = BackgroundWorkerClient(
@@ -739,8 +819,6 @@ def build_app(config_path: str | Path):
     else:
         engine.provider_experiment_unavailable = provider_experiments_unavailable or {
             "code": "provider_experiments_unavailable"}
-    engine.viv_activity_version = workers.viv_activity_version
-    engine.wait_for_viv_activity = workers.wait_for_viv_activity
 
     feedback_workflow = None
     feedback_configuration_error = None
@@ -789,7 +867,157 @@ def build_app(config_path: str | Path):
 
     @asynccontextmanager
     async def lifespan(_app):
-        initialize_company_runtime(engine, config.company_binding, config.company_clock_rate)
+        nonlocal shared_clock_publisher, guest_kernel_clock
+        if config.kernel_company_clock_enabled:
+            _kernel_company_clock_now()
+        initialize_company_runtime(engine, config.company_binding)
+        shared_clock_publisher = None
+        engine.company_time_provider = None
+        engine.company_clock_speed_setter = None
+        engine.company_clock_speed_reader = None
+        mode_path = config.state_root / "company-clock-source"
+        desired_clock_source = "shared" if config.shared_company_clock_enabled else "real"
+        kernel_mode_ready = False
+        try:
+            previous_clock_source = _company_clock_source(mode_path)
+            company = engine.company_state()
+            was_shared = previous_clock_source in {"shared", "transition:shared", "transition:real"}
+            was_kernel = previous_clock_source == "kernel"
+            if config.kernel_company_clock_enabled:
+                if (company is not None and
+                        engine._time(company["simulated_time"]) > datetime.now(timezone.utc)):
+                    raise KernelCompanyClockConfigurationError(
+                        "guest kernel time precedes persisted company time; seed the guest at or after company time"
+                    )
+                kernel_now = lambda: datetime.now(timezone.utc)
+                # Persisting the source is part of clock-state initialization. If
+                # it fails, use the existing unavailable-source handling below.
+                _persist_company_clock_source(mode_path, "kernel")
+                kernel_mode_ready = True
+                engine.company_time_provider = kernel_now
+                engine.company_clock_mode = "kernel"
+                company_clock.time_provider = kernel_now
+                company_clock.shared_time_enabled = False
+                # Kernel time already includes the accelerated elapsed time. Do not
+                # recover or rebase the previous shared-clock epoch here.
+                try:
+                    from .guest_kernel_clock import GuestKernelClockClient
+                    guest_kernel_clock = GuestKernelClockClient(
+                        config.kernel_company_clock_url, config.kernel_company_clock_token_file,
+                        private_secret,
+                    )
+                    engine.company_clock_speed_setter = guest_kernel_clock.set_speed
+                    engine.company_clock_speed_reader = guest_kernel_clock.speed
+                except Exception as control_error:
+                    engine.company_clock_speed_setter = None
+                    engine.company_clock_speed_reader = None
+                    engine.company_clock_control_error = type(control_error).__name__
+                    frames = [(frame.filename, frame.lineno, frame.name)
+                              for frame in traceback.extract_tb(control_error.__traceback__)]
+                    LOG.error("kernel company clock speed control unavailable exception_type=%s stack=%s",
+                              type(control_error).__name__, frames)
+            elif desired_clock_source == "shared":
+                from .shared_clock import SharedCompanyClock
+                transition_instant = None
+                if company is not None and not was_shared:
+                    # Reserve the elapsed real-time interval before moving the
+                    # anchor into the shared source's epoch domain.
+                    real_now = datetime.now(timezone.utc)
+                    real_anchor = engine._time(company["wall_anchor"])
+                    # ``wall_anchor`` may be in the future after a source
+                    # correction; cap elapsed time there as tick does.
+                    transition_instant = engine._time(company["simulated_time"]) + (
+                        max(real_now, real_anchor) - real_anchor
+                    )
+                initial_instant = transition_instant
+                if initial_instant is None:
+                    initial_instant = (engine._time(company["simulated_time"]) if company is not None
+                                       else None) if was_shared else datetime.now(timezone.utc)
+                clock_state_path = config.shared_company_clock_state or (config.state_root / "company-clock.json")
+                shared_clock = SharedCompanyClock(
+                    clock_state_path, config.shared_company_clock_file,
+                    initial_instant=initial_instant,
+                    reset_to_initial=not was_shared,
+                    require_existing_state=was_shared,
+                )
+                shared_clock_publisher = SharedCompanyClockPublisherWorker(shared_clock)
+                engine.company_time_provider = shared_clock_publisher.now
+                engine.company_clock_speed_setter = shared_clock_publisher.set_speed
+                engine.company_clock_speed_reader = shared_clock_publisher.speed
+                engine.company_clock_mode = "shared"
+                company_clock.time_provider = shared_clock_publisher.now
+                _persist_company_clock_source(mode_path, "transition:shared")
+                if company is not None:
+                    shared_now = shared_clock.now()
+                    engine.store.update_company(
+                        "company", simulated_time=shared_now, wall_anchor=shared_now,
+                    )
+                _persist_company_clock_source(mode_path, "shared")
+                shared_clock_publisher.start()
+            elif was_shared:
+                # Recover the shared epoch through the same durable publisher
+                # state, then atomically rebase both persisted time fields onto
+                # the real clock so no interval is replayed or discarded.
+                from .shared_clock import SharedCompanyClock
+                clock_state_path = config.shared_company_clock_state or (config.state_root / "company-clock.json")
+                shared_clock = SharedCompanyClock(
+                    clock_state_path, config.shared_company_clock_file,
+                    initial_instant=(engine._time(company["simulated_time"]) if company is not None else None),
+                    require_existing_state=True,
+                )
+                try:
+                    shared_now = shared_clock.now()
+                    _persist_company_clock_source(mode_path, "transition:real")
+                    if company is not None:
+                        real_now = datetime.now(timezone.utc)
+                        engine.store.update_company(
+                            "company", simulated_time=shared_now, wall_anchor=real_now,
+                        )
+                finally:
+                    shared_clock.close()
+                _persist_company_clock_source(mode_path, "real")
+                engine.company_clock_mode = "real"
+            elif was_kernel:
+                if company is not None:
+                    engine.store.update_company(
+                        "company", wall_anchor=datetime.now(timezone.utc),
+                    )
+                _persist_company_clock_source(mode_path, "real")
+                engine.company_clock_mode = "real"
+            else:
+                engine.company_clock_mode = "real"
+        except Exception as error:
+            if config.kernel_company_clock_enabled and kernel_mode_ready:
+                # A speed-control/configuration failure must not stop local guest
+                # time from advancing the company runtime.
+                kernel_now = lambda: datetime.now(timezone.utc)
+                engine.company_time_provider = kernel_now
+                engine.company_clock_speed_setter = None
+                engine.company_clock_speed_reader = None
+                engine.company_clock_mode = "kernel"
+                company_clock.time_provider = kernel_now
+                company_clock.shared_time_enabled = False
+                company_clock.error = type(error).__name__
+                frames = [(frame.filename, frame.lineno, frame.name)
+                          for frame in traceback.extract_tb(error.__traceback__)]
+                LOG.error("kernel company clock control initialization failed exception_type=%s stack=%s",
+                          type(error).__name__, frames)
+            else:
+                def unavailable_company_time(failure=error):
+                    raise RuntimeError("configured company clock source is unavailable") from failure
+
+                engine.company_time_provider = unavailable_company_time
+                engine.company_clock_speed_setter = None
+                engine.company_clock_speed_reader = None
+                company_clock.time_provider = unavailable_company_time
+                company_clock.shared_time_enabled = True
+                company_clock.error = type(error).__name__
+                frames = [(frame.filename, frame.lineno, frame.name)
+                          for frame in traceback.extract_tb(error.__traceback__)]
+                LOG.error("company clock source initialization failed exception_type=%s stack=%s",
+                          type(error).__name__, frames)
+                if isinstance(error, KernelCompanyClockConfigurationError):
+                    LOG.error("kernel company clock configuration failed: %s", error)
         if config.workers_enabled:
             workers.start()
             company_clock.start()
@@ -798,10 +1026,23 @@ def build_app(config_path: str | Path):
         try:
             yield
         finally:
+            # Stop new work in every worker before joining any of them. This
+            # prevents ongoing producers from starving a draining DB operation.
+            workers.stopped.set()
+            workers.changed.set()
+            company_clock.stopped.set()
+            company_clock.wake()
+            if company_background is not None:
+                company_background.stopped.set()
+                company_background.wake()
             workers.stop()
             if company_background is not None:
                 company_background.stop()
             company_clock.stop()
+            if shared_clock_publisher is not None:
+                shared_clock_publisher.stop()
+            if guest_kernel_clock is not None:
+                guest_kernel_clock.close()
             engine.actor_turn_client.session.close()
             provider_worker_client.session.close()
             if portal_client is not None:
@@ -828,7 +1069,7 @@ def build_app(config_path: str | Path):
         if feedback_workflow is not None:
             if feedback_workflow.error:
                 components["company_feedback"] = feedback_workflow.error
-            with store.transaction() as connection:
+            with store.transaction(write=False) as connection:
                 outstanding = connection.execute("SELECT count(*) FROM company_feedback_actions WHERE stage IN ('uncertain','submitting') OR last_error IS NOT NULL").fetchone()[0]
                 feedback_health = connection.execute("SELECT result_json FROM company_feedback_runtime_reports WHERE provider='workflow_health'").fetchone()
                 provider_mail_health = connection.execute(
@@ -850,6 +1091,16 @@ def build_app(config_path: str | Path):
             components["company_binding"] = "NotConfigured"
         if company_clock.error:
             components["company_clock"] = company_clock.error
+        if getattr(engine, "company_clock_control_error", None):
+            components["company_clock_speed_control"] = engine.company_clock_control_error
+        if shared_clock_publisher is not None:
+            if shared_clock_publisher.error is not None:
+                components["shared_company_clock_publisher"] = type(shared_clock_publisher.error).__name__
+            else:
+                try:
+                    shared_clock_publisher.speed()
+                except Exception as error:
+                    components["shared_company_clock_publisher"] = type(error).__name__
         if company_clock.dispatch_error:
             components["company_event_dispatch"] = company_clock.dispatch_error
         if company_background is not None:

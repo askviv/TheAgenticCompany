@@ -8478,7 +8478,7 @@
     "The 200 intake rows cover clinic (80), hotel (71) and automotive service (49) callbacks. Hotel and automotive customer/partner intake can fit this company’s external service workflows; clinic intake needs an explicit sensitive-health-data purpose and access treatment. Source-specific adapters and form flows remain implementation work.",
     "CoffeeBench has nine experiment TOMLs and 21 configured seed runs within one 90-day coffee economy; they are comparisons/configurations, not nine independent business assignments.",
     "E-CommerceBench is a configurable 365-day commerce episode, not a discrete task bank. The current company integration connects the native lifecycle to ERP events and shared background state; its saved benchmark metric panels remain distinct from other benchmarks.",
-    "The current experiment library also contains 105 non-coding workplace tasks; other workplace tasks were omitted under prior scope authorization. This count is separate from benchmark source catalogues.",
+    "The current experiment library also contains 79 business workplace tasks; other workplace tasks were omitted under prior scope authorization. This count is separate from benchmark source catalogues.",
     "All upstream task rows are preserved in the private source audit artifact. Public compatibility responses expose curated catalogue counts, fit summaries, source revisions and implementation/source-integrity notes; they do not expose task criteria, action arguments or private source records."
   ],
   "public_catalogue": {
@@ -8487,9 +8487,9 @@
     "library_inventory": [
       {
         "name": "Current workplace library",
-        "count": 105,
+        "count": 79,
         "classification": "available",
-        "summary": "105 non-coding workplace tasks are in the current library. Other workplace tasks were omitted under earlier scope authorization."
+        "summary": "79 business workplace tasks are in the current library. Other workplace tasks were omitted under earlier scope authorization."
       },
       {
         "name": "A1–S01 company scenarios",

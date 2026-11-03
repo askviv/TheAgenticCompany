@@ -52,10 +52,10 @@ class ProviderPortalClientError(RuntimeError):
 
 
 class ProviderPortalClient:
-    def __init__(self, base_url: str, bearer_token: SecretStr | str, *, timeout_seconds: float = 15,
+    def __init__(self, base_url: str, bearer_token: SecretStr | str, *, timeout_seconds: float | None = None,
                  session: requests.Session | None = None):
         token = bearer_token.get_secret_value() if isinstance(bearer_token, SecretStr) else bearer_token
-        if not base_url or not token or timeout_seconds <= 0:
+        if not base_url or not token or (timeout_seconds is not None and timeout_seconds <= 0):
             raise ValueError("provider portal connection is incomplete")
         self.base_url = base_url.rstrip("/")
         self.token = token

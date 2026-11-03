@@ -1,7 +1,7 @@
 # Intro
 
 This directory contains code & configs needed to run all services,
-including GitLab, ownCloud, Plane, and RocketChat. Below are the URLs, usernames,
+including ownCloud, Plane, and RocketChat. Below are the URLs, usernames,
 and passwords for each service.
 
 Caveat: `the-agent-company.com` is a real domain where we host the project website
@@ -31,11 +31,6 @@ to the file. If you are hosting the services on your local machine, use
 `127.0.0.1 the-agent-company.com`.
 
 </details>
-
-## GitLab
-* service url: http://the-agent-company.com:8929
-* root email: `root@local`
-* root password: `theagentcompany`
 
 ## ownCloud
 * service url: http://the-agent-company.com:8092

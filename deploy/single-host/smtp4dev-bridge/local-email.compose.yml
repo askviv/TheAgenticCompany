@@ -1,0 +1,11 @@
+# Merge with the Compose file that owns your existing smtp4dev service.
+services:
+  smtp4dev:
+    environment:
+      RelayOptions__SmtpServer: ${SMTP4DEV_RELAY_HOST:?Set the company Mailu hostname}
+      RelayOptions__SmtpPort: ${SMTP4DEV_RELAY_PORT:-2587}
+      RelayOptions__TlsMode: StartTls
+      RelayOptions__Login: ${SMTP4DEV_RELAY_LOGIN:?Set the managed Mailu reply-relay login}
+      RelayOptions__Password: ${SMTP4DEV_RELAY_PASSWORD:?Set the managed Mailu reply-relay password privately}
+      RelayOptions__SenderAddress: ""
+      RelayOptions__AutomaticRelayExpression: ${SMTP4DEV_RELAY_EXPRESSION:?Set the company-recipient expression}

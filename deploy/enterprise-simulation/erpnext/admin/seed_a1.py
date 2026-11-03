@@ -24,7 +24,17 @@ WAREHOUSE = "Stores - TAC"
 RUN_DATE = "2026-10-01"
 SHIPPING_MARKER_FIELD = "custom_tac_approval_marker"
 EMPLOYEE_IDENTITIES = Path("/opt/company-identities.json")
-SANDBOX_EMPLOYEE_PASSWORD = "theagentcompany"
+
+
+def _sandbox_password() -> str:
+    secret_path = Path(os.environ.get("TAC_SANDBOX_PASSWORD_FILE", "/run/secrets/site-admin-password"))
+    if secret_path.is_file():
+        value = secret_path.read_text(encoding="utf-8").rstrip("\r\n")
+    else:
+        value = os.environ.get("TAC_SANDBOX_PASSWORD", "theagentcompany")
+    if not value:
+        raise RuntimeError("Required ERP sandbox password is empty")
+    return value
 
 
 def ensure_shipping_marker_field() -> str:
@@ -215,7 +225,7 @@ def _ensure_users(site: str, credentials_dir: Path) -> None:
         agent = frappe.get_doc({
             "doctype": "User", "email": agent_email, "first_name": "The Agent Company",
             "username": "theagentcompany", "enabled": 1, "user_type": "System User",
-            "send_welcome_email": 0, "new_password": "theagentcompany",
+            "send_welcome_email": 0, "new_password": _sandbox_password(),
             "roles": [{"role": "Simulation ERP Agent"}],
         })
         agent.flags.no_welcome_mail = True
@@ -323,7 +333,7 @@ def _ensure_company_employees() -> None:
                 "enabled": 1,
                 "user_type": "System User",
                 "send_welcome_email": 0,
-                "new_password": SANDBOX_EMPLOYEE_PASSWORD,
+                "new_password": _sandbox_password(),
                 "roles": [{"role": role_name} for role_name in user_roles],
             })
             user.flags.no_welcome_mail = True
@@ -376,8 +386,8 @@ def _ensure_outgoing_email() -> None:
         "enable_outgoing": 1,
         "enable_incoming": 0,
         "default_outgoing": 1,
-        "smtp_server": "mail.company.example.test",
-        "smtp_port": 2587,
+        "smtp_server": os.environ.get("TAC_MAIL_HOST", "mail.company.example.test"),
+        "smtp_port": int(os.environ.get("TAC_MAIL_SMTP_PORT", "2587")),
         "use_tls": 1,
         "use_ssl": 0,
         "no_smtp_authentication": 0,
@@ -392,37 +402,45 @@ def _ensure_outgoing_email() -> None:
         frappe.get_doc({"doctype": "Email Account", **values}).insert(ignore_permissions=True)
 
 
+def _ensure_company_business_records() -> dict[str, str]:
+    """Ensure the shared native business records without creating scenario documents."""
+    if not frappe.db.exists("Supplier Group", "Raw Material Suppliers"):
+        frappe.get_doc({"doctype": "Supplier Group", "supplier_group_name": "Raw Material Suppliers",
+                        "parent_supplier_group": "All Supplier Groups", "is_group": 0}).insert(ignore_permissions=True)
+    if not frappe.db.exists("Supplier", SUPPLIER):
+        frappe.get_doc({"doctype": "Supplier", "supplier_name": SUPPLIER,
+                        "supplier_group": "Raw Material Suppliers", "supplier_type": "Company",
+                        "country": "United Kingdom"}).insert(ignore_permissions=True)
+    if not frappe.db.exists("Warehouse", WAREHOUSE):
+        frappe.get_doc({"doctype": "Warehouse", "warehouse_name": WAREHOUSE,
+                        "company": COMPANY, "is_group": 0}).insert(ignore_permissions=True)
+    if not frappe.db.exists("Item", ITEM):
+        frappe.get_doc({"doctype": "Item", "item_code": ITEM, "item_name": "Precision Drive Component",
+                        "item_group": "Raw Material", "stock_uom": "Nos", "is_stock_item": 1,
+                        "include_item_in_manufacturing": 1,
+                        "item_defaults": [{"company": COMPANY, "default_warehouse": WAREHOUSE}]
+                        }).insert(ignore_permissions=True)
+    if not frappe.db.exists("Customer Group", "Commercial"):
+        frappe.get_doc({"doctype": "Customer Group", "customer_group_name": "Commercial",
+                        "parent_customer_group": "All Customer Groups", "is_group": 0}).insert(ignore_permissions=True)
+    if not frappe.db.exists("Territory", "United Kingdom"):
+        frappe.get_doc({"doctype": "Territory", "territory_name": "United Kingdom",
+                        "parent_territory": "All Territories", "is_group": 0}).insert(ignore_permissions=True)
+    if not frappe.db.exists("Customer", CUSTOMER):
+        frappe.get_doc({"doctype": "Customer", "customer_name": CUSTOMER, "customer_type": "Company",
+                        "customer_group": "Commercial", "territory": "United Kingdom"}).insert(ignore_permissions=True)
+    return {"supplier_id": SUPPLIER, "item_id": ITEM, "warehouse_id": WAREHOUSE,
+            "customer_id": CUSTOMER}
+
+
 def seed(site: str, runtime_dir: str) -> dict[str, str]:
     frappe.init(site, sites_path="/home/frappe/frappe-bench/sites")
     frappe.connect()
     frappe.set_user("Administrator")
     try:
         ensure_shipping_marker_field()
-        ensure_utc_timezone()
-        _setup_company()
-        if not frappe.db.exists("Supplier Group", "Raw Material Suppliers"):
-            frappe.get_doc({
-                "doctype": "Supplier Group", "supplier_group_name": "Raw Material Suppliers",
-                "parent_supplier_group": "All Supplier Groups", "is_group": 0,
-            }).insert(ignore_permissions=True)
-        if not frappe.db.exists("Supplier", SUPPLIER):
-            frappe.get_doc({
-                "doctype": "Supplier", "supplier_name": SUPPLIER,
-                "supplier_group": "Raw Material Suppliers", "supplier_type": "Company",
-                "country": "United Kingdom",
-            }).insert(ignore_permissions=True)
-        if not frappe.db.exists("Warehouse", WAREHOUSE):
-            frappe.get_doc({
-                "doctype": "Warehouse", "warehouse_name": WAREHOUSE,
-                "company": COMPANY, "is_group": 0,
-            }).insert(ignore_permissions=True)
-        if not frappe.db.exists("Item", ITEM):
-            frappe.get_doc({
-                "doctype": "Item", "item_code": ITEM, "item_name": "Precision Drive Component",
-                "item_group": "Raw Material", "stock_uom": "Nos", "is_stock_item": 1,
-                "include_item_in_manufacturing": 1,
-                "item_defaults": [{"company": COMPANY, "default_warehouse": WAREHOUSE}],
-            }).insert(ignore_permissions=True)
+        setup_company(site, runtime_dir)
+        _ensure_company_business_records()
         if not frappe.db.exists("Item Group", "Simulation Services"):
             frappe.get_doc({
                 "doctype": "Item Group", "item_group_name": "Simulation Services",
@@ -434,33 +452,6 @@ def seed(site: str, runtime_dir: str) -> dict[str, str]:
                 "item_name": "Expedited Freight Service", "item_group": "Simulation Services",
                 "stock_uom": "Nos", "is_stock_item": 0,
             }).insert(ignore_permissions=True)
-
-        if not frappe.db.exists("Customer Group", "Commercial"):
-            frappe.get_doc({
-                "doctype": "Customer Group", "customer_group_name": "Commercial",
-                "parent_customer_group": "All Customer Groups", "is_group": 0,
-            }).insert(ignore_permissions=True)
-        if not frappe.db.exists("Territory", "United Kingdom"):
-            frappe.get_doc({
-                "doctype": "Territory", "territory_name": "United Kingdom",
-                "parent_territory": "All Territories", "is_group": 0,
-            }).insert(ignore_permissions=True)
-        if not frappe.db.exists("Customer", CUSTOMER):
-            frappe.get_doc({
-                "doctype": "Customer", "customer_name": CUSTOMER, "customer_type": "Company",
-                "customer_group": "Commercial", "territory": "United Kingdom",
-            }).insert(ignore_permissions=True)
-
-        _ensure_role("Simulation ERP Agent", "Read-only benchmark access to ERP business records")
-        _ensure_role("Simulation ERP Reviewer", "Can request invoice review through the configured workflow")
-        _grant("Simulation ERP Agent", ("Purchase Order", "Purchase Receipt", "Purchase Invoice", "Supplier",
-                                          "Item", "Warehouse", "Bin", "Payment Entry", "Payment Entry Reference",
-                                          "Customer", "Sales Order", "Sales Invoice"))
-        _grant("Simulation ERP Reviewer", ("Purchase Order", "Purchase Receipt", "Purchase Invoice", "Supplier",
-                                             "Item", "Warehouse", "Bin", "Payment Entry", "Payment Entry Reference",
-                                             "Account", "Customer", "Sales Order", "Sales Invoice"),
-               write=("Purchase Invoice",))
-        _ensure_workflow()
 
         purchase_orders = frappe.get_all(
             "Purchase Order", filters={"supplier": SUPPLIER, "company": COMPANY,
@@ -550,19 +541,6 @@ def seed(site: str, runtime_dir: str) -> dict[str, str]:
             sales_order.insert(ignore_permissions=True)
             sales_order.submit()
 
-        _ensure_outgoing_email()
-        _ensure_users(site, Path(runtime_dir) / "api-credentials")
-        # The ERPNext setup hook creates the company and accounts, but current
-        # Frappe also tracks setup separately for each installed application.
-        # Mark those native flags only after the company seed has completed.
-        from frappe.desk.page.setup_wizard.setup_wizard import enable_setup_wizard_complete
-
-        installed = set(frappe.get_all("Installed Application", pluck="app_name"))
-        if not {"frappe", "erpnext"}.issubset(installed):
-            raise RuntimeError("Required ERPNext applications are not installed")
-        for app_name in ("frappe", "erpnext"):
-            enable_setup_wizard_complete(app_name)
-        frappe.db.set_single_value("System Settings", "setup_complete", 1)
         frappe.db.commit()
         frappe.clear_cache()
         return {
@@ -582,5 +560,52 @@ def seed(site: str, runtime_dir: str) -> dict[str, str]:
             "billed_qty": "10000",
             "expected_unreceived_billed_qty": "2000",
         }
+    finally:
+        frappe.destroy()
+
+
+def setup_company(site: str, runtime_dir: str) -> dict[str, str]:
+    """Apply the native company, employee, permissions and workflow baseline only."""
+    ensure_utc_timezone()
+    _setup_company()
+    business_records = _ensure_company_business_records()
+    _ensure_role("Simulation ERP Agent", "Read-only benchmark access to ERP business records")
+    _ensure_role("Simulation ERP Reviewer", "Can request invoice review through the configured workflow")
+    _grant("Simulation ERP Agent", ("Purchase Order", "Purchase Receipt", "Purchase Invoice", "Supplier",
+                                      "Item", "Warehouse", "Bin", "Payment Entry", "Payment Entry Reference",
+                                      "Customer", "Sales Order", "Sales Invoice"))
+    _grant("Simulation ERP Reviewer", ("Purchase Order", "Purchase Receipt", "Purchase Invoice", "Supplier",
+                                         "Item", "Warehouse", "Bin", "Payment Entry", "Payment Entry Reference",
+                                         "Account", "Customer", "Sales Order", "Sales Invoice"),
+           write=("Purchase Invoice",))
+    _ensure_workflow()
+    _ensure_outgoing_email()
+    _ensure_users(site, Path(runtime_dir) / "api-credentials")
+    from frappe.desk.page.setup_wizard.setup_wizard import enable_setup_wizard_complete
+
+    installed = set(frappe.get_all("Installed Application", pluck="app_name"))
+    if not {"frappe", "erpnext"}.issubset(installed):
+        raise RuntimeError("Required ERPNext applications are not installed")
+    for app_name in ("frappe", "erpnext"):
+        enable_setup_wizard_complete(app_name)
+    frappe.db.set_single_value("System Settings", "setup_complete", 1)
+    frappe.db.commit()
+    frappe.clear_cache()
+    return {
+        "site_name": site,
+        "company_id": COMPANY,
+        "company_name": COMPANY,
+        "company_abbr": COMPANY_ABBR,
+        **business_records,
+    }
+
+
+def setup_company_site(site: str, runtime_dir: str) -> dict[str, str]:
+    """Open a fresh native Frappe context and apply only company setup."""
+    frappe.init(site, sites_path="/home/frappe/frappe-bench/sites")
+    frappe.connect()
+    frappe.set_user("Administrator")
+    try:
+        return setup_company(site, runtime_dir)
     finally:
         frappe.destroy()

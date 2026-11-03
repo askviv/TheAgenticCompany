@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
@@ -20,7 +21,7 @@ LOG = logging.getLogger(__name__)
 class CompanyIssueWorkflow:
     def __init__(self, config, *, mail=None, store=None, scheduler=None, native=None):
         self.config = config
-        self.store = store or SQLiteStore(config.state_root / "state.sqlite")
+        self.store = store or SQLiteStore(config.state_root / "state.sqlite", busy_timeout_seconds=config.sqlite_busy_timeout_seconds)
         self.native = native or ERPNextSiteAdmin(config.erp_compose, config.erp_credentials_root.parent)
         profile = json.loads(config.company_profile_file.read_text())
         route, employee = resolve_company_issue_route(profile)
@@ -42,8 +43,20 @@ class CompanyIssueWorkflow:
             source_root=Path(__file__).resolve().parents[2],
             state_root=config.state_root,
         )
+        kernel_clock = None
+        if config.kernel_company_clock_enabled:
+            from .guest_kernel_clock import GuestKernelClockClient
+            from .runtime import private_secret
+            kernel_clock = GuestKernelClockClient(
+                config.kernel_company_clock_url, config.kernel_company_clock_token_file,
+                private_secret,
+            )
+            if scheduler is not None and isinstance(scheduler, SystemdIssueScheduler):
+                scheduler.registration_client = kernel_clock
         self.service = IssueHandoffService(IssueHandoffStore(self.store), mail, scheduler,
-                                          actors=config.mail["actors"], erp_public_url=config.erp_public_url)
+                                          actors=config.mail["actors"], erp_public_url=config.erp_public_url,
+                                          kernel_mode=config.kernel_company_clock_enabled,
+                                          now=kernel_clock.real_now if kernel_clock else lambda: datetime.now(timezone.utc))
         self.error: str | None = None
 
     def _consume(self, result) -> None:
@@ -108,6 +121,9 @@ def main() -> None:
     try:
         if args.issue_key:
             workflow.service.process(args.issue_key)
+            print(json.dumps({"issue_key": args.issue_key,
+                              "status": workflow.service.store.get(args.issue_key)["stage"]},
+                             separators=(",", ":")))
         elif args.maintenance:
             workflow.maintenance()
         else:

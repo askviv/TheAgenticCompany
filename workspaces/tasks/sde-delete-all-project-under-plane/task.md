@@ -1,1 +1,0 @@
-Delete all projects under the workspace in Plane repositories (http://the-agent-company.com:8091/).

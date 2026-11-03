@@ -8,12 +8,16 @@ outbox state, or treat an email sender header as approval authority.
 from __future__ import annotations
 
 import email
+import errno
+import imaplib
 import email.policy
 from email.header import decode_header, make_header
 import json
 from pathlib import Path
 import re
 import smtplib
+import socket
+import threading
 import time
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -21,10 +25,9 @@ from email.utils import getaddresses
 from typing import Any, Callable
 from urllib.parse import quote, urljoin
 
-import requests
 from authres import AuthenticationResultsHeader, AuthResError
 from imapclient import IMAPClient
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from servers.company.scenarios import (
     RealMailTransport,
@@ -49,7 +52,7 @@ class _ActorRecord(_ActorRef):
 
 
 class _GatewayConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, hide_input_in_errors=True)
 
     actors: list[_ActorRecord]
     mailu_smtp_host: str = "mail.company.example.test"
@@ -59,7 +62,7 @@ class _GatewayConfig(BaseModel):
     webmail_url: str = "https://mail.company.example.test/webmail/"
     delivery_aliases: dict[str, str] = Field(default_factory=dict)
     tls_ca_file: str | None = None
-    smtp_timeout_seconds: float = Field(default=20, gt=0)
+    smtp_timeout_seconds: float | None = Field(default=None, gt=0)
     confirm_timeout_seconds: float = Field(default=30, gt=0)
     smtp4dev_smtp_host: str = "127.0.0.1"
     smtp4dev_smtp_port: int = Field(default=19125, gt=0, le=65535)
@@ -74,11 +77,6 @@ class _GatewayConfig(BaseModel):
             raise ValueError("configured actor IDs must be unique")
         if len(actor_emails) != len(set(actor_emails)):
             raise ValueError("configured actor email addresses must be unique")
-        for actor in self.actors:
-            is_viv_id = actor.actor_id == SPECIAL_VIV_ID
-            is_viv_email = actor.email.casefold() == SPECIAL_VIV_EMAIL
-            if is_viv_id != is_viv_email:
-                raise ValueError("the configured Viv actor must use its fixed actor ID and address")
         from email.headerregistry import Address
         for address, actor_id in self.delivery_aliases.items():
             Address(addr_spec=address)
@@ -122,12 +120,6 @@ class _WaitContext(_PollContext):
     timeout: float = Field(default=30, gt=0)
 
 
-class _VivPollContext(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-    run_id: str = Field(min_length=1)
-    generation: int = Field(ge=0, strict=True)
-    known_ids: set[str]
 
 
 class _ActivityContext(BaseModel):
@@ -154,16 +146,6 @@ class MailReplySourceUnavailable(RuntimeError):
     """An employee reply has no unique exact source message in its inbox."""
 
 
-class SMTP4DevAPIError(RuntimeError):
-    """smtp4dev API request or response failed without exposing its body."""
-
-    def __init__(self, operation: str, status: int | None = None):
-        self.operation = operation
-        self.status = status
-        detail = f"smtp4dev {operation} failed"
-        if status is not None:
-            detail += f" (HTTP {status})"
-        super().__init__(detail)
 
 
 class EmployeeBrowserUnavailable(RuntimeError):
@@ -231,6 +213,25 @@ def _decoded_header(values: list[Any]) -> str:
     )
 
 
+def _address_header(values: list[Any]) -> str:
+    addresses = [address for _name, address in getaddresses([str(value) for value in values]) if address]
+    return addresses[0] if len(addresses) == 1 else ""
+
+
+def _normalize_mail_body(value: str) -> str:
+    return value.replace("\r\n", "\n").replace("\r", "\n")
+
+
+_COMPANY_TIME = TypeAdapter(AwareDatetime)
+
+
+def _company_time_label(value: str | datetime | None) -> str | None:
+    """Format an explicitly supplied simulation instant for company mail."""
+    if value is None:
+        return None
+    return _COMPANY_TIME.validate_python(value).isoformat()
+
+
 class MailuGateway:
     """Route run-scoped mail through the existing Mailu and smtp4dev services.
 
@@ -251,6 +252,9 @@ class MailuGateway:
         self._transport = RealMailTransport()
         self.employee_desktops = employee_desktops
         self._webmail_sender = webmail_sender
+        self._activity_clients: set[IMAPClient] = set()
+        self._activity_clients_lock = threading.Lock()
+        self._activity_waits_stopped = threading.Event()
 
     def set_employee_desktops(self, manager: Any | None) -> None:
         """Attach the coordinator-owned employee browser runtime after engine setup."""
@@ -271,7 +275,7 @@ class MailuGateway:
         return credentials
 
     def _is_viv(self, actor: _ActorRecord) -> bool:
-        return actor.actor_id == SPECIAL_VIV_ID and actor.email.casefold() == SPECIAL_VIV_EMAIL
+        return actor.actor_id == SPECIAL_VIV_ID
 
     def _employee_id(self, actor: _ActorRecord) -> str | None:
         if self._is_viv(actor):
@@ -508,9 +512,12 @@ class MailuGateway:
         reply_to_actor_id: str | None = None,
         automated: bool = False,
         delivery_address: str | None = None,
+        business_time: str | datetime | None = None,
         on_submission_started: Callable[[], None] = lambda: None,
+        on_submission_snapshot: Callable[[str, int], None] | None = None,
+        on_native_message_id: Callable[[str], None] | None = None,
     ) -> dict[str, Any]:
-        """Submit once, then require a native, correlated delivery receipt.
+        """Submit once and record SMTP acceptance without querying the recipient inbox.
 
         The callback marks the external submission boundary immediately before
         SMTP's send command. If submission outcome is uncertain, callers must
@@ -538,6 +545,9 @@ class MailuGateway:
             self._credentials_for(recipient_actor)
         if not isinstance(body, str):
             raise TypeError("body must be text")
+        company_time = _company_time_label(business_time)
+        if company_time is not None:
+            body = f"{body.rstrip()}\n\nCompany time: {company_time}"
         if delivery_address is not None and self.config.delivery_aliases.get(delivery_address) != recipient_actor.actor_id:
             raise PermissionError("delivery address is not a configured alias of the recipient mailbox")
 
@@ -550,6 +560,8 @@ class MailuGateway:
         message["Message-ID"] = context.message_id
         message["X-TAC-Run-ID"] = context.run_id
         message["X-TAC-Generation"] = str(context.generation)
+        if company_time is not None:
+            message["X-TAC-Company-Time"] = company_time
         if context.automated:
             message["Auto-Submitted"] = "auto-replied"
         if context.in_reply_to:
@@ -574,6 +586,44 @@ class MailuGateway:
                     {"actor_id": sender_actor.actor_id, "email": sender_actor.email},
                     reply_source,
                 )
+            sent_snapshot: dict[str, Any] | None = None
+            submission_time: datetime | None = None
+
+            def mark_browser_submission_started() -> None:
+                nonlocal submission_time, sent_snapshot
+                # Called inside the employee's activity lock before the native
+                # agent can submit. Earlier snapshots could include a different
+                # experiment's message while this action waits for the browser.
+                sent_snapshot = self._employee_sent_snapshot(sender_credentials)
+                submission_time = datetime.now(timezone.utc)
+                if on_submission_snapshot is not None:
+                    on_submission_snapshot(sent_snapshot["uidvalidity"], sent_snapshot["uid_next"])
+                else:
+                    on_submission_started()
+
+            native_message_id: str | None = None
+
+            def reconcile_browser_submission() -> None:
+                nonlocal native_message_id
+                if submission_time is None or sent_snapshot is None:
+                    raise MailReceiptMismatch("employee browser send returned without crossing the submission boundary")
+                native_message_id = self._employee_sent_message_id(
+                    sender_credentials,
+                    sender_actor.email,
+                    delivery_address or recipient_actor.email,
+                    context.subject,
+                    body,
+                    context.in_reply_to,
+                    sent_snapshot["uidvalidity"],
+                    sent_snapshot["uid_next"],
+                )
+                if native_message_id is None:
+                    raise MailDeliveryUnconfirmed(
+                        "employee browser submission has no unique matching Sent-folder message"
+                    )
+                if on_native_message_id is not None:
+                    on_native_message_id(native_message_id)
+
             webmail.send(
                 employee_id,
                 sender_actor.email,
@@ -590,23 +640,32 @@ class MailuGateway:
                 verify_reply_source=source_verifier,
                 reply_to=reply_to_actor.email if reply_to_actor is not None else None,
                 automated=context.automated,
-                on_submission_started=on_submission_started,
+                require_reply_to=reply_to_actor.email if reply_to_actor is not None else None,
+                on_submission_started=mark_browser_submission_started,
+                on_submission_completed=reconcile_browser_submission,
             )
+            if native_message_id is None:
+                raise MailDeliveryUnconfirmed("employee browser submission has no confirmed native Message-ID")
+            receipt_message_id = native_message_id
         elif delivery_address is None:
             self._smtp_send(sender_actor, recipient_actor, message, on_submission_started)
+            receipt_message_id = context.message_id
         else:
             self._smtp_send(sender_actor, recipient_actor, message, on_submission_started,
                             delivery_address=delivery_address)
+            receipt_message_id = context.message_id
         receipt = self.find_receipt(
             recipient_actor,
-            context.message_id,
+            receipt_message_id,
             context.subject,
             context.run_id,
             context.generation,
+            native_message=employee_id is not None,
+            submission_confirmed=True,
         )
         if receipt is None:
             raise MailDeliveryUnconfirmed(
-                "SMTP submission completed but no matching recipient receipt was confirmed"
+                "SMTP acceptance could not be established"
             )
         return {
             **receipt,
@@ -621,58 +680,143 @@ class MailuGateway:
         subject: str,
         run_id: str,
         generation: int,
+        *,
+        native_message: bool = False,
+        submission_confirmed: bool = False,
     ) -> dict[str, Any] | None:
-        """Reconcile an earlier submission using the recipient's native provider."""
-        recipient_actor = self._actor(recipient, "recipient")
-        context = _ReceiptContext(
-            subject=subject,
-            message_id=message_id,
-            run_id=run_id,
-            generation=generation,
-        )
-        if self._is_viv(recipient_actor):
-            fixture = {
-                "subject": context.subject,
-                "smtp4dev_base_url": self.config.smtp4dev_api_base_url,
-                "smtp4dev_mailbox_name": self.config.smtp4dev_mailbox_name,
-                "employee_mailbox": {"tls_ca_file": self.config.tls_ca_file},
-            }
-            receipt = self._transport.confirm_smtp4dev(fixture, context.message_id)
-            if receipt is None:
-                return None
-            headers = self._smtp4dev_headers(receipt["mailbox_uid"])
-            self._verify_headers(headers, context)
-        else:
-            credentials = self._credentials_for(recipient_actor)
-            fixture = {
-                "confirm_timeout_seconds": self.config.confirm_timeout_seconds,
-                "employee_mailbox": {
-                    "imap_host": self.config.mailu_imap_host,
-                    "imap_port": self.config.mailu_imap_port,
-                    "webmail_url": self.config.webmail_url,
-                    "tls_ca_file": self.config.tls_ca_file,
-                },
-            }
-            receipt = self._transport.confirm_message(
-                fixture,
-                credentials.model_dump(),
-                context.message_id,
-            )
-            if receipt is None:
-                return None
-            headers = self._mailu_headers(receipt["mailbox_uid"], credentials)
-            self._verify_headers(headers, context)
-            if headers["uidvalidity"] != str(receipt["uidvalidity"]):
-                raise MailReceiptMismatch("Mailu UIDVALIDITY changed during receipt confirmation")
+        """Describe confirmed submission; never inspect a recipient inbox.
 
+        A recovered native Message-ID has already been verified in the sender's
+        Sent folder. Other uncertain SMTP submissions remain uncertain until
+        acceptance is established; they are never inferred from a Message-ID.
+        """
+        recipient_actor = self._actor(recipient, "recipient")
+        context = _ReceiptContext(subject=subject, message_id=message_id,
+                                  run_id=run_id, generation=generation)
+        if not submission_confirmed and not native_message:
+            return None
         return {
-            **receipt,
+            "submission_status": "accepted",
+            "confirmation_source": "sender_sent_folder" if native_message else "smtp_acceptance",
             "message_id": context.message_id,
             "subject": context.subject,
             "run_id": context.run_id,
             "generation": context.generation,
             "recipient_actor_id": recipient_actor.actor_id,
         }
+
+    def employee_sent_message_id(
+        self, sender: dict[str, Any], recipient: dict[str, Any], subject: str, body: str,
+        in_reply_to: str | None, submission_started_at: str | None,
+        *, sent_uidvalidity: str | None = None, sent_uid_next: int | None = None,
+        business_time: str | datetime | None = None, delivery_address: str | None = None,
+    ) -> str | None:
+        """Recover one native browser submission from exact Sent-folder evidence."""
+        sender_actor = self._actor(sender, "sender")
+        recipient_actor = self._actor(recipient, "recipient")
+        if self._employee_id(sender_actor) is None:
+            return None
+        credentials = self._credentials_for(sender_actor)
+        if not submission_started_at:
+            return None
+        try:
+            datetime.fromisoformat(submission_started_at)
+        except ValueError as error:
+            raise MailReceiptMismatch("outbox submission timestamp is invalid") from error
+        company_time = _company_time_label(business_time)
+        if company_time is not None:
+            body = f"{body.rstrip()}\n\nCompany time: {company_time}"
+        if (not sent_uidvalidity or isinstance(sent_uid_next, bool)
+                or not isinstance(sent_uid_next, int)):
+            return None
+        return self._employee_sent_message_id(
+            credentials, sender_actor.email, delivery_address or recipient_actor.email, subject, body,
+            in_reply_to, sent_uidvalidity, sent_uid_next,
+        )
+
+    def _employee_sent_snapshot(self, credentials: _Credentials) -> dict[str, Any]:
+        with IMAPClient(
+            self.config.mailu_imap_host,
+            port=self.config.mailu_imap_port,
+            ssl=True,
+            ssl_context=_ssl_context(self.config.tls_ca_file),
+            timeout=self.config.smtp_timeout_seconds,
+        ) as client:
+            client.login(credentials.username, credentials.password)
+            sent_folders = []
+            for flags, _delimiter, mailbox in client.list_folders():
+                flag_names = {_flag_text(flag).casefold() for flag in (flags or [])}
+                if "\\sent" in flag_names:
+                    sent_folders.append(mailbox.decode("utf-8") if isinstance(mailbox, bytes) else str(mailbox))
+            if len(sent_folders) != 1:
+                raise MailReceiptMismatch("Mailu account does not expose one unambiguous Sent folder")
+            selected = client.select_folder(sent_folders[0], readonly=True)
+            uidvalidity = self._uidvalidity(selected)
+            uid_next = selected.get(b"UIDNEXT", selected.get("UIDNEXT"))
+            if isinstance(uid_next, bytes):
+                uid_next = uid_next.decode("ascii")
+            if isinstance(uid_next, bool) or not str(uid_next).isdigit() or int(uid_next) < 1:
+                raise MailReceiptMismatch("Mailu Sent folder selection has no valid UIDNEXT")
+            return {"uidvalidity": uidvalidity, "uid_next": int(uid_next)}
+
+    def _employee_sent_message_id(
+        self, credentials: _Credentials, sender_email: str, recipient_email: str,
+        subject: str, body: str, in_reply_to: str | None,
+        sent_uidvalidity: str, sent_uid_next: int,
+    ) -> str | None:
+        matches: list[str] = []
+        with IMAPClient(
+            self.config.mailu_imap_host,
+            port=self.config.mailu_imap_port,
+            ssl=True,
+            ssl_context=_ssl_context(self.config.tls_ca_file),
+            timeout=self.config.smtp_timeout_seconds,
+        ) as client:
+            client.login(credentials.username, credentials.password)
+            sent_folders = []
+            for flags, _delimiter, mailbox in client.list_folders():
+                flag_names = {_flag_text(flag).casefold() for flag in (flags or [])}
+                if "\\sent" in flag_names:
+                    sent_folders.append(mailbox.decode("utf-8") if isinstance(mailbox, bytes) else str(mailbox))
+            if len(sent_folders) != 1:
+                raise MailReceiptMismatch("Mailu account does not expose one unambiguous Sent folder")
+            selected = client.select_folder(sent_folders[0], readonly=True)
+            if self._uidvalidity(selected) != sent_uidvalidity:
+                raise MailReceiptMismatch("Mailu Sent folder UIDVALIDITY changed since submission began")
+            for uid in client.search(["UID", f"{sent_uid_next}:*"]):
+                if int(uid) < sent_uid_next:
+                    continue
+                fetched = client.fetch([uid], [b"BODY.PEEK[]"]).get(uid)
+                if not isinstance(fetched, dict):
+                    raise MailReceiptMismatch("Mailu Sent folder returned incomplete message evidence")
+                raw = fetched.get(b"BODY[]", b"")
+                parsed = email.message_from_bytes(raw, policy=email.policy.default)
+                actual_id = _single_header({"message-id": parsed.get_all("Message-ID", [])}, "message-id")
+                if not actual_id:
+                    continue
+                actual_recipients = {
+                    address.casefold()
+                    for _name, address in getaddresses(
+                        parsed.get_all("To", []) + parsed.get_all("Cc", [])
+                    ) if address
+                }
+                actual_in_reply_to = _single_header(
+                    {"in-reply-to": parsed.get_all("In-Reply-To", [])}, "in-reply-to"
+                )
+                body_part = parsed.get_body(preferencelist=("plain",))
+                actual_body = body_part.get_content() if body_part is not None else None
+                if (
+                    _address_header(parsed.get_all("From", [])).casefold() == sender_email.casefold()
+                    and actual_recipients == {recipient_email.casefold()}
+                    and _decoded_header(parsed.get_all("Subject", [])) == subject
+                    and actual_in_reply_to == in_reply_to
+                    and isinstance(actual_body, str)
+                    and _normalize_mail_body(actual_body) == _normalize_mail_body(body)
+                ):
+                    matches.append(actual_id)
+        if len(matches) > 1:
+            raise MailReceiptMismatch("Mailu Sent folder has multiple exact matches for the uncertain submission")
+        return matches[0] if matches else None
 
     def inspect_issue_notification(
         self,
@@ -824,23 +968,6 @@ class MailuGateway:
             "uidvalidity": str(uidvalidity),
         }
 
-    def _smtp4dev_headers(self, message_uuid: str) -> dict[str, str]:
-        detail_url = urljoin(
-            self.config.smtp4dev_api_base_url.rstrip("/") + "/",
-            f"api/Messages/{message_uuid}",
-        )
-        response = requests.get(detail_url, timeout=self.config.smtp_timeout_seconds)
-        response.raise_for_status()
-        headers: dict[str, list[str]] = {}
-        for item in response.json().get("headers", []):
-            name = str(item.get("name", "")).casefold()
-            headers.setdefault(name, []).append(str(item.get("value", "")).strip())
-        return {
-            "message_id": _single_header(headers, "message-id"),
-            "subject": _single_header(headers, "subject"),
-            "run_id": _single_header(headers, "x-tac-run-id"),
-            "generation": _single_header(headers, "x-tac-generation"),
-        }
 
     @staticmethod
     def _verify_headers(headers: dict[str, str], expected: _ReceiptContext) -> None:
@@ -1110,183 +1237,75 @@ class MailuGateway:
                 else:
                     client.idle_done()
 
-    def poll_viv(
-        self,
-        run_id: str,
-        generation: int,
-        known_ids: set[str],
-    ) -> list[dict[str, Any]]:
-        """Read only Viv mailbox messages correlated to this run generation.
 
-        smtp4dev is a shared capture inbox. Its paginated message summaries are
-        hydrated by the native detail and RFC822 download APIs, then filtered
-        by exact TAC run headers or exact Message-ID references. Message bodies
-        are returned to the caller and are never logged or cached here.
-        """
-        context = _VivPollContext(run_id=run_id, generation=generation, known_ids=known_ids)
-        summaries = self._smtp4dev_message_summaries()
-        found: list[dict[str, Any]] = []
-        base_url = self.config.smtp4dev_api_base_url.rstrip("/") + "/"
-        for summary in summaries:
-            provider_id = summary.get("id")
-            if not isinstance(provider_id, str) or not provider_id:
-                raise SMTP4DevAPIError("read message summary") from ValueError("summary id missing")
-            detail = self._smtp4dev_json(f"api/Messages/{quote(provider_id, safe='')}", "read message detail")
-            if detail.get("id") != provider_id:
-                raise MailReceiptMismatch("smtp4dev message ID changed between list and detail")
-            detail_headers = self._smtp4dev_detail_headers(detail)
-            detail_message_id = _single_header(detail_headers, "message-id")
-            if not detail_message_id:
-                raise SMTP4DevAPIError("read message detail") from ValueError("Message-ID header missing or ambiguous")
-            if provider_id in context.known_ids or detail_message_id in context.known_ids:
-                continue
-            if not self._viv_message_matches(detail_headers, context):
-                continue
-
-            mime_response = self._smtp4dev_get(
-                f"api/Messages/{quote(provider_id, safe='')}/download", "read message MIME"
-            )
+    def stop_activity_waits(self) -> None:
+        """Wake owned IMAP listeners; their threads retain connection cleanup."""
+        with self._activity_clients_lock:
+            self._activity_waits_stopped.set()
+            clients = tuple(self._activity_clients)
+        failures = []
+        for client in clients:
             try:
-                raw_mime = mime_response.content
-                if not isinstance(raw_mime, bytes) or not raw_mime:
-                    raise ValueError("empty MIME response")
-                parsed = email.message_from_bytes(raw_mime, policy=email.policy.default)
-            except Exception as error:
-                raise SMTP4DevAPIError("parse message MIME", mime_response.status_code) from error
-
-            mime_message_id = _single_header(
-                {"message-id": parsed.get_all("Message-ID", [])}, "message-id"
-            )
-            if mime_message_id != detail_message_id:
-                raise MailReceiptMismatch("smtp4dev MIME Message-ID does not match message detail")
-            if not self._viv_message_matches(parsed, context):
-                raise MailReceiptMismatch("smtp4dev MIME correlation does not match message detail")
-            body_part = parsed.get_body(preferencelist=("plain", "html"))
-            if body_part is None:
-                raise SMTP4DevAPIError("read message body") from ValueError("plain-text or HTML MIME body missing")
-            body = body_part.get_content()
-            if not isinstance(body, str):
-                raise SMTP4DevAPIError("decode message body") from TypeError("MIME body is not text")
-            if not body:
-                raise SMTP4DevAPIError("read message body") from ValueError("MIME body is empty")
-
-            mailbox = quote(self.config.smtp4dev_mailbox_name, safe="")
-            message_path = quote(provider_id, safe="")
-            webmail_url = (
-                self.config.smtp4dev_api_base_url.rstrip("/")
-                + f"/#/messages/mailbox/{mailbox}/folder/INBOX/message/{message_path}"
-            )
-            found.append({
-                "message_id": mime_message_id,
-                "subject": _decoded_header(parsed.get_all("Subject", [])),
-                "body": body,
-                "from": _decoded_header(parsed.get_all("From", [])),
-                "to": _decoded_header(parsed.get_all("To", [])),
-                "in_reply_to": _decoded_header(parsed.get_all("In-Reply-To", [])),
-                "references": _decoded_header(parsed.get_all("References", [])),
-                "provider_id": provider_id,
-                "webmail_url": webmail_url,
-                "run_id": context.run_id,
-                "generation": context.generation,
-            })
-        return found
+                # Shutdown wakes both IDLE's native poll and a blocked IMAP read.
+                # Do not close the descriptor or buffered file from this thread:
+                # imaplib.shutdown() closes the file first and can wait on a reader.
+                client.socket().shutdown(socket.SHUT_RDWR)
+            except OSError as error:
+                # The owning context may already have finished its native cleanup.
+                if error.errno not in {errno.EBADF, errno.ENOTCONN}:
+                    failures.append(error)
+        if failures:
+            raise ExceptionGroup("IMAP listener cancellation failed", failures)
 
     def wait_for_activity(self, actor: dict[str, Any], timeout: float = 30) -> bool:
         """Return whether the actor's Mailu INBOX signals activity through IMAP IDLE."""
+        if self._activity_waits_stopped.is_set():
+            return False
         mailbox_actor = self._actor(actor, "mailbox")
         if self._is_viv(mailbox_actor):
             raise ValueError("Viv's smtp4dev inbox does not provide Mailu IMAP IDLE")
         credentials = self._credentials_for(mailbox_actor)
         context = _ActivityContext(timeout=timeout)
-        with IMAPClient(
+        client = IMAPClient(
             self.config.mailu_imap_host,
             port=self.config.mailu_imap_port,
             ssl=True,
             ssl_context=_ssl_context(self.config.tls_ca_file),
-            timeout=max(self.config.smtp_timeout_seconds, context.timeout),
-        ) as client:
-            client.login(credentials.username, credentials.password)
-            client.select_folder("INBOX", readonly=True)
-            client.idle()
-            try:
-                activity = client.idle_check(timeout=context.timeout)
-            except BaseException as error:
+            timeout=(None if self.config.smtp_timeout_seconds is None else
+                     max(self.config.smtp_timeout_seconds, context.timeout)),
+        )
+        with self._activity_clients_lock:
+            stopped = self._activity_waits_stopped.is_set()
+            if not stopped:
+                self._activity_clients.add(client)
+        if stopped:
+            # This connection finished opening after the cancellation snapshot.
+            client.shutdown()
+            return False
+        try:
+            with client:
+                if self._activity_waits_stopped.is_set():
+                    return False
+                client.login(credentials.username, credentials.password)
+                client.select_folder("INBOX", readonly=True)
+                client.idle()
                 try:
-                    client.idle_done()
-                except BaseException as cleanup_error:
-                    error.add_note(f"IMAP IDLE cleanup also failed: {type(cleanup_error).__name__}")
-                raise
-            client.idle_done()
-        return bool(activity)
-
-    def _smtp4dev_get(self, path: str, operation: str, *, params: dict[str, Any] | None = None) -> requests.Response:
-        url = urljoin(self.config.smtp4dev_api_base_url.rstrip("/") + "/", path)
-        try:
-            response = requests.get(url, params=params, timeout=self.config.smtp_timeout_seconds)
-            response.raise_for_status()
-            return response
-        except requests.RequestException as error:
-            status = error.response.status_code if isinstance(error, requests.HTTPError) and error.response else None
-            raise SMTP4DevAPIError(operation, status) from error
-
-    def _smtp4dev_json(self, path: str, operation: str, *, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        response = self._smtp4dev_get(path, operation, params=params)
-        try:
-            result = response.json()
-        except (ValueError, requests.RequestException) as error:
-            raise SMTP4DevAPIError(operation, response.status_code) from error
-        if not isinstance(result, dict):
-            raise SMTP4DevAPIError(operation, response.status_code) from TypeError("JSON response must be an object")
-        return result
-
-    def _smtp4dev_message_summaries(self) -> list[dict[str, Any]]:
-        path = "api/Messages"
-        params = {
-            "mailboxName": self.config.smtp4dev_mailbox_name,
-            "folderName": "INBOX",
-            "page": 1,
-            "pageSize": 100,
-        }
-        first = self._smtp4dev_json(path, "list messages", params=params)
-        results = first.get("results")
-        page_count = first.get("pageCount")
-        if not isinstance(results, list) or isinstance(page_count, bool) or not isinstance(page_count, int) or page_count < 0:
-            raise SMTP4DevAPIError("list messages", 200) from ValueError("invalid paged message response")
-        summaries = list(results)
-        for page in range(2, page_count + 1):
-            next_params = {**params, "page": page}
-            result = self._smtp4dev_json(path, "list messages", params=next_params)
-            page_results = result.get("results")
-            if not isinstance(page_results, list):
-                raise SMTP4DevAPIError("list messages", 200) from ValueError("invalid paged message response")
-            summaries.extend(page_results)
-        if any(not isinstance(summary, dict) for summary in summaries):
-            raise SMTP4DevAPIError("list messages", 200) from ValueError("invalid message summary")
-        return summaries
-
-    @staticmethod
-    def _smtp4dev_detail_headers(detail: dict[str, Any]) -> dict[str, list[Any]]:
-        headers = detail.get("headers")
-        if not isinstance(headers, list):
-            raise SMTP4DevAPIError("read message detail", 200) from ValueError("headers missing from detail")
-        result: dict[str, list[Any]] = {}
-        for item in headers:
-            if not isinstance(item, dict) or not isinstance(item.get("name"), str):
-                raise SMTP4DevAPIError("read message detail", 200) from ValueError("invalid header entry")
-            result.setdefault(item["name"].casefold(), []).append(item.get("value", ""))
-        return result
-
-    @staticmethod
-    def _viv_message_matches(headers: email.message.Message | dict[str, list[Any]], context: _VivPollContext) -> bool:
-        runs = headers.get_all("X-TAC-Run-ID", []) if isinstance(headers, email.message.Message) else headers.get("x-tac-run-id", [])
-        generations = headers.get_all("X-TAC-Generation", []) if isinstance(headers, email.message.Message) else headers.get("x-tac-generation", [])
-        if runs or generations:
-            return (
-                len(runs) == 1 and len(generations) == 1
-                and str(runs[0]).strip() == context.run_id
-                and str(generations[0]).strip() == str(context.generation)
-            )
-        return bool(_referenced_message_ids(headers) & context.known_ids)
+                    activity = client.idle_check(timeout=context.timeout)
+                except BaseException as error:
+                    try:
+                        client.idle_done()
+                    except BaseException as cleanup_error:
+                        error.add_note(f"IMAP IDLE cleanup also failed: {type(cleanup_error).__name__}")
+                    raise
+                client.idle_done()
+            return bool(activity)
+        except (OSError, imaplib.IMAP4.error):
+            if self._activity_waits_stopped.is_set():
+                return False
+            raise
+        finally:
+            with self._activity_clients_lock:
+                self._activity_clients.discard(client)
 
     def _poll_selected(
         self,

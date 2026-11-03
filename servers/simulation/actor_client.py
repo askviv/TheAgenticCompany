@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 import requests
-from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Field, SecretStr
 
 from servers.simulation.actor_protocol import (
     ActorEvaluateRequest, ActorEvaluateResponse, ActorTurnRequest, ActorTurnResponse,
@@ -34,15 +34,6 @@ class ActorWorkerSettings(BaseModel):
     supplier_token: SecretStr | None = None
     request_timeout_seconds: float | None = Field(default=None, gt=0)
 
-    @model_validator(mode="after")
-    def configured_workers_need_timeout(self):
-        configured = any((self.customer_url, self.customer_token,
-                          self.supplier_url, self.supplier_token))
-        if configured and self.request_timeout_seconds is None:
-            raise ValueError("actor worker endpoints require an explicit request timeout")
-        return self
-
-
 class ActorTurnClient:
     def __init__(self, settings: ActorWorkerSettings, *, session=None):
         self.settings = settings
@@ -53,7 +44,7 @@ class ActorTurnClient:
     def _post(self, actor_type: str, path: str, request: BaseModel) -> requests.Response:
         base_url = getattr(self.settings, f"{actor_type}_url")
         token = getattr(self.settings, f"{actor_type}_token")
-        if base_url is None or token is None or self.settings.request_timeout_seconds is None:
+        if base_url is None or token is None:
             raise ActorWorkerError(actor_type, None, "worker_not_configured")
         try:
             return self.session.post(
@@ -68,7 +59,7 @@ class ActorTurnClient:
     def _get(self, actor_type: str, path: str) -> requests.Response:
         base_url = getattr(self.settings, f"{actor_type}_url")
         token = getattr(self.settings, f"{actor_type}_token")
-        if base_url is None or token is None or self.settings.request_timeout_seconds is None:
+        if base_url is None or token is None:
             raise ActorWorkerError(actor_type, None, "worker_not_configured")
         try:
             return self.session.get(

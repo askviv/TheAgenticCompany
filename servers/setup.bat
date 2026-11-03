@@ -29,7 +29,6 @@ echo Starting Pull Image...
 docker pull ghcr.io/theagentcompany/servers-api-server:latest
 docker pull ghcr.io/theagentcompany/servers-rocketchat-npc-data-population:latest
 docker pull ghcr.io/theagentcompany/servers-owncloud:latest
-docker pull ghcr.io/theagentcompany/servers-gitlab:latest
 docker pull ghcr.io/theagentcompany/servers-plane-admin:0.0.1
 docker pull ghcr.io/theagentcompany/servers-plane-frontend:0.0.1
 docker pull ghcr.io/theagentcompany/servers-plane-backend:0.0.1
@@ -71,7 +70,7 @@ if %ERRORLEVEL% neq 0 (
 echo api-server is running on port 2999!
 
 echo Starting health checks...
-for %%s in (rocketchat owncloud gitlab plane) do (
+for %%s in (rocketchat owncloud plane) do (
     :check_service_%%s
     curl -s -o nul -w "%%{http_code}" localhost:2999/api/healthcheck/%%s | findstr "200" >nul
     if %ERRORLEVEL% neq 0 (

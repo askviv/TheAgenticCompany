@@ -1,6 +1,7 @@
 """Private experiment library: real requests to Viv, tracked as Rocket.Chat threads."""
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -11,16 +12,44 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, closing
 from datetime import datetime, timezone
 from pathlib import Path
-from textwrap import shorten
 from urllib.parse import parse_qsl, quote, urlsplit
 
+import requests
 import yaml
 from flask import Flask, Response, abort, jsonify, redirect, request, session, url_for, send_file
+from jinja2 import Environment, StrictUndefined
 
 from .runner import RocketChatClient
 from .coordinator import CoordinatorError, SimulationCoordinatorClient
 
-ROLES = {'admin':'Administration','hr':'People','finance':'Finance','ds':'Data','pm':'Product','research':'Research','bm':'Business','ml':'Machine learning'}
+ROLES = {'admin':'Administration','hr':'People','finance':'Finance','ds':'Data','pm':'Product','bm':'Business'}
+COMPANY_TOOLS = (
+    ('erpnext', 'ERPNext'),
+    ('email', 'Email'),
+    ('rocketchat', 'Rocket.Chat'),
+    ('owncloud', 'ownCloud'),
+    ('plane', 'Plane'),
+    ('midpoint', 'midPoint'),
+)
+
+
+def _kernel_virtual_time_rate():
+    rate_path = Path('/sys/kernel/virtual_time_rate')
+    try:
+        raw_rate = rate_path.read_text(encoding='ascii').strip()
+    except FileNotFoundError:
+        return 1
+    except OSError as error:
+        raise RuntimeError('Could not read the active kernel virtual-time rate') from error
+    try:
+        rate = int(raw_rate)
+    except ValueError as error:
+        raise RuntimeError('The active kernel virtual-time rate is invalid') from error
+    if rate < 1:
+        raise RuntimeError('The active kernel virtual-time rate must be positive')
+    return rate
+
+
 COMPANY_EVALUATION_PROVIDERS = ('coffeebench', 'ecommercebench')
 SIMULATION_SCENARIOS = {
     'A1': {
@@ -56,16 +85,36 @@ SIMULATION_SCENARIOS = {
 }
 
 
-def catalog(root):
+def company_tools_urls(path):
+    """Read the configured company links shared by navigation and task instructions."""
+    mapping = json.loads(Path(path).read_text(encoding='utf-8'))
+    expected = {key for key, _ in COMPANY_TOOLS}
+    if not isinstance(mapping, dict) or set(mapping) != expected:
+        raise ValueError('mapping keys do not match the company tools')
+    for key, value in mapping.items():
+        if not isinstance(value, str) or not value or value != value.strip():
+            raise ValueError(f'invalid URL for {key}')
+        parsed = urlsplit(value)
+        if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError(f'invalid URL for {key}')
+        _ = parsed.port
+    return mapping
+
+
+def catalog(root, company_tools_urls_file=None):
+    mapping_path = (company_tools_urls_file if company_tools_urls_file is not None
+                    else Path(__file__).with_name('company-tools-urls.example.json'))
+    tools = {key: value.rstrip('/') for key, value in company_tools_urls(mapping_path).items()}
+    templates = Environment(autoescape=False, undefined=StrictUndefined, keep_trailing_newline=True)
     result = {}
     briefs = {}
     for brief_file in sorted(Path(__file__).parent.glob('briefs-*.json')):
         briefs.update(json.loads(brief_file.read_text()))
     for path in sorted((Path(root)/'workspaces/tasks').glob('*/task.md')):
         task_id = path.parent.name
-        if task_id.startswith('sde-') or task_id=='example':
+        if task_id == 'example':
             continue
-        description = path.read_text()
+        description = templates.from_string(path.read_text()).render(company_tools=tools)
         dependencies = yaml.safe_load((path.parent/'dependencies.yml').read_text()) or []
         result[task_id] = dict(id=task_id, title=task_id.removeprefix(task_id.split('-')[0]+'-').replace('-', ' ').capitalize(),
             summary=briefs[task_id]['summary'], description=description,
@@ -79,52 +128,6 @@ def catalog(root):
     retail = json.loads(Path(__file__).with_name('retail-catalog.json').read_text())
     for entry in retail['tasks']:
         result[entry['id']] = {**entry, 'display_description': entry['description']}
-    return result
-
-
-def provider_definitions(payload):
-    """Project the worker's public business catalogue, never its private task data."""
-    providers = {'tau2-airline': 'Travel services', 'tau2-telecom': 'Telecom account',
-                 'tau2-banking': 'Banking portal'}
-    if (not isinstance(payload, dict) or payload.get('schema_version') != 1
-            or not isinstance(payload.get('tasks'), list)
-            or not re.fullmatch(r'[0-9a-f]{40}', str(payload.get('upstream_commit', '')))):
-        raise CoordinatorError('provider-catalog', 'invalid_response')
-    result = {}
-    for entry in payload['tasks']:
-        if (not isinstance(entry, dict) or entry.get('provider_id') not in providers
-                or not isinstance(entry.get('task_id'), str)
-                or not entry['task_id'] or len(entry['task_id']) > 240
-                or entry.get('classification') not in {None,'financial','operational'}
-                or not isinstance(entry.get('description'), str) or not entry['description'].strip()):
-            raise CoordinatorError('provider-catalog', 'invalid_task')
-        provider_id, task_id = entry['provider_id'], entry['task_id']
-        classification = entry.get('classification')
-        role = 'Finance' if classification == 'financial' or (classification is None and provider_id == 'tau2-banking') else 'Operations'
-        experiment_id = f'tau-provider-{uuid.uuid5(uuid.NAMESPACE_URL, provider_id + ":" + task_id)}'
-        if experiment_id in result:
-            raise CoordinatorError('provider-catalog', 'duplicate_task')
-        description = re.sub(r'https?://\S+', '', entry['description']).strip()
-        public_fields={}
-        for field in ('title','summary','requested_outcome','role_fit','role_fit_note','financial_context_status'):
-            if field in entry and entry[field] is not None:
-                if not isinstance(entry[field],str):
-                    raise CoordinatorError('provider-catalog','invalid_business_brief')
-                public_fields[field]=re.sub(r'https?://\S+', '', entry[field]).strip()
-        display=description
-        if public_fields.get('requested_outcome'):
-            display+='\n\nRequested outcome\n'+public_fields['requested_outcome']
-        result[experiment_id] = dict(
-            id=experiment_id, task_id=task_id, provider_id=provider_id,
-            scenario_id='TAU_PROVIDER', title=public_fields.get('title') or shorten(description.split('\n')[0], width=100, placeholder='…'),
-            summary=public_fields.get('summary') or shorten(description, width=240, placeholder='…'), description=description,
-            display_description=display, role=role,
-            kind='simulation',
-            **({'classification':entry['classification']} if entry.get('classification') is not None else {}),
-            dependencies=['Email', providers[provider_id]], benchmarks=['τ-bench', f'τ-bench · {providers[provider_id]}'],
-            source_revision=payload['upstream_commit'],
-            **{key:value for key,value in public_fields.items() if key not in {'title','summary'}},
-        )
     return result
 
 
@@ -156,18 +159,25 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     app.config.update(SECRET_KEY=os.environ.get('EXPERIMENTS_SECRET_KEY'),
         DATABASE=os.environ.get('EXPERIMENTS_DB', '/data/experiments.sqlite'),
         REPO=os.environ.get('TAC_REPO', str(Path(__file__).resolve().parents[2])),
+        COMPANY_PROFILE_FILE=os.environ.get('COMPANY_PROFILE_FILE'),
         CHAT_PUBLIC_URL=os.environ.get('ROCKETCHAT_PUBLIC_URL','https://chat.company.example.test'),
-        EXPERIMENTS_PUBLIC_URL=os.environ.get('EXPERIMENTS_PUBLIC_URL','http://192.0.2.10:8110'),
+        EXPERIMENTS_PUBLIC_URL=os.environ.get('EXPERIMENTS_PUBLIC_URL'),
+        COMPANY_TOOLS_URLS_FILE=os.environ.get(
+            'COMPANY_TOOLS_URLS_FILE', str(Path(__file__).with_name('company-tools-urls.example.json'))),
+        CODEX_AUTH_BRIDGE_URL=os.environ.get('CODEX_AUTH_BRIDGE_URL'),
+        CODEX_AUTH_BRIDGE_TOKEN_FILE=os.environ.get('CODEX_AUTH_BRIDGE_TOKEN_FILE'),
         SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', MAX_CONTENT_LENGTH=65536,
         SESSION_COOKIE_SECURE=False, EVENTS_WAIT_SECONDS=20)
     if config: app.config.update(config)
+    if app.config['COMPANY_PROFILE_FILE'] is None:
+        app.config['COMPANY_PROFILE_FILE']=str(Path(app.config['REPO'])/'deploy/single-host/company-identities.json')
     if not config or 'SESSION_COOKIE_SECURE' not in config:
         app.config['SESSION_COOKIE_SECURE'] = urlsplit(app.config['EXPERIMENTS_PUBLIC_URL']).scheme.lower() == 'https'
     if not app.secret_key: raise RuntimeError('EXPERIMENTS_SECRET_KEY must be configured')
     Path(app.config['DATABASE']).parent.mkdir(parents=True, exist_ok=True)
     @contextmanager
     def db():
-        with closing(sqlite3.connect(app.config['DATABASE'], timeout=15)) as connection:
+        with closing(sqlite3.connect(app.config['DATABASE'], timeout=15 * _kernel_virtual_time_rate())) as connection:
             connection.row_factory=sqlite3.Row
             with connection:
                 yield connection
@@ -185,7 +195,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                                   ('simulation_run_id', 'TEXT'), ('simulated_time', 'TEXT'),
                                   ('activity', "TEXT NOT NULL DEFAULT '[]'"), ('company_id','TEXT'),
                                   ('simulation_experiment_id','TEXT'),('provider_url','TEXT'),('provider_status','TEXT'),
-                                  ('sender_employee_id','TEXT')):
+                                  ('sender_employee_id','TEXT'),('chat_browser_url','TEXT')):
             if name not in columns: c.execute(f'ALTER TABLE runs ADD COLUMN {name} {declaration}')
         c.execute("""UPDATE runs SET status='uncertain',
           error=CASE WHEN kind='simulation' THEN 'The server restarted while dispatching. Retry will reconcile the same experiment ID.'
@@ -202,11 +212,9 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             if name not in company_columns: c.execute(f'ALTER TABLE company_state ADD COLUMN {name} {declaration}')
         c.execute("INSERT OR IGNORE INTO company_state(singleton,status,updated_at) VALUES(1,'not_started',?)",
                   (datetime.now(timezone.utc).isoformat(),))
-    experiments=catalog(app.config['REPO'])
-    catalogue_lock=threading.RLock()
+    experiments=catalog(app.config['REPO'], app.config['COMPANY_TOOLS_URLS_FILE'])
     compatibility=public_compatibility()
     inputs=json.loads(Path(__file__).with_name('inputs.json').read_text())['tasks']
-    refresh_lock=threading.RLock()
     rocket=client_factory()
     def client(): return rocket
     coordinator_instance=None
@@ -216,26 +224,13 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         with coordinator_lock:
             if coordinator_instance is None: coordinator_instance=coordinator_factory()
             return coordinator_instance
-    def load_provider_catalogue():
-        definitions = provider_definitions(coordinator().provider_catalog())
-        with catalogue_lock:
-            for key in list(experiments):
-                if experiments[key].get('provider_id'):
-                    del experiments[key]
-            experiments.update(definitions)
-        return definitions
     def definition_for(experiment_id):
-        with catalogue_lock:
-            definition = experiments.get(experiment_id)
-        if definition is None and experiment_id.startswith('tau-provider-'):
-            load_provider_catalogue()
-            definition = experiments.get(experiment_id)
+        definition = experiments.get(experiment_id)
         if definition is None:
             abort(404)
         return definition
     executor=ThreadPoolExecutor(max_workers=4, thread_name_prefix='experiments')
     app.extensions['experiments_executor']=executor
-    company_lock=threading.RLock()
     changed=threading.Condition()
     version=[0]
     def notify():
@@ -248,23 +243,26 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         data=dict(item);data['messages']=json.loads(data['messages'])
         data['activity']=json.loads(data['activity'])
         data.pop('idempotency_key',None)
-        data['chat_url']=app.config['CHAT_PUBLIC_URL'].rstrip('/')+'/channel/'+quote(os.environ.get('EXPERIMENTS_ROCKETCHAT_CHANNEL','viv-experiments'))+'?msg='+quote(data['message_id']) if data['message_id'] else None
+        data['chat_url']=data.pop('chat_browser_url') if data['message_id'] else None
+        data.pop('chat_browser_url',None)
         return data
     def all_runs():
         with db() as c: return [dict(r) for r in c.execute('SELECT * FROM runs ORDER BY created_at DESC')]
-    def update(run_id, **values):
+    def update(run_id, *, expected_revision=None, **values):
         material={key:value for key,value in values.items() if key!='simulated_time'}
+        revision_clause=' AND revision=?' if expected_revision is not None else ''
+        revision_params=(expected_revision,) if expected_revision is not None else ()
         with db() as c:
             changed_row=0
             if material:
                 changed_row=c.execute(
                     'UPDATE runs SET '+','.join(k+'=?' for k in values)+',revision=revision+1 '
-                    +'WHERE id=? AND ('+' OR '.join(k+' IS NOT ?' for k in material)+')',
-                    (*values.values(),run_id,*material.values()),
+                    +'WHERE id=?'+revision_clause+' AND ('+' OR '.join(k+' IS NOT ?' for k in material)+')',
+                    (*values.values(),run_id,*revision_params,*material.values()),
                 ).rowcount
             if not changed_row and 'simulated_time' in values:
-                c.execute('UPDATE runs SET simulated_time=? WHERE id=? AND simulated_time IS NOT ?',
-                          (values['simulated_time'],run_id,values['simulated_time']))
+                c.execute('UPDATE runs SET simulated_time=? WHERE id=?'+revision_clause+' AND simulated_time IS NOT ?',
+                          (values['simulated_time'],run_id,*revision_params,values['simulated_time']))
         if changed_row: notify()
     def save_company(state, error=None, *, clear_error=False):
         with db() as c:
@@ -363,14 +361,21 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             activity.append({key:item[key] for key in
                 ('id','timestamp','event','description','experiment_id','scenario_id',
                  'type','title','summary','content','actor','direction','received_at','created_at') if key in item})
-        return {key:payload.get(key) for key in ('company_id','simulated_time','erp_site_id')} | {
+        clock_speed=payload.get('clock_speed')
+        if clock_speed is not None and (isinstance(clock_speed,bool) or not isinstance(clock_speed,(int,float))
+                                        or not math.isfinite(clock_speed) or clock_speed<=0):
+            raise CoordinatorError('company','invalid_clock_speed')
+        return {key:payload.get(key) for key in ('company_id','simulated_time','erp_site_id','clock_mode')} | {
             'background':background,
             'status':status,'paused':bool(payload.get('paused')),
-            'experiments':experiments,'activity':activity}
+            'experiments':experiments,'activity':activity,
+            **({'clock_speed':float(clock_speed)} if clock_speed is not None else {})}
     def company_state(refresh=True):
         if refresh:
             state=safe_company(coordinator().company(),require_activity=True)
-            save_company(state)
+            # A confirmed snapshot resolves the dashboard request error. Native
+            # provider/action failures remain in the authoritative payload.
+            save_company(state,clear_error=True)
             return state
         with db() as c: item=dict(c.execute('SELECT * FROM company_state WHERE singleton=1').fetchone())
         return {'company_id':item['company_id'] or 'company','status':item['status'],'simulated_time':item['simulated_time'],
@@ -380,11 +385,12 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def api_company_shape(state):
         statuses={'not_started':'stopped','initializing':'starting','running':'running',
                   'paused':'paused','failed':'stopped','resetting':'starting'}
-        return {'id':state.get('company_id') or 'company','name':json.loads((Path(app.config['REPO'])/'deploy/single-host/company-identities.json').read_text())['company']['name'],
+        return {'id':state.get('company_id') or 'company','name':json.loads(Path(app.config['COMPANY_PROFILE_FILE']).read_text())['company']['name'],
                 'status':statuses.get(state.get('status'),'stopped'),
-                'simulated_time':state.get('simulated_time'),'paused':bool(state.get('paused')),
+                'simulated_time':state.get('simulated_time'),'clock_mode':state.get('clock_mode'),'paused':bool(state.get('paused')),
                 'erp_site_id':state.get('erp_site_id'),'experiments':state.get('experiments',[]),
-                'activity':state.get('activity',[]),'background':state.get('background'),'error':state.get('error')}
+                'activity':state.get('activity',[]),'background':state.get('background'),'error':state.get('error'),
+                **({'clock_speed':state['clock_speed']} if 'clock_speed' in state else {})}
     def dispatch(run_id):
         with app.app_context():
             item=row(run_id)
@@ -429,7 +435,11 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 return
             try:
                 update(run_id,status='sending',error=None)
-                files=[{'name':Path(f['source']).name,'url':os.environ.get('EXPERIMENTS_PUBLIC_URL','http://192.0.2.10:8110').rstrip('/')+f"/experiments/{item['experiment_id']}/inputs/{i}"} for i,f in enumerate(inputs.get(item['experiment_id'],[]))]
+                source_files = inputs.get(item['experiment_id'], [])
+                public_url = app.config['EXPERIMENTS_PUBLIC_URL']
+                if source_files and not public_url:
+                    raise RuntimeError('EXPERIMENTS_PUBLIC_URL must be configured for source-file links')
+                files=[{'name':Path(f['source']).name,'url':public_url.rstrip('/')+f"/experiments/{item['experiment_id']}/inputs/{i}"} for i,f in enumerate(source_files)]
                 definition=definition_for(item['experiment_id'])
                 role=definition.get('role')
                 if not isinstance(role,str) or not role:
@@ -443,23 +453,30 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                     role=role,employee_id=employee_id,employee_user_id=employee_user_id,
                     coordinator=coordinator(),
                 )
-                if sent.get('legacy_api') is True:
-                    update(run_id,status='awaiting_viv',room_id=sent['room_id'],
-                           message_id=sent['message_id'],sender_employee_id=None)
-                elif sent.get('status')=='uncertain':
+                if sent.get('status')=='uncertain':
+                    detail = {
+                        'agent_no_cua_actions': 'The employee agent stopped without using CUA. No chat delivery was confirmed.',
+                        'agent_chat_message_not_confirmed': 'The employee agent finished its CUA turn, but the requested chat message was not confirmed.',
+                    }.get(sent.get('error_code'), 'Employee browser send is uncertain.')
                     update(run_id,status='uncertain',room_id=sent.get('room_id'),
                            message_id=sent.get('message_id'),
-                           error='Employee browser send is uncertain. Retry reconciles the same native message without resending.')
+                           error=detail+' Retry reconciles the same native message without resending.')
                     return
                 else:
                     if (sent.get('status')!='sent' or sent.get('employee_id')!=employee_id
                             or not isinstance(sent.get('room_id'),str) or not isinstance(sent.get('message_id'),str)):
                         raise CoordinatorError('experiment-chat','invalid_response')
                     update(run_id,status='awaiting_viv',room_id=sent['room_id'],
-                           message_id=sent['message_id'],sender_employee_id=employee_id)
+                           message_id=sent['message_id'],sender_employee_id=employee_id,
+                           chat_browser_url=sent['browser_url'])
             except Exception as error:
                 logging.exception('Experiment dispatch failed run=%s', run_id)
-                update(run_id,status='uncertain',error=f'Could not confirm delivery ({type(error).__name__}). Retry checks the same request before sending again.')
+                if isinstance(error, CoordinatorError) and error.code == 'browser_send_failed_before_submit':
+                    detail = 'The employee desktop failed before the message was submitted. Retry resumes this same request.'
+                else:
+                    code = f'{type(error).__name__}: {error.code}' if isinstance(error, CoordinatorError) else type(error).__name__
+                    detail = f'Could not confirm delivery ({code}). Retry checks the same request before sending again.'
+                update(run_id,status='uncertain',error=detail)
                 return
             try: refresh(run_id)
             except Exception:
@@ -538,15 +555,14 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         update(run_id,status=status,simulated_time=linked.get('simulated_time'),
                activity=json.dumps(activity),error=None)
     def refresh(run_id):
-        with refresh_lock:
-            item=row(run_id)
-            if not item['message_id']: return
-            chat=client()
-            messages=chat.thread(item['room_id'],item['message_id'])
-            if messages != item['messages'] or item['error']:
-                status=item['status']
-                if status!='completed' and any(m['author']==chat.viv_username for m in messages): status='viv_replied'
-                update(run_id,messages=json.dumps(messages),status=status,error=None)
+        item=row(run_id)
+        if not item['message_id']: return
+        chat=client()
+        messages=chat.thread(item['room_id'],item['message_id'])
+        if messages != item['messages'] or item['error']:
+            status=item['status']
+            if status!='completed' and any(m['author']==chat.viv_username for m in messages): status='viv_replied'
+            update(run_id,expected_revision=item['revision'],messages=json.dumps(messages),status=status,error=None)
     def refresh_channel(room_id):
         with app.app_context():
             for item in all_runs():
@@ -579,17 +595,110 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def api_session(): return jsonify(csrf_token=session['csrf_token'],idempotency_key=str(uuid.uuid4()))
     @app.get('/api/catalog')
     def api_catalog():
-        error=None
-        try:
-            load_provider_catalogue()
-        except CoordinatorError as failure:
-            error={'code':failure.code,'correlation_id':failure.correlation_id}
-            logging.warning('Provider catalogue unavailable code=%s correlation_id=%s',failure.code,failure.correlation_id)
-        with catalogue_lock:
-            entries=list(experiments.values())
-        return jsonify(experiments=entries,provider_catalog_error=error)
+        return jsonify(experiments=list(experiments.values()))
     @app.get('/api/compatibility')
     def api_compatibility(): return jsonify(compatibility)
+    @app.get('/api/company-tools')
+    def api_company_tools():
+        try:
+            mapping = company_tools_urls(app.config['COMPANY_TOOLS_URLS_FILE'])
+            links = [{'id': key, 'name': name, 'url': mapping[key]} for key, name in COMPANY_TOOLS]
+        except (OSError, TypeError, ValueError) as error:
+            logging.exception('Company tools URL mapping unavailable (%s)', type(error).__name__)
+            return jsonify(error='Company tools URL mapping is unavailable or invalid.'), 503
+        return jsonify(tools=links)
+
+    def codex_auth_json(payload, status=200):
+        response=jsonify(payload)
+        response.headers['Cache-Control']='no-store'
+        return response,status
+
+    def codex_auth_bridge(path, method='GET', payload=None):
+        token_file=app.config.get('CODEX_AUTH_BRIDGE_TOKEN_FILE')
+        bridge_url=app.config.get('CODEX_AUTH_BRIDGE_URL') or (
+            'http://10.0.2.2:8143' if token_file else None
+        )
+        if not bridge_url or not token_file:
+            return None, codex_auth_json({'error':{'code':'codex_auth_bridge_unconfigured'}},503)
+        try:
+            parsed=urlsplit(bridge_url)
+            if parsed.scheme not in {'http','https'} or not parsed.hostname or parsed.username or parsed.password:
+                raise ValueError('invalid bridge URL')
+            token=Path(token_file).read_text(encoding='utf-8').strip()
+            if not token:
+                raise ValueError('empty bridge bearer token')
+        except (OSError,TypeError,ValueError) as error:
+            logging.error('Codex auth bridge configuration unavailable exception_type=%s',type(error).__name__)
+            return None, codex_auth_json({'error':{'code':'codex_auth_bridge_unavailable'}},503)
+        try:
+            response=requests.request(
+                method,bridge_url.rstrip('/')+path,
+                headers={'Authorization':f'Bearer {token}','Accept':'application/json'},
+                json=payload,timeout=None,allow_redirects=False,
+            )
+        except requests.RequestException as error:
+            logging.warning('Codex auth bridge request failed exception_type=%s',type(error).__name__)
+            return None, codex_auth_json({'error':{'code':'codex_auth_bridge_unavailable'}},502)
+        if not 200 <= response.status_code < 300:
+            logging.warning('Codex auth bridge returned status=%s',response.status_code)
+            return None, codex_auth_json({'error':{'code':'codex_auth_bridge_rejected'}},502)
+        try:
+            data=response.json()
+            if (not isinstance(data,dict)
+                    or data.get('state') not in {'authenticated','unauthenticated','starting','pending','completed','failed','expired'}):
+                raise ValueError('invalid response')
+            safe={'state':data['state']}
+            if 'authenticated' in data:
+                if not isinstance(data['authenticated'],bool):
+                    raise ValueError('invalid authenticated status')
+                safe['authenticated']=data['authenticated']
+            for field in ('auth_method','login_id','user_code','expires_at'):
+                value=data.get(field)
+                if value is not None:
+                    if not isinstance(value,str):
+                        raise ValueError('invalid response field')
+                    safe[field]=value
+            verification_url=data.get('verification_url')
+            if verification_url is not None:
+                if not isinstance(verification_url,str):
+                    raise ValueError('invalid verification URL')
+                verification=urlsplit(verification_url)
+                if verification.scheme not in {'http','https'} or not verification.hostname or verification.username or verification.password:
+                    raise ValueError('invalid verification URL')
+                safe['verification_url']=verification_url
+            error_code=data.get('error')
+            if error_code is not None:
+                if not isinstance(error_code,str) or not re.fullmatch(r'[A-Za-z][A-Za-z0-9_.-]{0,95}',error_code):
+                    raise ValueError('invalid error code')
+                safe['error']=error_code
+            return safe, None
+        except (ValueError,requests.JSONDecodeError) as error:
+            logging.warning('Codex auth bridge returned an invalid response exception_type=%s',type(error).__name__)
+            return None, codex_auth_json({'error':{'code':'codex_auth_bridge_invalid_response'}},502)
+
+    @app.get('/api/company/model-auth/status')
+    def api_company_model_auth_status():
+        result,failure=codex_auth_bridge('/auth/status')
+        return failure if failure else codex_auth_json(result)
+
+    @app.post('/api/company/model-auth/device/start')
+    def api_company_model_auth_device_start():
+        result,failure=codex_auth_bridge('/auth/device/start',method='POST',payload={})
+        return failure if failure else codex_auth_json(result)
+
+    @app.get('/api/company/model-auth/device/<login_id>')
+    def api_company_model_auth_device_status(login_id):
+        result,failure=codex_auth_bridge('/auth/device/'+quote(login_id,safe=''))
+        return failure if failure else codex_auth_json(result)
+    @app.get('/api/company/clock')
+    def api_company_clock():
+        try:
+            clock=coordinator().company_clock()
+            return jsonify(simulated_time=clock['simulated_time'],clock_mode=clock['clock_mode'])
+        except Exception:
+            logging.exception('Company clock retrieval failed')
+            return jsonify(error='Company clock could not be retrieved.'),503
+
     @app.get('/api/company')
     def api_company():
         try:
@@ -603,7 +712,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         return jsonify(company=api_company_shape(state))
 
     def company_employee_roster():
-        path=Path(app.config['REPO'])/'deploy/single-host/company-identities.json'
+        path=Path(app.config['COMPANY_PROFILE_FILE'])
         try:
             document=json.loads(path.read_text(encoding='utf-8'))
             employees=document['employees']
@@ -626,7 +735,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         return roster
 
     def company_experiment_sender(role, employee_id=None):
-        path=Path(app.config['REPO'])/'deploy/single-host/company-identities.json'
+        path=Path(app.config['COMPANY_PROFILE_FILE'])
         try:
             document=json.loads(path.read_text(encoding='utf-8'))
             company=document['company']
@@ -926,21 +1035,20 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def start_company():
         requested_key=request.form.get('idempotency_key')
         if not requested_key: abort(400)
-        with company_lock:
-            try:
-                current=company_state()
-                if current['status']=='paused':
-                    state=safe_company(coordinator().pause_company(False,idempotency_key=requested_key))
-                    state.update(experiments=current['experiments'],activity=current['activity'])
-                    save_company(state,clear_error=True)
-                    return jsonify(company=api_company_shape(state))
-                if current['status']=='running':
-                    return jsonify(company=api_company_shape(current))
-                return jsonify(error='The persistent company is not initialized. Retry after the coordinator is ready.'),503
-            except Exception as error:
-                logging.exception('Company resume failed')
-                save_company_error(f'Company resume could not be confirmed ({type(error).__name__}). Retry to reconcile the requested state.')
-                return jsonify(error='Company resume could not be confirmed. Retry to reconcile the requested state.'),502
+        try:
+            current=company_state()
+            if current['status']=='paused':
+                state=safe_company(coordinator().pause_company(False,idempotency_key=requested_key))
+                state.update(experiments=current['experiments'],activity=current['activity'])
+                save_company(state,clear_error=True)
+                return jsonify(company=api_company_shape(state))
+            if current['status']=='running':
+                return jsonify(company=api_company_shape(current))
+            return jsonify(error='The persistent company is not initialized. Retry after the coordinator is ready.'),503
+        except Exception as error:
+            logging.exception('Company resume failed')
+            save_company_error(f'Company resume could not be confirmed ({type(error).__name__}). Retry to reconcile the requested state.')
+            return jsonify(error='Company resume could not be confirmed. Retry to reconcile the requested state.'),502
     @app.post('/company/pause')
     def pause_company():
         raw=request.form.get('paused')
@@ -973,6 +1081,25 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             message=f'{provider_id} background control could not be confirmed ({type(error).__name__}). Refresh to reconcile the requested state.'
             save_company_error(message)
             return jsonify(error=message),502
+    @app.post('/api/company/clock/speed')
+    def set_company_clock_speed():
+        raw=request.form.get('speed')
+        key=request.headers.get('Idempotency-Key') or request.form.get('idempotency_key')
+        if raw is None or not key: abort(400)
+        try: speed=float(raw)
+        except ValueError: abort(400)
+        if not math.isfinite(speed) or speed<=0: abort(400)
+        try:
+            payload=coordinator().set_company_clock_speed(speed,idempotency_key=key)
+            state=safe_company(payload,require_activity=True)
+            confirmed_speed=state.get('clock_speed')
+            if confirmed_speed is None:
+                raise CoordinatorError('company/clock/speed','missing_clock_speed')
+            notify()
+            return jsonify(clock_speed=confirmed_speed)
+        except Exception as error:
+            logging.exception('Company clock speed update failed')
+            return jsonify(error=f'Company clock speed could not be confirmed ({type(error).__name__}). Refresh to retry.'),502
     @app.get('/api/activity')
     def api_activity():
         activity=[]
@@ -1261,7 +1388,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             while True:
                 with changed:
                     received=changed.wait_for(lambda: version[0]!=last,
-                        timeout=app.config['EVENTS_WAIT_SECONDS'])
+                        timeout=app.config['EVENTS_WAIT_SECONDS'] * _kernel_virtual_time_rate())
                     last=version[0]
                 if received:
                     snapshot=[{k:r[k] for k in ('id','status','revision')} for r in all_runs()]

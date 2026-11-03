@@ -77,7 +77,7 @@ def _erpnext_is_installed(site: str) -> bool:
     return any(line.split() and line.split()[0] == "erpnext" for line in completed.stdout.splitlines())
 
 
-def _create(site: str) -> dict[str, str]:
+def _create(site: str, *, company_only: bool = False) -> dict[str, object]:
     site_path = SITES_ROOT / site
     manifest_path = RUNTIME_ROOT / f"{site}.json"
     golden_dir = GOLDEN_ROOT / site
@@ -139,13 +139,14 @@ def _create(site: str) -> dict[str, str]:
         os.chdir(BENCH_ROOT)
 
     sys.path.insert(0, "/opt/erpnext-admin")
-    from seed_a1 import seed
+    from seed_a1 import seed, setup_company_site
 
     (BENCH_ROOT / "logs").mkdir(mode=0o700, parents=True, exist_ok=True)
     (site_path / "logs").mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chdir(SITES_ROOT)
     with contextlib.redirect_stdout(sys.stderr):
-        seeded = seed(site, str(RUNTIME_ROOT))
+        seeded = (setup_company_site(site, str(RUNTIME_ROOT)) if company_only
+                  else seed(site, str(RUNTIME_ROOT)))
     os.chdir(BENCH_ROOT)
     backup_dir = site_path / "private" / "backups"
     before = {file.resolve() for file in backup_dir.glob("*")} if backup_dir.exists() else set()
@@ -177,12 +178,30 @@ def _create(site: str) -> dict[str, str]:
         raise RuntimeError("Golden ERP backup is incomplete")
 
     manifest = {**seeded, "golden_files_sha256": json.dumps(copied, sort_keys=True)}
+    if company_only:
+        manifest["baseline_only"] = True
     private_json(manifest_path, manifest)
     return public_binding(manifest)
 
 
-def public_binding(manifest: dict[str, str]) -> dict[str, object]:
+def public_binding(manifest: dict[str, object]) -> dict[str, object]:
     site = manifest["site_name"]
+    if manifest.get("baseline_only") is True:
+        return {
+            "site_name": site,
+            "company_id": manifest["company_id"],
+            "company_name": manifest["company_name"],
+            "company_abbr": manifest["company_abbr"],
+            "erp_company": manifest["company_id"],
+            "documents": {
+                "company": manifest["company_id"],
+                "supplier": manifest["supplier_id"],
+                "item": manifest["item_id"],
+                "warehouse": manifest["warehouse_id"],
+                "customer": manifest["customer_id"],
+            },
+            "credentials_ref": f"/data/theagentcompany/enterprise/erpnext/runtime/api-credentials/{site}.json",
+        }
     return {
         "site_name": site,
         "documents": {
@@ -553,6 +572,7 @@ def _refresh_seed(site: str) -> dict[str, object]:
     hashes = json.loads(manifest.get("golden_files_sha256", "{}"))
     hashes.update(copied)
     manifest.update(seeded)
+    manifest.pop("baseline_only", None)
     manifest["golden_files_sha256"] = json.dumps(hashes, sort_keys=True)
     temporary = manifest_path.with_suffix(".json.refresh")
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
@@ -566,7 +586,7 @@ def _refresh_seed(site: str) -> dict[str, object]:
 def main() -> None:
     Path("/home/frappe/logs").mkdir(mode=0o700, parents=True, exist_ok=True)
     parser = argparse.ArgumentParser(description="Manage coordinator-owned ERPNext sites and native task imports")
-    parser.add_argument("operation", choices=("create", "reset", "probe", "refresh-seed", "ensure-erp-contract", "seed-tau-retail", "observe-tau-retail", "reconcile-finance-sources", "read-due-obligations", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence"))
+    parser.add_argument("operation", choices=("create", "company-only", "reset", "probe", "refresh-seed", "ensure-erp-contract", "seed-tau-retail", "observe-tau-retail", "reconcile-finance-sources", "read-due-obligations", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence"))
     parser.add_argument("run_id", help="run UUID or τ experiment UUID")
     parser.add_argument("task_id", nargs="?", help="τ retail task id for seed-tau-retail")
     args = parser.parse_args()
@@ -586,8 +606,8 @@ def main() -> None:
     site = site_for_run(args.run_id)
     lock_fd = lock_for(site)
     try:
-        if args.operation == "create":
-            result = _create(site)
+        if args.operation in ("create", "company-only"):
+            result = _create(site, company_only=args.operation == "company-only")
         elif args.operation == "reset":
             result = _reset(site)
         elif args.operation == "refresh-seed":

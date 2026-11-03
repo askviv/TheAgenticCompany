@@ -1,7 +1,6 @@
 import base64
 import os
 import logging
-import urllib
 import subprocess
 import functools
 import re
@@ -109,6 +108,55 @@ def codex_judge(prompt: str, image_path: str = None) -> bool:
         "required": ["answer"],
         "additionalProperties": False,
     }
+    inference_url = os.environ.get('CODEX_INFERENCE_URL')
+    inference_token = os.environ.get('CODEX_INFERENCE_BEARER_TOKEN')
+    token_file = os.environ.get('CODEX_INFERENCE_BEARER_TOKEN_FILE')
+    if inference_token is None and token_file:
+        try:
+            with open(token_file, encoding='utf-8') as credential_file:
+                inference_token = credential_file.read().strip()
+        except OSError as error:
+            raise CodexJudgeError('configuration_missing', correlation_id, error) from error
+    if bool(inference_url) != bool(inference_token):
+        raise CodexJudgeError('configuration_invalid', correlation_id)
+    if inference_url:
+        image_base64 = None
+        if image_path:
+            try:
+                with open(image_path, 'rb') as image_file:
+                    image_base64 = base64.b64encode(image_file.read()).decode('ascii')
+                image_filename = os.path.basename(image_path)
+            except (OSError, ValueError) as error:
+                raise CodexJudgeError('invalid_image', correlation_id, error) from error
+        else:
+            image_filename = None
+        try:
+            response = requests.post(
+                inference_url.rstrip('/') + '/v1/judge',
+                json={
+                    'prompt': prompt, 'model': model, 'output_schema': schema,
+                    'image_bytes': image_base64, 'image_filename': image_filename,
+                },
+                headers={'Authorization': 'Bearer ' + inference_token},
+            )
+        except requests.RequestException as error:
+            raise CodexJudgeError('remote_transport', correlation_id, error) from error
+        if response.status_code != 200:
+            try:
+                detail = response.json().get('detail', {})
+                code = detail.get('error', 'remote_failure') if isinstance(detail, dict) else 'remote_failure'
+            except (ValueError, AttributeError):
+                code = 'remote_failure'
+            cause = RuntimeError(f'remote judge returned HTTP {response.status_code}')
+            raise CodexJudgeError(code, correlation_id, cause) from cause
+        try:
+            result = response.json()
+        except ValueError as error:
+            raise CodexJudgeError('invalid_result', correlation_id, error) from error
+        if not isinstance(result, dict) or set(result) != {'answer'} or result['answer'] not in ('yes', 'no'):
+            raise CodexJudgeError('invalid_result', correlation_id)
+        return result['answer'] == 'yes'
+
     with tempfile.TemporaryDirectory(prefix='codex-judge-') as temp_dir:
         schema_path = os.path.join(temp_dir, 'schema.json')
         output_path = os.path.join(temp_dir, 'answer.json')
@@ -132,12 +180,11 @@ def codex_judge(prompt: str, image_path: str = None) -> bool:
                 input=prompt,
                 text=True,
                 capture_output=True,
-                timeout=int(os.environ.get('CODEX_JUDGE_TIMEOUT_SECONDS', '120')),
+                timeout=None,
                 check=False,
             )
-        except (OSError, subprocess.TimeoutExpired, ValueError) as error:
-            code = 'timeout' if isinstance(error, subprocess.TimeoutExpired) else 'process_start_failed'
-            raise CodexJudgeError(code, correlation_id, error) from error
+        except OSError as error:
+            raise CodexJudgeError('process_start_failed', correlation_id, error) from error
 
         events = []
         try:
@@ -424,92 +471,6 @@ def evaluate_chat_history_with_llm(rocket_client, username: str, predicate: str)
     except Exception as e:
         logging.error(f"Failed to evaluate chat history for user {username}: {str(e)}", exc_info=True)
         return False
-
-def make_gitlab_request(project_identifier: str = None, additional_path: str = None, method: str = 'GET', params: dict = None):
-    url = f"{GITLAB_BASEURL}/api/v4"
-
-    if project_identifier:
-        if '/' in project_identifier:
-            project_identifier = urllib.parse.quote(project_identifier, safe='')
-        url = f"{url}/projects/{project_identifier}"
-    
-    if additional_path:
-        url = f"{url}/{additional_path}"
-    
-    try:
-        response = requests.request(method, url, headers=GITLAB_HEADERS, params=params)
-        return response
-    except Exception as e:
-        logging.error(f"GitLab API request failed: {e}")
-        return None
-
-def get_gitlab_project_id(project_name:str):
-    """
-    Get project ID for gitlab project
-
-    Args:
-        project_name: The name of the project
-
-    Returns:
-        str: The ID of the project
-
-    """
-    projects = make_gitlab_request(None,"projects")
-    if not projects:
-        logging.warning(f"No gitlab projects found")
-        return None
-    else:
-        projects = projects.json()
-    target_projects = [project['id'] for project in projects if project['name']==project_name]
-    if len(target_projects) == 0:
-        logging.warning(f"No gitlab projects found for project name {project_name}")
-        return None
-    else:
-        return str(target_projects[0])
-
-def get_gitlab_merge_request_by_title(project_id:str, merge_request_title:str):
-    """
-    Get merge request by title
-
-    Args:
-        project_id: The ID of the project
-        merge_request_title: The title of the merge request
-
-    Returns:
-        dict: The merge request object
-    """
-    merge_requests = make_gitlab_request(project_id,"merge_requests")
-    if not merge_requests:
-        logging.warning(f"No gitlab merge requests found")
-        return None
-    else:
-        merge_requests = merge_requests.json()
-    target_merge_requests = [merge_request for merge_request in merge_requests if merge_request['title'].strip().lower()==merge_request_title.strip().lower()]
-    if len(target_merge_requests) == 0:
-        logging.warning(f"No gitlab merge requests found for title {merge_request_title}")
-        return None
-    else:
-        return target_merge_requests[0]
-
-def get_gitlab_file_in_mr(mr: dict, file_path: str) -> str:
-    """
-    Get the content of a file in a merge request.
-
-    Args:
-        mr: The merge request object
-        file_path: The path to the file 
-
-    Returns:
-        str: The content of the file
-    """
-    mr_sha = mr['sha']
-    file_path_in_url = urllib.parse.quote(file_path, safe='')
-    path = f"repository/files/{file_path_in_url}/raw?ref={mr_sha}"
-    resp = make_gitlab_request(str(mr['project_id']), path)
-    if not resp:
-        return None
-    return resp.text
-
 
 def get_owncloud_url_in_file(filename: str):
     try:

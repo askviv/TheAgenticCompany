@@ -35,7 +35,7 @@ class ProviderExperimentWorkerClient:
     def _request(self, method: str, path: str, *, json_body: dict | None = None) -> dict[str, Any]:
         base_url = self.settings.customer_url
         token = self.settings.customer_token
-        if base_url is None or token is None or self.settings.request_timeout_seconds is None:
+        if base_url is None or token is None:
             raise ProviderWorkerError(None, "worker_not_configured", uncertain=False)
         try:
             response = self.session.request(
