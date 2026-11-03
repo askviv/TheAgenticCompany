@@ -651,7 +651,13 @@ class RealChatTransport:
             raise RuntimeError("ROCKETCHAT_MESSAGE_ROOM_MISMATCH")
         if not isinstance(author, dict) or author.get("_id") != author_id:
             raise RuntimeError("ROCKETCHAT_MESSAGE_AUTHOR_MISMATCH")
-        if value.get("msg") != message_text:
+        actual_text = value.get("msg")
+        if message_text.startswith("@") and isinstance(actual_text, str):
+            # Native mention completion may add a separator space. Keep the
+            # account token and the entire remaining assignment unchanged.
+            actual_text = actual_text.split(maxsplit=1)
+            message_text = message_text.split(maxsplit=1)
+        if actual_text != message_text:
             raise RuntimeError("ROCKETCHAT_MESSAGE_TEXT_MISMATCH")
         return value
 

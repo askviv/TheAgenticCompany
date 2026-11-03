@@ -125,7 +125,10 @@ class CuaChatTransport:
 
         matches = [message for message in self._read_messages(base, headers, room)
                    if message.get("_id") not in baseline_ids and message.get("rid") == room_id
-                   and message.get("msg") == message_text and isinstance(message.get("u"), dict)
+                   and (message.get("msg") == message_text or (
+                       mention and isinstance(message.get("msg"), str)
+                       and message["msg"].split(maxsplit=1) == message_text.split(maxsplit=1)))
+                   and isinstance(message.get("u"), dict)
                    and message["u"].get("_id") == author_id]
         if len(matches) != 1:
             raise ChatMessageNotConfirmed("ROCKETCHAT_SEND_OUTCOME_UNCERTAIN")
