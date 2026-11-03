@@ -441,3 +441,16 @@ old requests are not rewritten or backdated. Missing/conflicting proof or a
 changed/corrupt checkpoint remains an explicit integrity failure for operator
 repair. Do not delete pending rows, reset the company, or clear inference caches
 to bypass it.
+
+Employee stream access is controlled in the coordinator runtime JSON:
+
+```json
+{"employee_desktop_view_only": true}
+```
+
+The default is `true`. Selkies enforces the viewer role on the server: keyboard,
+mouse, clipboard, gamepad, command input and file transfers are blocked for the
+stream credentials. Employee automation continues through its private Chrome
+DevTools connection. Set the value to `false` to allow viewer control.
+Docker environment settings apply when a desktop container is created; existing
+containers must be recreated to apply a changed mode, retaining their profile volumes.

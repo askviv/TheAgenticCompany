@@ -742,6 +742,7 @@ def main() -> int:
         "employee_chat_credentials_file": str(secrets_root / "employee-chat-credentials.json"),
         "company_profile_file": str(company_profile_path),
         "employee_desktop_image": employee_desktop_image,
+        "employee_desktop_view_only": True,
         "employee_desktop_ca_file": str(args.tls_ca_file) if args.tls_ca_file else None,
         "rocketchat_base_url": args.chat_url,
         "principals_file": str(principals_path),

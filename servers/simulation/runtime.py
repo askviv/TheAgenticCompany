@@ -63,6 +63,7 @@ class RuntimeConfig(BaseModel):
     kernel_company_clock_enabled: bool = False
     kernel_company_clock_url: str = "http://10.0.2.2:8133"
     kernel_company_clock_token_file: Path = Path("/run/secrets/clock-api-token")
+    employee_desktop_view_only: bool = True
     employee_desktop_image: str | None = None
     employee_desktop_ca_file: Path | None = None
     company_issues_enabled: bool = True
@@ -133,6 +134,7 @@ def employee_desktop_manager(config: RuntimeConfig | None = None):
         config.company_profile_file, config.state_root / "employee-desktops",
         caddy_proxy=CaddyEmployeeDesktopProxy(),
         image=desktop_image or DEFAULT_SELKIES_IMAGE,
+        view_only=config.employee_desktop_view_only,
         ca_file=Path(desktop_ca_file) if desktop_ca_file else None,
     )
     manager.start_idle_shutdown()

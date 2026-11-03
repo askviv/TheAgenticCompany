@@ -73,6 +73,7 @@ class EmployeeDesktopRuntime:
         caddy_proxy: CaddyEmployeeDesktopProxy | None = None,
         docker_binary: str = "docker",
         image: str = DEFAULT_SELKIES_IMAGE,
+        view_only: bool = True,
         ca_file: str | Path | None = None,
     ):
         if not isinstance(image, str) or not image.strip():
@@ -84,6 +85,7 @@ class EmployeeDesktopRuntime:
         self.caddy_proxy = caddy_proxy
         self.docker_binary = docker_binary
         self.image = image.strip()
+        self.view_only = view_only
         self.ca_file = Path(ca_file) if ca_file is not None else None
         self._idle_workers: dict[str, tuple[threading.Thread, threading.Event]] = {}
         self._idle_workers_lock = threading.Lock()
@@ -632,8 +634,11 @@ class EmployeeDesktopRuntime:
             with os.fdopen(fd, "w", encoding="utf-8") as output:
                 output.write("SELKIES_ENABLE_BASIC_AUTH=true\n")
                 output.write("SELKIES_BASIC_AUTH_USER=" + credentials["username"] + "\n")
-                output.write("SELKIES_BASIC_AUTH_PASSWORD=" + credentials["password"] + "\n")
-                output.write("PASSWD=" + credentials["password"] + "\n")
+                control_password = secrets.token_urlsafe(32) if self.view_only else credentials["password"]
+                output.write("SELKIES_BASIC_AUTH_PASSWORD=" + control_password + "\n")
+                output.write("PASSWD=" + control_password + "\n")
+                if self.view_only:
+                    output.write("SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD=" + credentials["password"] + "\n")
                 output.write("SELKIES_MODE=websockets\n")
                 output.write("SELKIES_FRAME_ANCESTORS='self'\n")
                 if self.caddy_proxy is not None:
