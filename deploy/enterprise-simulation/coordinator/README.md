@@ -463,7 +463,11 @@ prompts. Message preparation finishes before the existing durable submission
 boundary; delivery is confirmed from native mailbox or chat records.
 
 Runtime configuration uses `employee_cua_driver_file`, `employee_cua_inference_url`,
-`employee_cua_inference_token_file` and `employee_cua_model`. The pinned driver and
-capability manifest are mounted read-only into new desktops; existing desktops
-receive the same files when their CUA session is opened. No model-backed action is
-executed by installation or tool-catalog discovery.
+`employee_cua_inference_token_file` and `employee_cua_model`. The pinned driver is
+mounted read-only into new desktops; existing desktops receive it when their CUA
+session is opened. Native `at-spi2-core` accessibility support is installed
+through the desktop image’s package manager when absent. The driver uses its native
+standard automation mode inside the isolated employee container, and the runtime
+exposes only its CUA tool allowlist. Chrome managed policy disables its password
+manager through `employee-chrome-policy.json`. No model-backed action is executed
+by installation or tool-catalog discovery.

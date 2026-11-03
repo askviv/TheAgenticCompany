@@ -18,7 +18,6 @@ from .clock_rate import kernel_virtual_time_rate
 
 
 DRIVER_PATH = "/opt/employee-cua/cua-driver"
-MANIFEST_PATH = "/opt/employee-cua/capabilities.yaml"
 DISPLAY = ":20"
 TYPE_TEXT_DELAY_MS = 150
 
@@ -286,7 +285,9 @@ class EmployeeCuaAction:
             if delivery_field:
                 call_arguments[delivery_field] = "foreground"
         if name in {"move_cursor", "click", "double_click", "right_click", "drag", "scroll"}:
-            if "target" in properties and "element_token" not in call_arguments:
+            if ("target" in properties and "target" not in call_arguments
+                    and "element_token" not in call_arguments
+                    and call_arguments.get("scope") == "desktop"):
                 call_arguments["target"] = {"kind": "desktop", "display_id": "primary"}
         if name in OBSERVATION_TOOLS:
             if "include_screenshot" in properties:
@@ -415,9 +416,7 @@ def _docker_exec_args(container: str, desktop_env: Mapping[str, str]) -> list[st
     ]
     environment = {
         **desktop_env,
-        "CUA_DRIVER_PERMISSION_MODE": "bounded",
-        "CUA_DRIVER_CAPABILITY_MANIFEST_FILE": MANIFEST_PATH,
-        "CUA_DRIVER_CAPABILITY_MANIFEST_APPROVED": "1",
+        "CUA_DRIVER_PERMISSION_MODE": "standard",
     }
     for name, value in environment.items():
         if "\x00" in value or "\n" in value or "\r" in value:

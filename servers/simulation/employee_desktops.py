@@ -88,7 +88,7 @@ class EmployeeDesktopRuntime:
         self.image = image.strip()
         self.view_only = view_only
         self.cua_driver_file = Path(cua_driver_file)
-        self.cua_manifest_file = Path(__file__).resolve().parents[2] / "deploy/enterprise-simulation/coordinator/employee-cua-capabilities.yaml"
+        self.chrome_policy_file = Path(__file__).resolve().parents[2] / "deploy/enterprise-simulation/coordinator/employee-chrome-policy.json"
         self.ca_file = Path(ca_file) if ca_file is not None else None
         self._idle_workers: dict[str, tuple[threading.Thread, threading.Event]] = {}
         self._idle_workers_lock = threading.Lock()
@@ -223,6 +223,7 @@ class EmployeeDesktopRuntime:
             self._validate_mount(inspect, volume)
             container_ip = self._container_ip(inspect, network)
 
+            self.configure_chrome_policy(employee_id)
             if not self._container_port_open(container, 9222):
                 self._wait_for_display(container)
                 self._launch_chrome(container)
@@ -726,7 +727,6 @@ class EmployeeDesktopRuntime:
         ]
         arguments.extend((
             "--mount", f"type=bind,source={self.cua_driver_file},target=/opt/employee-cua/cua-driver,readonly",
-            "--mount", f"type=bind,source={self.cua_manifest_file},target=/opt/employee-cua/capabilities.yaml,readonly",
         ))
         if ca_nss_db is not None:
             arguments.extend((
@@ -783,22 +783,42 @@ class EmployeeDesktopRuntime:
                 os.chown(database_file, 1000, 1000)
         return db
 
+    def configure_chrome_policy(self, employee_id: str) -> None:
+        """Apply Chrome's managed policy to the employee's own desktop."""
+        container = self._container_name(employee_id)
+        self._validate_managed_container(self._inspect(container), employee_id)
+        target = "/etc/opt/chrome/policies/managed/employee.json"
+        actual = self._docker("exec", container, "sha256sum", target, check=False)
+        digest = hashlib.sha256(self.chrome_policy_file.read_bytes()).hexdigest()
+        if actual.returncode == 0 and actual.stdout.split()[0] == digest:
+            return
+        if actual.returncode not in {0, 1}:
+            raise EmployeeDesktopError("Chrome managed policy could not be inspected")
+        self._docker("exec", "--user", "root", container, "mkdir", "-p", "/etc/opt/chrome/policies/managed")
+        self._docker("cp", str(self.chrome_policy_file), f"{container}:{target}")
+        self._docker("exec", "--user", "root", container, "chmod", "0644", target)
+
     def prepare_cua_runtime(self, employee_id: str) -> None:
         """Install native tool files into existing desktops; new ones bind them read-only."""
         container = self._container_name(employee_id)
         self._validate_managed_container(self._inspect(container), employee_id)
+        self._docker(
+            "exec", "--user", "root", container, "sh", "-c",
+            "if [ ! -x /usr/libexec/at-spi-bus-launcher ]; then "
+            "apt-get update -qq && DEBIAN_FRONTEND=noninteractive "
+            "apt-get install -y --no-install-recommends at-spi2-core; fi",
+        )
         self._docker("exec", "--user", "root", container, "mkdir", "-p", "/opt/employee-cua")
-        for source, target in ((self.cua_driver_file, "/opt/employee-cua/cua-driver"),
-                               (self.cua_manifest_file, "/opt/employee-cua/capabilities.yaml")):
-            digest = hashlib.sha256(source.read_bytes()).hexdigest()
-            actual = self._docker("exec", container, "sha256sum", target, check=False)
-            if actual.returncode == 0 and actual.stdout.split()[0] == digest:
-                continue
-            if actual.returncode not in {0, 1}:
-                raise EmployeeDesktopError("Native CUA tool files could not be inspected")
-            self._docker("cp", str(source), f"{container}:{target}")
-            self._docker("exec", "--user", "root", container, "chmod",
-                         "0755" if target.endswith("cua-driver") else "0644", target)
+        self.configure_chrome_policy(employee_id)
+        target = "/opt/employee-cua/cua-driver"
+        digest = hashlib.sha256(self.cua_driver_file.read_bytes()).hexdigest()
+        actual = self._docker("exec", container, "sha256sum", target, check=False)
+        if actual.returncode == 0 and actual.stdout.split()[0] == digest:
+            return
+        if actual.returncode not in {0, 1}:
+            raise EmployeeDesktopError("Native CUA driver could not be inspected")
+        self._docker("cp", str(self.cua_driver_file), f"{container}:{target}")
+        self._docker("exec", "--user", "root", container, "chmod", "0755", target)
 
     def _launch_chrome(self, container: str) -> None:
         # The official Selkies desktop image installs Google Chrome and patches
