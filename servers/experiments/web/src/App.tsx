@@ -580,6 +580,11 @@ function ActivityPage() {
         <div className="space-y-3">
           {filtered.map((entry) => {
             const isEmail = entry.type === "email"
+            const title = entry.title.trim()
+            const content = entry.content?.trim()
+            const summary = entry.summary?.trim()
+            const showContent = Boolean(content && content !== title)
+            const showSummary = Boolean(summary && summary !== title && !(showContent && content?.startsWith(summary)))
             const Icon = isEmail ? Mail : entry.type === "message" || entry.type === "chat" ? MessageCircle : Building2
             return <article key={entry.id} className="rounded-xl border bg-card p-4 sm:p-5">
               <div className="flex items-start gap-3">
@@ -590,8 +595,8 @@ function ActivityPage() {
                     <time className="text-xs text-muted-foreground">{formatDate(entry.timestamp)}</time>
                   </div>
                   {(entry.actor || entry.direction) && <p className="mt-1 text-xs text-muted-foreground">{[entry.actor, entry.direction === "sent" ? "Sent" : entry.direction === "received" ? "Received" : null].filter(Boolean).join(" · ")}</p>}
-                  {entry.summary && <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/85">{entry.summary}</p>}
-                  {entry.content && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 text-sm leading-6">{entry.content}</p>}
+                  {showSummary && <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/85">{entry.summary}</p>}
+                  {showContent && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 text-sm leading-6">{entry.content}</p>}
                   {entry.run_id && <Link className="mt-3 inline-flex items-center gap-1 text-sm text-primary hover:underline" to={`/runs/${encodeURIComponent(entry.run_id)}`}>View experiment <ArrowRight className="size-3.5" /></Link>}
                 </div>
               </div>
