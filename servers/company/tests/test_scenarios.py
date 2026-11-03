@@ -10,7 +10,6 @@ import sys
 import tempfile
 import threading
 import unittest
-from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -92,43 +91,19 @@ class FakeMailTransport:
 class FakeChatTransport:
     def __init__(self):
         self.calls = []
-        self.posted = {}
+        self.posted = set()
         self.fail_once = False
-        self.fail_before_submit = False
-        self.timeline = []
 
-    def post(self, fixture, credentials, attempt_id, *, on_submission_started=None,
-             on_message_id_captured=None):
-        self.calls.append((attempt_id, credentials["username"], fixture["chat_message"]))
-        if self.fail_before_submit:
-            self.fail_before_submit = False
-            raise PermissionError("synthetic browser authentication failure")
-        if on_submission_started:
-            on_submission_started()
-        self.timeline.append("submission_marked")
-        message_id = "native-" + attempt_id
-        room = fixture["employee_mailbox"]["rocketchat_room_id"]
-        receipt = {"message_id": message_id, "room_id": room, "thread_id": None,
-                   "browser_url": f"https://chat.example.test/channel/general?msg={message_id}"}
-        self.posted[message_id] = (receipt, fixture["chat_message"])
-        self.timeline.append("message_accepted")
+    def post(self, fixture, credentials, message_id):
+        self.calls.append((message_id, credentials["username"], fixture["chat_message"]))
         if self.fail_once:
             self.fail_once = False
-            if on_message_id_captured:
-                on_message_id_captured(message_id)
-            self.timeline.append("native_id_persisted")
+            self.posted.add(message_id)
             raise ConnectionError("synthetic chat timeout after acceptance")
-        if on_message_id_captured:
-            on_message_id_captured(message_id)
-        self.timeline.append("native_id_persisted")
-        return receipt
-
-    def confirm_message(self, fixture, credentials, message_id, message_text, submission_started_at):
-        if message_id:
-            saved = self.posted.get(message_id)
-            return saved[0] if saved and saved[1] == message_text else None
-        matches = [receipt for receipt, text in self.posted.values() if text == message_text]
-        return matches[0] if len(matches) == 1 else None
+        self.posted.add(message_id)
+        room = fixture["employee_mailbox"]["rocketchat_room_id"]
+        return {"message_id": message_id, "room_id": room, "thread_id": None,
+                "browser_url": f"https://chat.example.test/channel/general?msg={message_id}"}
 
 
 class CrossProcessMailTransport:
@@ -178,23 +153,19 @@ class Response:
 
 
 class FakeChatSession:
-    def __init__(self, user_id="expected-employee-id", mention_user_id="assistant-account-id",
-                 message_author_id=None, message_room_id="room-safe-id", message_text=None):
+    def __init__(self, user_id="expected-employee-id", mention_user_id="assistant-account-id"):
         self.user_id = user_id
         self.mention_user_id = mention_user_id
-        self.message_author_id = message_author_id or user_id
-        self.message_room_id = message_room_id
-        self.message_text = message_text
-        self.message = None
-        self.native_message_id = "rocketchat-native-id"
-        self.client_message_id = self.native_message_id
-        self.historic_message = None
-        self.sent_message_events = 0
-        self.typing_events = []
         self.calls = []
 
     def post(self, url, **kwargs):
         self.calls.append(("POST", url, kwargs))
+        if url.endswith("/api/v1/login"):
+            return Response({"status": "success", "data": {"authToken": "safe-test-token", "userId": "login-id"}})
+        if url.endswith("/api/v1/chat.sendMessage"):
+            message = kwargs["json"]["message"]
+            return Response({"success": True, "message": {"_id": message["_id"], "rid": message["rid"],
+                                                              "u": {"_id": self.user_id}}})
         raise AssertionError(f"unexpected POST endpoint: {url}")
 
     def get(self, url, **kwargs):
@@ -203,190 +174,11 @@ class FakeChatSession:
             return Response({"success": True, "_id": self.user_id, "username": "employee"})
         if url.endswith("/api/v1/users.info"):
             return Response({"success": True, "user": {"_id": self.mention_user_id, "username": "configured_assistant"}})
+        if url.endswith("/api/v1/chat.getMessage"):
+            return Response({"success": False}, status=400)
         if url.endswith("/api/v1/rooms.info"):
             return Response({"success": True, "room": {"_id": "room-safe-id", "t": "c", "name": "general"}})
-        if url.endswith("/api/v1/chat.getMessage"):
-            requested = kwargs.get("params", {}).get("msgId")
-            return Response({"success": True, "message": self.message}, status=200) if self.message and requested == self.message["_id"] else Response({"success": False}, status=400)
         raise AssertionError(f"unexpected GET endpoint: {url}")
-
-    def submit_from_browser(self, text):
-        self.message = {"_id": self.client_message_id, "rid": self.message_room_id,
-                       "u": {"_id": self.message_author_id}, "msg": self.message_text or text,
-                       "tmid": None, "ts": "2026-10-31T12:00:00Z"}
-        return {"msg": "changed", "collection": "stream-room-messages",
-                "fields": {"args": [self.message]}}
-
-
-class FakeWebSocket:
-    url = "wss://chat.example.test/websocket"
-
-    def __init__(self, session):
-        self.session = session
-        self.frames = []
-        self.listeners = {"framereceived": [], "framesent": []}
-        self.closed = False
-        self.connected_frames_seen = False
-
-    def is_closed(self):
-        return self.closed
-
-    def on(self, event, callback):
-        if event not in self.listeners:
-            raise AssertionError(f"unexpected websocket event: {event}")
-        self.listeners[event].append(callback)
-
-    def wait_for_event(self, event, predicate=None, timeout=None):
-        if timeout != 0:
-            raise AssertionError("DDP initialization wait must have no deadline")
-        if event == "framereceived":
-            while self.frames:
-                frame = self.frames.pop(0)
-                if predicate is None or predicate(frame):
-                    self.emit(frame)
-                    return frame
-        raise AssertionError("the synthetic DDP connected frame arrived before the wait")
-
-    def emit(self, frame):
-        self.emit_event("framereceived", frame)
-
-    def emit_event(self, event, frame):
-        if frame.get("msg") == "connected":
-            self.connected_frames_seen = True
-        if event == "framesent" and frame.get("method") == "sendMessage":
-            self.session.sent_message_events += 1
-        for listener in self.listeners[event]:
-            listener(frame)
-
-
-class FakeMessageComposer:
-    def __init__(self, page):
-        self.page = page
-        self.text = ""
-        self.first = self
-
-    def count(self):
-        return 1
-
-    def is_visible(self):
-        return self.page.composer_visible
-
-    def wait_for(self, state=None, timeout=None):
-        if state != "visible" or timeout != 0:
-            raise AssertionError("composer visibility wait must be unbounded")
-        if not self.page.socket.connected_frames_seen:
-            raise AssertionError("the DDP handshake must arrive before composer visibility")
-        self.page.composer_waits += 1
-        self.page.composer_visible = True
-
-    def fill(self, text, timeout=None):
-        if timeout != 0:
-            raise AssertionError("composer edits must not add a deadline")
-        if text != "":
-            raise AssertionError("message content must be typed visibly, not filled instantly")
-        self.text = ""
-        self.page.session.typing_events.append(("clear",))
-
-    def press_sequentially(self, text, delay=None, timeout=None):
-        if timeout != 0:
-            raise AssertionError("visible typing must not add a deadline")
-        if self.page.session.sent_message_events:
-            raise AssertionError("message was submitted before visible typing finished")
-        self.text += text
-        self.page.session.typing_events.append(("type", text, delay, timeout))
-
-    def press(self, key, timeout=None):
-        if timeout != 0:
-            raise AssertionError("message composer keypresses must not add a deadline")
-        if key == "Shift+Enter":
-            if self.page.session.sent_message_events:
-                raise AssertionError("line break submitted the message")
-            self.text += "\n"
-            self.page.session.typing_events.append(("newline", key))
-            return
-        if key != "Enter":
-            raise AssertionError(f"unexpected message submit key: {key}")
-        if self.page.socket.is_closed():
-            raise AssertionError("message submission used a closed websocket")
-        if not self.page.socket.listeners["framereceived"]:
-            raise AssertionError("DDP frame listener must be installed before message submission")
-        self.page.session.typing_events.append(("enter",))
-        frame = self.page.session.submit_from_browser(self.text)
-        outgoing = {"msg": "method", "method": "sendMessage", "id": "send-rpc-1",
-                    "params": [{"_id": self.page.session.client_message_id,
-                                "rid": self.page.session.message_room_id, "msg": self.text}]}
-        self.page.socket.emit_event("framesent", outgoing)
-        # Model a fast DDP acknowledgement and message event during Enter.
-        self.page.socket.emit({"msg": "result", "id": "send-rpc-1",
-                              "result": {"_id": self.page.session.client_message_id}})
-        self.page.socket.emit(frame)
-
-
-class FakePage:
-    def __init__(self, session):
-        self.session = session
-        self.listeners = {}
-        self.socket = None
-        self.sockets = []
-        self.composer_visible = False
-        self.composer_waits = 0
-        self.composer = FakeMessageComposer(self)
-        self.url = ""
-
-    def on(self, event, callback):
-        self.listeners[event] = callback
-
-    def goto(self, url, **kwargs):
-        if kwargs.get("timeout") != 0:
-            raise AssertionError("browser navigation must not add a deadline")
-        self.url = url
-        if "/channel/" in url and self.socket is not None:
-            self.socket.closed = True
-        self.socket = FakeWebSocket(self.session)
-        self.sockets.append(self.socket)
-        if "websocket" in self.listeners:
-            self.listeners["websocket"](self.socket)
-            # The DDP handshake arrives while the composer is still loading.
-            self.socket.emit({"msg": "connected", "session": "synthetic"})
-            historic_message = self.session.historic_message
-            if "/channel/" in url and historic_message is not None:
-                self.socket.emit({"msg": "changed", "collection": "stream-room-messages",
-                                  "fields": {"args": [historic_message]}})
-
-    def wait_for_event(self, event, predicate=None, timeout=None):
-        if timeout != 0:
-            raise AssertionError("websocket initialization wait must have no deadline")
-        if event == "websocket":
-            candidates = [socket for socket in self.sockets if predicate is None or predicate(socket)]
-            if candidates:
-                return candidates[-1]
-        raise TimeoutError("synthetic websocket wait expired")
-
-    def evaluate(self, _script):
-        return {"token": "synthetic-browser-token", "userId": self.session.user_id}
-
-    def locator(self, selector):
-        if selector.startswith('textarea[aria-label="Message"]'):
-            return self.composer
-        return EmptyLocator()
-
-
-class EmptyLocator:
-    count = lambda self: 0
-
-
-class FakeBrowserSessionProvider:
-    def __init__(self, session):
-        self.session = session
-        self.employee_emails = []
-        self.pages = []
-
-    @contextmanager
-    def open_for_employee_email(self, email):
-        self.employee_emails.append(email)
-        page = FakePage(self.session)
-        self.pages.append(page)
-        yield page
 
 
 class ScenarioRunnerTests(unittest.TestCase):
@@ -568,44 +360,16 @@ class ScenarioRunnerTests(unittest.TestCase):
         self.assertEqual(self.mail.smtp_send_attempts, 1)
         self.assertEqual(len(self.mail.forwards), 1)
 
-    def test_chat_uncertain_recovery_verifies_native_id_without_resubmitting_or_repeating_email(self):
+    def test_chat_failure_retries_same_message_id_without_repeating_email(self):
         self.chat.fail_once = True
         first = self.run_it()
         self.assertEqual(first["status"], "FAILED")
-        first_step = next(step for step in first["steps"] if step["step_key"] == "chat-post")
-        self.assertEqual(first_step["step"], STEP_FAILED)
-        self.assertEqual(first_step["submission_started"], 1)
-        self.assertTrue(first_step["submission_started_at"])
-        self.assertTrue(first_step["external_id"].startswith("native-"))
-        self.assertEqual(self.chat.timeline[:3], ["submission_marked", "message_accepted", "native_id_persisted"])
+        self.assertTrue(any(step["step"] == STEP_FAILED for step in first["steps"]))
         second = self.run_it(run_id=first["id"])
         self.assertEqual(second["status"], "COMPLETED")
         self.assertEqual(len(self.mail.deliveries), 1)
         self.assertEqual(len(self.mail.forwards), 1)
-        self.assertEqual(len(self.chat.calls), 1)
-        final_step = next(step for step in second["steps"] if step["step_key"] == "chat-post")
-        self.assertEqual(final_step["external_id"], first_step["external_id"])
-
-    def test_chat_uncertain_outcome_without_matching_message_is_not_resent(self):
-        self.chat.fail_once = True
-        first = self.run_it()
-        self.chat.posted.clear()
-        second = self.run_it(run_id=first["id"])
-        self.assertEqual(second["status"], "FAILED")
-        self.assertEqual(len(self.chat.calls), 1)
-        chat_step = next(step for step in second["steps"] if step["step_key"] == "chat-post")
-        self.assertEqual(chat_step["error_type"], "ChatBrowserMessageNotFound")
-        self.assertEqual(chat_step["submission_started"], 1)
-
-    def test_chat_failure_before_submission_can_retry(self):
-        self.chat.fail_before_submit = True
-        first = self.run_it()
-        self.assertEqual(first["status"], "FAILED")
-        first_step = next(step for step in first["steps"] if step["step_key"] == "chat-post")
-        self.assertEqual(first_step["submission_started"], 0)
-        second = self.run_it(run_id=first["id"])
-        self.assertEqual(second["status"], "COMPLETED")
-        self.assertEqual(len(self.chat.calls), 2)
+        self.assertEqual(self.chat.calls[0][0], self.chat.calls[1][0])
 
     def test_requires_explicit_versions_and_smtp4dev_receipt_configuration(self):
         bad = dict(self.fixture)
@@ -737,114 +501,55 @@ class ScenarioRunnerTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             self.run_it()
 
-    def test_real_chat_transport_sends_in_employee_browser_and_verifies_native_ddp_message(self):
-        self.fixture["chat_message"] = "line one\nline two"
+    def test_real_chat_transport_checks_logged_in_employee_identity_and_uses_deterministic_id(self):
         session = FakeChatSession()
-        browser = FakeBrowserSessionProvider(session)
-        message_id = session.native_message_id
-        result = RealChatTransport(session, browser).post(
-            self.fixture, {"username": "employee", "password": "private"}, "attempt-reference")
+        message_id = "scenario-deterministic-id"
+        result = RealChatTransport(session).post(self.fixture, {"username": "employee", "password": "private"}, message_id)
         self.assertEqual(result, {"message_id": message_id, "room_id": "room-safe-id", "thread_id": None,
                                   "browser_url": f"https://chat.example.test/channel/general?msg={message_id}"})
-        self.assertEqual(session.message["_id"], message_id)
-        self.assertEqual(session.message["msg"], self.fixture["chat_message"])
-        self.assertEqual(session.typing_events, [
-            ("clear",), ("type", "line one", 150, 0), ("newline", "Shift+Enter"),
-            ("type", "line two", 150, 0), ("enter",),
-        ])
-        self.assertEqual(session.sent_message_events, 1)
-        self.assertEqual(session.calls[0][2]["headers"]["X-User-Id"], "expected-employee-id")
-        self.assertEqual(browser.employee_emails, ["employee@example.test"])
-        page = browser.pages[0]
-        self.assertEqual(len(page.sockets), 2)
-        self.assertTrue(page.sockets[0].is_closed())
-        self.assertFalse(page.sockets[1].is_closed())
-        self.assertGreater(page.composer_waits, 0)
+        sent = next(call for call in session.calls if call[1].endswith("chat.sendMessage"))
+        self.assertEqual(sent[2]["json"]["message"]["_id"], message_id)
+        self.assertEqual(sent[2]["json"]["message"]["msg"], self.fixture["chat_message"])
+        self.assertEqual(sent[2]["headers"]["X-User-Id"], "login-id")
         self.assertTrue(any(call[1].endswith("/api/v1/rooms.info") for call in session.calls))
         self.assertFalse(any(call[1].endswith("/api/v1/users.info") for call in session.calls))
-        self.assertFalse(any(call[0] == "POST" for call in session.calls))
-
-    def test_visible_typing_timeout_scales_for_long_messages(self):
-        self.fixture["chat_message"] = "x" * 1200
-        session = FakeChatSession()
-        browser = FakeBrowserSessionProvider(session)
-
-        RealChatTransport(session, browser).post(
-            self.fixture, {"username": "employee", "password": "private"}, "long-message")
-
-        typed = next(event for event in session.typing_events if event[0] == "type")
-        self.assertEqual(typed[1], self.fixture["chat_message"])
-        self.assertEqual(typed[2], 150)
-        self.assertEqual(typed[3], 0)
-
-    def test_old_identical_room_message_is_not_attributed_to_new_ddp_send(self):
-        session = FakeChatSession()
-        session.client_message_id = "new-client-generated-id"
-        session.native_message_id = session.client_message_id
-        session.historic_message = {
-            "_id": "old-historic-id", "rid": "room-safe-id",
-            "u": {"_id": "expected-employee-id"}, "msg": self.fixture["chat_message"],
-            "ts": "2026-10-31T11:59:00Z",
-        }
-        browser = FakeBrowserSessionProvider(session)
-
-        result = RealChatTransport(session, browser).post(
-            self.fixture, {"username": "employee", "password": "private"}, "attempt-reference")
-
-        self.assertEqual(result["message_id"], "new-client-generated-id")
-        self.assertNotEqual(result["message_id"], session.historic_message["_id"])
-        self.assertEqual(session.message["msg"], session.historic_message["msg"])
-        self.assertFalse(any(call[0] == "POST" for call in session.calls))
 
     def test_real_chat_transport_rejects_wrong_logged_in_user_before_posting(self):
         session = FakeChatSession(user_id="different-user")
-        browser = FakeBrowserSessionProvider(session)
         with self.assertRaisesRegex(RuntimeError, "ROCKETCHAT_AUTHOR_MISMATCH"):
-            RealChatTransport(session, browser).post(
-                self.fixture, {"username": "wrong", "password": "private"}, "scenario-id")
-        self.assertIsNone(session.message)
+            RealChatTransport(session).post(self.fixture, {"username": "wrong", "password": "private"}, "scenario-id")
+        self.assertFalse(any(call[1].endswith("chat.sendMessage") for call in session.calls))
 
     def test_real_chat_transport_resolves_immutable_mention_id_and_records_receipt(self):
         self.fixture["mention_account_id"] = "assistant-account-id"
         session = FakeChatSession()
-        browser = FakeBrowserSessionProvider(session)
         message_id = "scenario-with-mention"
-        result = RealChatTransport(session, browser).post(
+        result = RealChatTransport(session).post(
             self.fixture, {"username": "employee", "password": "private"}, message_id)
         lookup = next(call for call in session.calls if call[1].endswith("/api/v1/users.info"))
+        sent = next(call for call in session.calls if call[1].endswith("/api/v1/chat.sendMessage"))
         self.assertEqual(lookup[2]["params"], {"userId": "assistant-account-id"})
-        self.assertEqual(lookup[2]["headers"]["X-User-Id"], "expected-employee-id")
-        self.assertEqual(session.message["rid"], "room-safe-id")
-        self.assertTrue(session.message["msg"].startswith("@configured_assistant "))
-        self.assertEqual(session.message["msg"].split(" ", 1)[1], self.fixture["chat_message"])
+        self.assertEqual(lookup[2]["headers"]["X-User-Id"], "login-id")
+        self.assertEqual(sent[2]["headers"]["X-User-Id"], "login-id")
+        self.assertEqual(sent[2]["json"]["message"]["rid"], "room-safe-id")
+        self.assertTrue(sent[2]["json"]["message"]["msg"].startswith("@configured_assistant "))
+        self.assertEqual(sent[2]["json"]["message"]["msg"].split(" ", 1)[1], self.fixture["chat_message"])
         self.assertEqual(result["mention_account_id"], "assistant-account-id")
-        self.assertFalse(any(call[0] == "POST" for call in session.calls))
 
     def test_real_chat_transport_rejects_mention_lookup_id_mismatch_before_posting(self):
         self.fixture["mention_account_id"] = "assistant-account-id"
         session = FakeChatSession(mention_user_id="different-account-id")
-        browser = FakeBrowserSessionProvider(session)
         with self.assertRaisesRegex(RuntimeError, "ROCKETCHAT_MENTION_ACCOUNT_MISMATCH"):
-            RealChatTransport(session, browser).post(
+            RealChatTransport(session).post(
                 self.fixture, {"username": "employee", "password": "private"}, "scenario-bad-mention")
-        self.assertIsNone(session.message)
-
-    def test_chat_recovery_does_not_claim_text_and_time_history_match_without_native_id(self):
-        session = FakeChatSession()
-        receipt = RealChatTransport(session, FakeBrowserSessionProvider(session)).confirm_message(
-            self.fixture, {"username": "employee", "password": "private"}, None,
-            self.fixture["chat_message"], "2026-10-31T12:00:00Z")
-        self.assertIsNone(receipt)
-        self.assertFalse(any(call[1].endswith("/api/v1/channels.history") for call in session.calls))
+        self.assertFalse(any(call[1].endswith("/api/v1/chat.sendMessage") for call in session.calls))
 
     def test_scenario_audit_persists_resolved_mention_account_id(self):
         self.fixture["mention_account_id"] = "assistant-account-id"
         self.fixture_path.write_text(json.dumps(self.fixture))
-        session = FakeChatSession()
         result = run_scenario(
             self.fixture_path, self.credentials_path, self.database,
-            mail_transport=self.mail,
-            chat_transport=RealChatTransport(session, FakeBrowserSessionProvider(session)))
+            mail_transport=self.mail, chat_transport=RealChatTransport(FakeChatSession()))
         chat_step = next(step for step in result["steps"] if step["step_key"] == "chat-post")
         self.assertEqual(chat_step["mention_account_id"], "assistant-account-id")
 
@@ -1044,11 +749,9 @@ class ScenarioRunnerTests(unittest.TestCase):
             raise AssertionError("unexpected directory endpoint")
 
         chat_session = FakeChatSession(user_id=central_chat_uid, mention_user_id="assistant-account-id")
-        chat_browser = FakeBrowserSessionProvider(chat_session)
         with patch("servers.company.scenarios.requests.get", side_effect=directory_get) as get:
             result = run_scenario(self.fixture_path, self.credentials_path, self.database,
-                                  mail_transport=self.mail,
-                                  chat_transport=RealChatTransport(chat_session, chat_browser),
+                                  mail_transport=self.mail, chat_transport=RealChatTransport(chat_session),
                                   owncloud_session=owncloud_session)
         actors = json.loads(result["actors"])
         self.assertEqual(actors["employee_id"], "Sarah Johnson")
@@ -1068,7 +771,8 @@ class ScenarioRunnerTests(unittest.TestCase):
         self.assertEqual(source_attachment["X-TAC-OwnCloud-Reference-ID"], "invoice-source")
         self.assertEqual(source_attachment["X-TAC-OwnCloud-FileID"], "82415")
         self.assertEqual(source_attachment["X-TAC-OwnCloud-ETag"], '"v7-55a"')
-        self.assertTrue(chat_session.message["msg"].startswith("@configured_assistant "))
+        self.assertTrue(next(call[2]["json"]["message"]["msg"] for call in chat_session.calls
+                                 if call[1].endswith("/api/v1/chat.sendMessage")).startswith("@configured_assistant "))
         chat_step = next(step for step in result["steps"] if step["step_key"] == "chat-post")
         mail_step = next(step for step in result["steps"] if step["step_key"] == "mail-delivery")
         self.assertEqual(chat_step["file_references"], mail_step["file_references"])
@@ -1076,18 +780,17 @@ class ScenarioRunnerTests(unittest.TestCase):
         self.assertEqual(chat_step["mention_account_id"], "assistant-account-id")
         self.assertEqual(get.call_args_list[0].args[0], "https://midpoint.example.test/ws/rest/users")
         self.assertEqual(get.call_args_list[0].kwargs["auth"], ("directory-user", "directory-password"))
-        self.assertEqual(chat_session.message["rid"], "room-safe-id")
-        self.assertIn("/webmail?_task=mail", chat_session.message["msg"])
-        self.assertIn("file ID 82415", chat_session.message["msg"])
-        self.assertFalse(any(call[0] == "POST" for call in chat_session.calls))
+        sent = next(call for call in chat_session.calls if call[1].endswith("chat.sendMessage"))
+        self.assertEqual(sent[2]["json"]["message"]["rid"], "room-safe-id")
+        self.assertIn("/webmail?_task=mail", sent[2]["json"]["message"]["msg"])
+        self.assertIn("file ID 82415", sent[2]["json"]["message"]["msg"])
 
         central_email = "contact.updated@example.com"
         resumed_chat_session = FakeChatSession(user_id=central_chat_uid, mention_user_id="assistant-account-id")
-        resumed_chat_browser = FakeBrowserSessionProvider(resumed_chat_session)
         with patch("servers.company.scenarios.requests.get", side_effect=directory_get):
             resumed = run_scenario(self.fixture_path, self.credentials_path, self.database,
                                    run_id=result["id"], mail_transport=self.mail,
-                                   chat_transport=RealChatTransport(resumed_chat_session, resumed_chat_browser),
+                                   chat_transport=RealChatTransport(resumed_chat_session),
                                    owncloud_session=WebDAVSession())
         self.assertEqual(resumed["id"], result["id"])
         self.assertEqual(len(self.mail.deliveries), 1)
