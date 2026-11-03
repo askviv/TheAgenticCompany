@@ -738,6 +738,7 @@ function HelpPage() {
   return (
     <section className="space-y-7">
       <h1 className="text-2xl font-semibold tracking-tight">Help</h1>
+      <CodexConnectionCard />
       <SavedNativeEvaluations />
       <Card>
         <CardHeader>
@@ -888,7 +889,6 @@ function LibraryPage() {
         </div>
       </div>
       <BackgroundSimulations />
-      <CodexConnectionCard />
 
       <fieldset className="space-y-3">
         <legend className="text-sm font-medium">Benchmark</legend>
