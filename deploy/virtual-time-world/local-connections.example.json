@@ -1,0 +1,12 @@
+{
+  "webhooks": {
+    "rocketchat": {
+      "enabled": true,
+      "endpoint": "https://your-mac.your-tailnet.ts.net:8443/your-existing-webhook-path",
+      "token": "",
+      "channels": [
+        "#general"
+      ]
+    }
+  }
+}

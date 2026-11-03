@@ -7,8 +7,17 @@ import plistlib
 import shutil
 import subprocess
 
-parser=argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--ssh-key',type=Path,required=True)
+config_parser=argparse.ArgumentParser(add_help=False)
+config_parser.add_argument('--config',type=Path,help='Private JSON configuration containing tunnel settings')
+config_args,_=config_parser.parse_known_args()
+defaults={}
+if config_args.config is not None:
+    import json
+    if config_args.config.stat().st_mode & 0o077:
+        raise PermissionError('Local connection configuration must be mode 0600')
+    defaults=json.loads(config_args.config.read_text())['tunnel']
+parser=argparse.ArgumentParser(description=__doc__,parents=[config_parser])
+parser.add_argument('--ssh-key',type=Path,required='ssh_key' not in defaults)
 parser.add_argument('--mini',default='company@192.0.2.10')
 parser.add_argument('--smtp-port',type=int,default=19126)
 parser.add_argument('--api-port',type=int,default=19158)
@@ -17,6 +26,7 @@ parser.add_argument('--label-prefix',default='org.example')
 parser.add_argument('--reply-listen-port',type=int,help='Optional Mac loopback port for company SMTP submission')
 parser.add_argument('--reply-smtp-host',help='Company submission hostname reachable from the SSH server')
 parser.add_argument('--reply-smtp-port',type=int,help='Company submission port reachable from the SSH server')
+parser.set_defaults(**defaults)
 args=parser.parse_args()
 reply_options=(args.reply_listen_port,args.reply_smtp_host,args.reply_smtp_port)
 if any(value is not None for value in reply_options) and not all(value is not None for value in reply_options):
