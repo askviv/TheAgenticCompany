@@ -1,0 +1,31 @@
+{
+  "domains": {
+    "owncloud": "owncloud.example.invalid",
+    "chat": "chat.example.invalid",
+    "plane": "plane.example.invalid",
+    "mail": "mail.example.invalid",
+    "erp": "erp.example.invalid",
+    "midpoint": "midpoint.example.invalid",
+    "experiments": "experiments.example.invalid"
+  },
+  "public_ip": "203.0.113.10",
+  "clock_rate": 24,
+  "mail_ports": {
+    "smtp": 2525,
+    "submission": 2587,
+    "imaps": 2993
+  },
+  "sandbox_password": "theagentcompany",
+  "viv": {
+    "email": "viv@example.invalid",
+    "chat_username": "viv",
+    "smtp_host": "smtp.example.invalid",
+    "smtp_port": 587,
+    "api_base_url": "https://api.example.invalid",
+    "mailbox_name": "viv"
+  },
+  "codex": {
+    "cli_version": "0.166.0",
+    "model": "gpt-6-luna"
+  }
+}

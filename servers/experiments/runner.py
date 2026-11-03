@@ -235,14 +235,15 @@ class RocketChatClient:
             normalized.sort(key=lambda item: item["timestamp"] or "")
             return normalized
 
-    def setup_outgoing_webhook(self, token: str | None = None) -> str:
+    def setup_outgoing_webhook(
+        self, token: str | None = None, *, endpoint: str = "http://192.0.2.10:8110/api/chat-events",
+    ) -> str:
         """Ensure the named message webhook exists without exposing its secret."""
         with self._lock:
             self._ensure_login()
             self._ensure_channel()
             token = token if token is not None else os.environ["EXPERIMENTS_WEBHOOK_TOKEN"]
             name = "TACExperimentTracking"
-            endpoint = "http://192.0.2.10:8110/api/chat-events"
             listed = self._request(
                 "GET",
                 "integrations.list",

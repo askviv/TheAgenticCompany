@@ -87,14 +87,16 @@ def write_mailu_proxy_config(path, timeout_usec):
 def prepare_mailu_proxy_timeout(config_dir, config_path, config, rate):
     if config.get('name') != MAILU_PROJECT:
         return False
-    if any(service not in config.get('services', {}) for service in MAILU_FRONT_SERVICES):
-        raise RuntimeError('Prepared Mailu Compose configuration is missing a required front service')
+    front_services = [service for service in MAILU_FRONT_SERVICES
+                      if service in config.get('services', {})]
+    if 'front' not in front_services:
+        raise RuntimeError('Prepared Mailu Compose configuration is missing its front service')
 
     baseline_dir = config_dir.parent / 'mailu-proxy-timeout-baseline'
     baseline_dir.mkdir(mode=0o700, exist_ok=True)
     generated_dir = (config_dir.parent / 'mailu-proxy-timeouts').resolve()
     generated_dir.mkdir(mode=0o700, exist_ok=True)
-    for service in MAILU_FRONT_SERVICES:
+    for service in front_services:
         baseline_path = baseline_dir / f'{service}.json'
         if baseline_path.exists():
             baseline = json.loads(baseline_path.read_text())

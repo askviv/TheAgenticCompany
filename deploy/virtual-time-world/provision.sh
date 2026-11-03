@@ -9,6 +9,10 @@ WORLD_VCPUS=${WORLD_VCPUS:-1}
 WORLD_SSH_PORT=${WORLD_SSH_PORT:-22220}
 WORLD_DISK_SIZE=${WORLD_DISK_SIZE:-40G}
 WORLD_DATA_DISK_SIZE=${WORLD_DATA_DISK_SIZE:-250G}
+WORLD_MAIL_BIND_IP=${WORLD_MAIL_BIND_IP:-127.0.0.1}
+WORLD_MAIL_SMTP_PORT=${WORLD_MAIL_SMTP_PORT:-2525}
+WORLD_MAIL_SUBMISSION_PORT=${WORLD_MAIL_SUBMISSION_PORT:-2587}
+WORLD_MAIL_IMAPS_PORT=${WORLD_MAIL_IMAPS_PORT:-2993}
 connection=qemu:///system
 base=noble-server-cloudimg-amd64.img
 
@@ -95,7 +99,26 @@ packages:
   - qemu-guest-agent
   - util-linux-extra
   - libnss3-tools
+  - build-essential
+  - bc
+  - bison
+  - flex
+  - libelf-dev
+  - libssl-dev
+  - libncurses-dev
+  - dwarves
+  - kmod
+  - cpio
+  - curl
+  - git
+  - rsync
+  - caddy
+  - python3-venv
+  - openjdk-21-jdk-headless
+  - unzip
+  - perl
 runcmd:
+  - [systemctl, disable, --now, caddy.service]
   - [systemctl, disable, --now, docker.service, docker.socket]
   - [systemctl, disable, --now, systemd-timesyncd.service]
   - [systemctl, disable, --now, apt-daily.timer, apt-daily-upgrade.timer, fwupd-refresh.timer, multipathd.service, multipathd.socket]
@@ -126,7 +149,7 @@ virt-install --connect "$connection" \
   --disk "path=$WORLD_ROOT/images/seed.img,format=raw,bus=virtio,readonly=on" \
   --disk "path=$WORLD_ROOT/images/company-data.qcow2,format=qcow2,bus=virtio" \
   --network none \
-  --qemu-commandline="-netdev user,id=worldnet,hostfwd=tcp:127.0.0.1:$WORLD_SSH_PORT-:22 -device virtio-net-pci,netdev=worldnet,bus=pcie.0,addr=0x1e" \
+  --qemu-commandline="-netdev user,id=worldnet,hostfwd=tcp:127.0.0.1:$WORLD_SSH_PORT-:22,hostfwd=tcp:127.0.0.1:18080-:80,hostfwd=tcp:127.0.0.1:18443-:443,hostfwd=tcp:$WORLD_MAIL_BIND_IP:$WORLD_MAIL_SMTP_PORT-:$WORLD_MAIL_SMTP_PORT,hostfwd=tcp:$WORLD_MAIL_BIND_IP:$WORLD_MAIL_SUBMISSION_PORT-:$WORLD_MAIL_SUBMISSION_PORT,hostfwd=tcp:$WORLD_MAIL_BIND_IP:$WORLD_MAIL_IMAPS_PORT-:$WORLD_MAIL_IMAPS_PORT -device virtio-net-pci,netdev=worldnet,bus=pcie.0,addr=0x1e" \
   --channel unix,target.type=virtio,name=org.qemu.guest_agent.0 \
   --graphics none --console none \
   --serial "file,path=$WORLD_ROOT/images/console.log" \

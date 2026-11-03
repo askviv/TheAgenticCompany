@@ -83,12 +83,20 @@ Docker Compose inside that VM. Its patched guest kernel provides the clock
 shared by applications, databases and employee desktops. The host keeps normal
 time for external transport and model authentication.
 
-Start with the [VM deployment guide](deploy/virtual-time-world/README.md). Its
-provisioning command creates the VM; Docker Compose starts the application
-containers inside it. For an existing company, follow the
-[migration runbook](docs/enterprise-simulation/virtual-time-migration.md) to
-preserve records, volumes and the clock epoch. Configure domain mappings and
-clock speed in deployment files, not dashboard controls.
+Configure the [deployment profile](deploy/virtual-time-world/deployment-profile.example.json)
+with your domains, host address, Viv email connection and Codex CLI version, then run:
+
+```sh
+sudo env DEPLOYMENT_PROFILE=/etc/agentic-company/deployment-profile.json \
+  bash deploy/virtual-time-world/up.sh --fresh
+```
+
+This creates a fresh timed Ubuntu VM and installs the company from standard
+published images, supplied benchmark seed data and repository configuration.
+It does not back up or migrate an old company. `--fresh` replaces the selected
+company VM; omit it to bring the initialized deployment back up. See the
+[VM deployment guide](deploy/virtual-time-world/README.md) for configuration and
+host requirements. Domain mappings and clock speed belong in deployment files.
 
 | Guide | Purpose |
 | --- | --- |
@@ -97,13 +105,13 @@ clock speed in deployment files, not dashboard controls.
 | [ERPNext runtime](docs/enterprise-simulation/erpnext-runtime.md) | Existing company site, roles and native integration evidence |
 | [Coordinator deployment](deploy/enterprise-simulation/coordinator/README.md) | Private configuration, bootstrap, service operations and persistence |
 | [Actor workers](deploy/enterprise-simulation/actors/README.md) | Pinned upstream runtimes, isolated environments and Codex transport |
-| [Virtual-time VM](deploy/virtual-time-world/README.md) | Whole-company guest kernel clock, host control and migration boundaries |
+| [Virtual-time VM](deploy/virtual-time-world/README.md) | Fresh infrastructure bootstrap and shared guest kernel clock |
 | [Dashboard operation](docs/enterprise-simulation/company-dashboard.md) | Shared-company experiment and activity flow |
 | [Identity/email delivery contracts](servers/company/README.md) | Durable mail/chat delivery, ownCloud source references and retries |
 
-Back up databases, private evidence and configuration before updating services.
-A code rollback must not overwrite newer company activity. Provider Start/Stop
-controls do not reset company data.
+Provider Start/Stop controls do not reset company data. The infrastructure
+bootstrap contains no saved experiment history, mailboxes or database snapshots
+from an existing deployment.
 
 For the React/shadcn dashboard:
 

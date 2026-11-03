@@ -38,8 +38,11 @@ services:
       - 9.9.9.9
       - 1.1.1.1
     networks:
-      - default
-      - webmail
+      default: {}
+      webmail: {}
+      provisioning:
+        aliases:
+          - mailu-api
 
   admin:
     image: ghcr.io/mailu/admin:2024.06.58@sha256:6d10f83d3a5afa41f7b40945563531a069ec99927a6fab9fdeed5e0ab229fbd3
@@ -124,7 +127,6 @@ services:
       - front
     networks:
       - webmail
-
 networks:
   default:
     driver: bridge
@@ -134,3 +136,6 @@ networks:
         - subnet: 172.22.0.0/24
   webmail:
     driver: bridge
+  provisioning:
+    name: tac-company-provisioning
+    external: true

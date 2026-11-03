@@ -13,7 +13,7 @@ import traceback
 LOG = logging.getLogger('virtual_time_world.company_compose_stop')
 CONFIG_DIR = Path(os.environ.get(
     'COMPOSE_CONFIG_DIR',
-    '/data/theagentcompany/virtual-time-world/config/migration-compose'))
+    '/etc/company-workplace/compose'))
 POLICY_JOURNAL = Path(os.environ.get(
     'RESTART_POLICY_JOURNAL', str(CONFIG_DIR.parent / 'container-restart-policy-journal.json')))
 DOCKER = '/usr/bin/docker'
@@ -161,7 +161,7 @@ def docker_inspect(container_ids):
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True)
     if result.returncode:
-        raise RuntimeError(command_error('Docker inspect for migration containers', result))
+        raise RuntimeError(command_error('Docker inspect for company containers', result))
     records = json.loads(result.stdout)
     by_id = {record['Id']: record for record in records}
     if set(by_id) != set(container_ids):
@@ -361,7 +361,7 @@ def drain_mailu_wrapper(config, project, service):
 
 def load_projects():
     if not CONFIG_DIR.is_dir():
-        raise FileNotFoundError('prepared migration Compose directory is unavailable')
+        raise FileNotFoundError('fresh company Compose directory is unavailable')
     projects = []
     for path in sorted(CONFIG_DIR.glob('*.json')):
         data = json.loads(path.read_text(encoding='utf-8'))
@@ -373,7 +373,7 @@ def load_projects():
             raise ValueError(f'duplicate prepared Compose project name: {name}')
         projects.append((name, path, services))
     if not projects:
-        raise FileNotFoundError('no prepared migration Compose configurations found')
+        raise FileNotFoundError('no fresh company Compose configurations found')
     return {name: (path, services) for name, path, services in projects}
 
 
