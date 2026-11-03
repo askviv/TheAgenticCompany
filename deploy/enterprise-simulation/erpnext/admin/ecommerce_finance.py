@@ -347,7 +347,9 @@ def _ensure_item(facts: dict[str, Any], company_id: str) -> tuple[str, bool]:
         "Item",
         {
             "item_code": item_code,
-            "item_name": product["title"],
+            "item_name": item_code,
+            # Native short label; preserve the complete upstream title below
+            # and in the immutable source snapshot.
             "item_group": group,
             "stock_uom": uom,
             "is_stock_item": 1,
