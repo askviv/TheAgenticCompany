@@ -1,0 +1,23 @@
+{
+  "webhooks": {
+    "rocketchat": {
+      "enabled": true,
+      "endpoint": "http://10.0.2.2:19160/your-existing-webhook-path",
+      "token": "",
+      "channels": [
+        "#general"
+      ]
+    }
+  },
+  "tunnel": {
+    "ssh_key": "~/.ssh/your-existing-key",
+    "mini": "user@company-host",
+    "label_prefix": "your.organisation",
+    "direct": true,
+    "smtp_port": 9170,
+    "api_port": 9167,
+    "webhook_listen_port": 19160,
+    "webhook_host": "127.0.0.1",
+    "webhook_port": 8080
+  }
+}

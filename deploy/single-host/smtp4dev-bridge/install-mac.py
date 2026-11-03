@@ -7,8 +7,17 @@ import plistlib
 import shutil
 import subprocess
 
-parser=argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--ssh-key',type=Path,required=True)
+config_parser=argparse.ArgumentParser(add_help=False)
+config_parser.add_argument('--config',type=Path,help='Private JSON configuration containing tunnel settings')
+config_args,_=config_parser.parse_known_args()
+defaults={}
+if config_args.config is not None:
+    import json
+    if config_args.config.stat().st_mode & 0o077:
+        raise PermissionError('Local connection configuration must be mode 0600')
+    defaults=json.loads(config_args.config.read_text())['tunnel']
+parser=argparse.ArgumentParser(description=__doc__,parents=[config_parser])
+parser.add_argument('--ssh-key',type=Path,required='ssh_key' not in defaults)
 parser.add_argument('--mini',default='company@192.0.2.10')
 parser.add_argument('--smtp-port',type=int,default=19126)
 parser.add_argument('--api-port',type=int,default=19158)
@@ -17,7 +26,14 @@ parser.add_argument('--label-prefix',default='org.example')
 parser.add_argument('--reply-listen-port',type=int,help='Optional Mac loopback port for company SMTP submission')
 parser.add_argument('--reply-smtp-host',help='Company submission hostname reachable from the SSH server')
 parser.add_argument('--reply-smtp-port',type=int,help='Company submission port reachable from the SSH server')
+parser.add_argument('--webhook-listen-port',type=int,help='Mini loopback port receiving company webhooks')
+parser.add_argument('--webhook-host',help='Webhook receiver hostname reachable from this laptop')
+parser.add_argument('--webhook-port',type=int,help='Webhook receiver port reachable from this laptop')
+parser.set_defaults(**defaults)
 args=parser.parse_args()
+webhook_options=(args.webhook_listen_port,args.webhook_host,args.webhook_port)
+if any(value is not None for value in webhook_options) and not all(value is not None for value in webhook_options):
+    parser.error('webhook-listen-port, webhook-host and webhook-port must be supplied together')
 reply_options=(args.reply_listen_port,args.reply_smtp_host,args.reply_smtp_port)
 if any(value is not None for value in reply_options) and not all(value is not None for value in reply_options):
     parser.error('reply-listen-port, reply-smtp-host and reply-smtp-port must be supplied together')
@@ -33,6 +49,9 @@ programs={
 if args.reply_listen_port is not None:
     tunnel=programs[f'{args.label_prefix}.tac-smtp4dev-tunnel']
     tunnel[-1:-1]=['-L',f'127.0.0.1:{args.reply_listen_port}:{args.reply_smtp_host}:{args.reply_smtp_port}']
+if args.webhook_listen_port is not None:
+    tunnel=programs[f'{args.label_prefix}.tac-smtp4dev-tunnel']
+    tunnel[-1:-1]=['-R',f'127.0.0.1:{args.webhook_listen_port}:{args.webhook_host}:{args.webhook_port}']
 if args.direct:
     label=f'{args.label_prefix}.tac-smtp4dev-forward'
     if subprocess.run(['launchctl','print',f'gui/{os.getuid()}/{label}'],capture_output=True).returncode==0:
