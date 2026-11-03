@@ -450,9 +450,13 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                     coordinator=coordinator(),
                 )
                 if sent.get('status')=='uncertain':
+                    detail = {
+                        'agent_no_cua_actions': 'The employee agent stopped without using CUA. No chat delivery was confirmed.',
+                        'agent_chat_message_not_confirmed': 'The employee agent finished its CUA turn, but the requested chat message was not confirmed.',
+                    }.get(sent.get('error_code'), 'Employee browser send is uncertain.')
                     update(run_id,status='uncertain',room_id=sent.get('room_id'),
                            message_id=sent.get('message_id'),
-                           error='Employee browser send is uncertain. Retry reconciles the same native message without resending.')
+                           error=detail+' Retry reconciles the same native message without resending.')
                     return
                 else:
                     if (sent.get('status')!='sent' or sent.get('employee_id')!=employee_id

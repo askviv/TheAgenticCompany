@@ -40,3 +40,16 @@ credential only to that employee's HTTP/WebSocket upstream. When creating a
 desktop container, it derives exact hostnames and listener addresses from the
 active Caddy route configuration and adds those names to the container's host
 mapping. Other browser DNS lookups continue through Docker's configured DNS.
+
+### Chrome sandbox
+
+Employee desktops launch the installed Chrome binary with its sandbox enabled,
+without Selkies' automatic `--no-sandbox` fallback. The Docker seccomp profile
+`../employee-desktop-seccomp.json` retains Moby's default policy and permits
+`clone`, `unshare` and `setns` for Chrome's nested namespace sandbox. It adds no
+container capabilities and does not use privileged mode. The baseline is
+https://github.com/moby/profiles/blob/4b8214fc4971e06172938a1f1554ccff6647ee80/seccomp/default.json.
+Existing desktop containers are replaced on their next use to apply the immutable
+Docker security setting; their named employee home volumes are retained.
+Chrome's packaged SUID helper is restored to root ownership and mode 4755.
+Sandbox startup errors fail desktop startup instead of disabling isolation.

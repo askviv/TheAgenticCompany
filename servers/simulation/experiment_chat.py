@@ -14,7 +14,8 @@ import traceback
 from datetime import datetime, timezone
 from typing import Any
 
-from servers.company.cua_chat import CuaChatTransport
+from servers.company.cua_chat import CuaChatTransport, ChatMessageNotConfirmed
+from servers.simulation.codex_model import CodexNoDesktopActionsError
 from servers.simulation.clock_rate import kernel_virtual_time_rate
 from servers.simulation.runtime import private_json
 
@@ -150,11 +151,12 @@ class ExperimentChatDispatch:
                     response = {"status": "sent", "employee_id": employee_id, **receipt}
                     self._finish(key_hash, response)
                     return response
-                self._set_status(key_hash, "uncertain", "browser_send_outcome_uncertain")
+                failure_code = row["error_code"] or "browser_send_outcome_uncertain"
+                self._set_status(key_hash, "uncertain", failure_code)
                 return {
                     "status": "uncertain", "employee_id": employee_id, "room_id": room_id,
                     "message_id": row["native_message_id"],
-                    "error_code": "browser_send_outcome_uncertain",
+                    "error_code": failure_code,
                 }
 
             self._set_status(key_hash, "prepared", None)
@@ -184,11 +186,16 @@ class ExperimentChatDispatch:
                               for frame in traceback.extract_tb(error.__traceback__)]
                     LOG.error("Employee chat submission outcome uncertain exception_type=%s stack=%s",
                               error_code, frames)
-                    self._set_status(key_hash, "uncertain", "browser_send_outcome_uncertain")
+                    failure_code = (
+                        "agent_no_cua_actions" if isinstance(error, CodexNoDesktopActionsError)
+                        else "agent_chat_message_not_confirmed" if isinstance(error, ChatMessageNotConfirmed)
+                        else "browser_send_outcome_uncertain"
+                    )
+                    self._set_status(key_hash, "uncertain", failure_code)
                     return {
                         "status": "uncertain", "employee_id": employee_id, "room_id": room_id,
                         "message_id": current["native_message_id"],
-                        "error_code": "browser_send_outcome_uncertain",
+                        "error_code": failure_code,
                     }
                 self._set_status(key_hash, "retryable", error_code)
                 raise ExperimentChatError("browser_send_failed_before_submit") from error

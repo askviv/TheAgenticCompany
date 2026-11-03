@@ -11,6 +11,10 @@ import json
 from .scenarios import RealChatTransport
 
 
+class ChatMessageNotConfirmed(RuntimeError):
+    """CUA finished, but the requested native chat message was not observed."""
+
+
 class CuaChatTransport:
     """Use Rocket.Chat's API for identity and receipts, and native CUA for sending."""
 
@@ -126,11 +130,11 @@ class CuaChatTransport:
                    and message.get("msg") == message_text and isinstance(message.get("u"), dict)
                    and message["u"].get("_id") == author_id]
         if len(matches) != 1:
-            raise RuntimeError("ROCKETCHAT_SEND_OUTCOME_UNCERTAIN")
+            raise ChatMessageNotConfirmed("ROCKETCHAT_SEND_OUTCOME_UNCERTAIN")
         message = matches[0]
         message_id = message.get("_id")
         if not isinstance(message_id, str) or not message_id:
-            raise RuntimeError("ROCKETCHAT_SEND_OUTCOME_UNCERTAIN")
+            raise ChatMessageNotConfirmed("ROCKETCHAT_SEND_OUTCOME_UNCERTAIN")
         if on_message_id_captured is not None:
             on_message_id_captured(message_id)
         confirmed = self._helpers._message_by_id(base, headers, message_id, room_id, author_id, message_text)

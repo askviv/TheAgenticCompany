@@ -16,7 +16,7 @@ from pydantic import BaseModel, Base64Bytes, ConfigDict, Field, SecretStr
 from servers.simulation.codex_model import (
     CodexAuthenticationError, CodexCLIModel, CodexCLISettings, CodexConfigurationError,
     CodexModelAccessError, CodexModelError, CodexOutputSchemaError, CodexRateLimitError,
-    ModelReply,
+    ModelReply, CodexNoDesktopActionsError,
 )
 from servers.simulation.codex_device_auth import (
     CodexDeviceAuthManager,
@@ -41,7 +41,7 @@ CUA_TOOLS = [
     "list_apps", "list_windows", "get_window_state", "get_desktop_state", "get_guide",
     "bring_to_front", "set_window_frame",
     "get_screen_size", "get_cursor_position", "move_cursor", "click", "double_click",
-    "right_click", "drag", "scroll", "type_text", "press_key", "hotkey",
+    "right_click", "drag", "scroll", "type_text", "press_key", "hotkey", "run_steps",
     "set_agent_cursor_enabled", "get_agent_cursor_state",
 ]
 
@@ -100,11 +100,13 @@ _ERROR_TYPES = {
     "rate_limit": CodexRateLimitError,
     "output_schema": CodexOutputSchemaError,
     "inference": CodexModelError,
+    "no_desktop_actions": CodexNoDesktopActionsError,
 }
 _SAFE_ERRORS = {
     CodexConfigurationError: "configuration", CodexAuthenticationError: "authentication",
     CodexModelAccessError: "model_access", CodexRateLimitError: "rate_limit",
     CodexOutputSchemaError: "output_schema", CodexModelError: "inference",
+    CodexNoDesktopActionsError: "no_desktop_actions",
 }
 
 

@@ -89,6 +89,7 @@ class EmployeeDesktopRuntime:
         self.view_only = view_only
         self.cua_driver_file = Path(cua_driver_file)
         self.chrome_policy_file = Path(__file__).resolve().parents[2] / "deploy/enterprise-simulation/coordinator/employee-chrome-policy.json"
+        self.chrome_seccomp_file = self.chrome_policy_file.with_name("employee-desktop-seccomp.json")
         self.ca_file = Path(ca_file) if ca_file is not None else None
         self._idle_workers: dict[str, tuple[threading.Thread, threading.Event]] = {}
         self._idle_workers_lock = threading.Lock()
@@ -198,6 +199,19 @@ class EmployeeDesktopRuntime:
             network = self._network_name(employee_id)
             inspect = self._inspect_optional(container)
             was_running = bool(inspect and (inspect.get("State") or {}).get("Running"))
+            if inspect is not None and not any(
+                option.startswith("seccomp={")
+                and json.loads(option.removeprefix("seccomp=")) == json.loads(self.chrome_seccomp_file.read_text())
+                for option in (inspect.get("HostConfig", {}).get("SecurityOpt") or [])
+            ):
+                self._validate_managed_container(inspect, employee_id)
+                self._validate_mount(inspect, volume)
+                # Docker security profiles are immutable: replace only the
+                # managed container, retaining its named employee home volume.
+                self._docker("stop", container)
+                self._docker("rm", container)
+                inspect = None
+                was_running = False
             if inspect is None:
                 self._require_image()
             self._ensure_volume(volume, employee_id)
@@ -722,6 +736,7 @@ class EmployeeDesktopRuntime:
             'p="${SELKIES_SUBFOLDER-${SUBFOLDER-}}"; p="${p#/}"; p="${p%/}"; p="${p:+/${p}}"; '
             'curl -fsS -o /dev/null "http://localhost:${SELKIES_PORT:-8080}${p}/api/health"',
             "--init", "--shm-size", "2g",
+            "--security-opt", f"seccomp={self.chrome_seccomp_file}",
             "--network", network,
             "--volume", f"{volume}:/home/ubuntu",
             "--env-file", str(env_file),
@@ -868,11 +883,15 @@ class EmployeeDesktopRuntime:
         self._docker("exec", "--user", "root", container, "chmod", "0755", target)
 
     def _launch_chrome(self, container: str) -> None:
-        # The official Selkies desktop image installs Google Chrome and patches
-        # its launcher with the container-compatible sandbox/password-store flags.
+        # Bypass Selkies' launcher, which silently falls back to --no-sandbox.
+        # Keep Chrome's native namespace and seccomp sandboxes enabled.
+        self._docker("exec", "--user", "root", container,
+                     "chown", "root:root", "/opt/google/chrome/chrome-sandbox")
+        self._docker("exec", "--user", "root", container,
+                     "chmod", "4755", "/opt/google/chrome/chrome-sandbox")
         self._docker(
             "exec", "--user", "ubuntu", "--env", "DISPLAY=:20", "--detach", container,
-            "google-chrome", "--no-first-run", "--no-default-browser-check", "--start-fullscreen", "--force-renderer-accessibility",
+            "/opt/google/chrome/chrome", "--password-store=basic", "--no-first-run", "--no-default-browser-check", "--start-fullscreen", "--force-renderer-accessibility",
             "--remote-debugging-port=9222",
             "--user-data-dir=/home/ubuntu/.employee-browser-profile", "about:blank",
         )

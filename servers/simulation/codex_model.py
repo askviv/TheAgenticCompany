@@ -25,6 +25,10 @@ class CodexModelError(RuntimeError):
     """A failed inference transport; never replace this with a canned response."""
 
 
+class CodexNoDesktopActionsError(CodexModelError):
+    """The native desktop turn ended without invoking CUA."""
+
+
 class CodexConfigurationError(CodexModelError):
     """The CLI rejected its configuration before inference."""
 
@@ -147,6 +151,8 @@ class CodexCLIModel:
                 "Never use shell, scripts, clipboard, browser APIs, or backend message sends. "
                 "Keep Chrome full screen. Never reveal account credentials in your final response. "
                 "Read get_guide for the native desktop targeting and input rules. "
+                "Keep one session label across related observations and actions that accept session. "
+                "Use the native run_steps tool for known action sequences with an observation afterward. "
                 "Use get_desktop_state to observe the screen, bring Chrome to the foreground, "
                 "dismiss any restore prompt, then perform the requested task. "
                 "Only report completion after observing the requested UI outcome.\n"
@@ -283,6 +289,8 @@ class CodexCLIModel:
                                           for item in calls],
                              sorted({event.get("item", {}).get("type", "unknown") for event in events
                                      if event.get("type") == "item.completed"}))
+                if mcp_servers and not calls:
+                    raise CodexNoDesktopActionsError("Employee agent ended without using CUA")
                 if reject_native_tools and any(event.get("item", {}).get("type") in {
                     "command_execution", "file_change", "mcp_tool_call", "web_search",
                 } for event in events):
