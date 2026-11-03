@@ -15,12 +15,6 @@ sections:
 | `webhooks.rocketchat.endpoint` | Complete URL reachable from the company, including the receiver's actual path |
 | `webhooks.rocketchat.token` | Shared secret sent in Rocket.Chat's native JSON `token` field; the receiver must validate it |
 | `webhooks.rocketchat.channels` | Native channel subscriptions, e.g. `["#general", "#finance"]` |
-| `tunnel.ssh_key` | Laptop's existing SSH identity for the company host |
-| `tunnel.mini` | SSH destination, e.g. `user@company-host` |
-| `tunnel.label_prefix` | Local LaunchAgent label prefix |
-| `tunnel.webhook_listen_port` | Company host loopback port opened by SSH |
-| `tunnel.webhook_host` | Receiver host as reached from the laptop, normally `127.0.0.1` |
-| `tunnel.webhook_port` | Receiver's actual local TCP port |
 
 Keep tokens and the filled configuration outside Git. The checked-in example has
 an empty token and illustrative receiver path; replace both before applying it.
@@ -28,37 +22,33 @@ The native integration is named `TACAssistantEvents`, separate from the existing
 `TACExperimentTracking` dashboard hook. Updating this configuration does not
 replace the tracker or change its existing channel subscriptions.
 
-## Directly reachable receiver
+## Tailscale connection to a local receiver
 
-Set `endpoint` to the receiver's HTTPS URL. No SSH webhook forward is needed;
-omit the three `tunnel.webhook_*` values when using the tunnel installer for mail
-only. Configure the receiver to accept Rocket.Chat's native outgoing-message
-payload and validate the shared token. This is not a combined feed of every ERP
-or platform event; ERPNext has its separate native webhook configuration.
+Use the standard Tailscale clients on the company host and laptop, connected to
+one tailnet. No project forwarding process or SSH webhook tunnel is required.
 
-## Laptop loopback receiver
-
-When the receiver only listens on laptop localhost, configure the optional SSH
-reverse forward. The example uses host port `19160` and local port `8080`; change
-them to your own setup. For the timed company VM's QEMU user network, the matching
-endpoint is `http://10.0.2.2:19160/<actual-receiver-path>`. `10.0.2.2` is the VM's
-existing route to host loopback. Other deployment topologies should use their
-own reachable host address. If the local receiver serves HTTPS, use `https` and
-its trusted hostname/certificate; SSH does not change the HTTP/TLS protocol.
-
-Install or update the existing Mac tunnel from the private configuration:
+On the laptop, publish the existing local receiver privately using native Serve:
 
 ```sh
-python3 deploy/single-host/smtp4dev-bridge/install-mac.py \
-  --config /path/to/private/local-connections.json
+tailscale serve --bg --https=8443 http://127.0.0.1:ACTUAL_RECEIVER_PORT
+tailscale serve status
 ```
 
-The installer uses standard launchd and SSH `-R`, binds the host listener to
-loopback, and reconnects automatically. It does not expose the receiver on a
-public interface or change SSH's `GatewayPorts` policy. It also manages the mail
-forwards described in [Local email setup](LOCAL_EMAIL.md): include your existing
-SMTP, API and optional reply-forward values in `tunnel` so applying it preserves
-the same connections. Explicit CLI options override file values.
+Replace `ACTUAL_RECEIVER_PORT` with the running receiver's port. Put the returned
+HTTPS hostname and port, followed by the receiver's actual webhook path, in
+`webhooks.rocketchat.endpoint`. The company VM must be able to reach that address
+through its host network; tailnet access rules must permit the company host.
+Use a separate Serve port if an existing service already occupies it. Do not
+use Funnel: this receiver should be private to the tailnet. The native Tailscale
+client manages the connection; no Python installer is needed for webhooks.
+
+The receiver must accept Rocket.Chat's native outgoing-message payload and
+validate its JSON token. A generic endpoint requiring signed adapter envelopes
+is not interchangeable with this receiver. This is not a combined feed of every
+ERP or platform event; ERPNext has separate native webhook configuration.
+
+A directly reachable HTTPS receiver can also be configured with just its URL.
+The existing SSH mail setup is independent and remains unchanged.
 
 ## Apply the outgoing integration
 

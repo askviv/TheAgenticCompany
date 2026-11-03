@@ -26,14 +26,8 @@ parser.add_argument('--label-prefix',default='org.example')
 parser.add_argument('--reply-listen-port',type=int,help='Optional Mac loopback port for company SMTP submission')
 parser.add_argument('--reply-smtp-host',help='Company submission hostname reachable from the SSH server')
 parser.add_argument('--reply-smtp-port',type=int,help='Company submission port reachable from the SSH server')
-parser.add_argument('--webhook-listen-port',type=int,help='Mini loopback port receiving company webhooks')
-parser.add_argument('--webhook-host',help='Webhook receiver hostname reachable from this laptop')
-parser.add_argument('--webhook-port',type=int,help='Webhook receiver port reachable from this laptop')
 parser.set_defaults(**defaults)
 args=parser.parse_args()
-webhook_options=(args.webhook_listen_port,args.webhook_host,args.webhook_port)
-if any(value is not None for value in webhook_options) and not all(value is not None for value in webhook_options):
-    parser.error('webhook-listen-port, webhook-host and webhook-port must be supplied together')
 reply_options=(args.reply_listen_port,args.reply_smtp_host,args.reply_smtp_port)
 if any(value is not None for value in reply_options) and not all(value is not None for value in reply_options):
     parser.error('reply-listen-port, reply-smtp-host and reply-smtp-port must be supplied together')
@@ -49,9 +43,6 @@ programs={
 if args.reply_listen_port is not None:
     tunnel=programs[f'{args.label_prefix}.tac-smtp4dev-tunnel']
     tunnel[-1:-1]=['-L',f'127.0.0.1:{args.reply_listen_port}:{args.reply_smtp_host}:{args.reply_smtp_port}']
-if args.webhook_listen_port is not None:
-    tunnel=programs[f'{args.label_prefix}.tac-smtp4dev-tunnel']
-    tunnel[-1:-1]=['-R',f'127.0.0.1:{args.webhook_listen_port}:{args.webhook_host}:{args.webhook_port}']
 if args.direct:
     label=f'{args.label_prefix}.tac-smtp4dev-forward'
     if subprocess.run(['launchctl','print',f'gui/{os.getuid()}/{label}'],capture_output=True).returncode==0:
