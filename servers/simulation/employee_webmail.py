@@ -287,7 +287,7 @@ class EmployeeWebmailSender:
 
             # Elastic renders its native Send action immediately after the
             # compose form, so it is a page-level accessible control.
-            send_button = page.get_by_role("button", name="Send", exact=True)
+            send_button = page.locator(".btn.send")
             if send_button.count() != 1:
                 raise EmployeeWebmailError("Roundcube compose form did not expose one Send button")
 
