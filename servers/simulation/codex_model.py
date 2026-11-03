@@ -7,6 +7,7 @@ Employee desktop actions use Codex's native MCP integration directly.
 from __future__ import annotations
 
 import json
+import logging
 import base64
 import os
 from pathlib import Path
@@ -15,6 +16,9 @@ import tempfile
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+LOG = logging.getLogger("uvicorn.error.employee_cua")
 
 
 class CodexModelError(RuntimeError):
@@ -139,7 +143,9 @@ class CodexCLIModel:
                 "Use native foreground mouse and keyboard actions in the employee's visible Chrome. "
                 "Never use shell, scripts, clipboard, browser APIs, or backend message sends. "
                 "Keep Chrome full screen. Never reveal account credentials in your final response. "
-                "Return the final result in content with an empty tool_calls array. "
+                "Read get_guide for the native desktop targeting and input rules. "
+                "Use get_desktop_state to observe the screen, bring Chrome to the foreground, "
+                "dismiss any restore prompt, then perform the requested task. "
                 "Only report completion after observing the requested UI outcome.\n"
                 + json.dumps({"messages": model_messages}, ensure_ascii=False)
             )
@@ -153,14 +159,14 @@ class CodexCLIModel:
                 + json.dumps({"messages": model_messages, "tools": tools}, ensure_ascii=False)
             )
         output, usage = self._run_structured_cli(
-            prompt, ModelReply.model_json_schema(), images=images,
+            prompt, None if mcp_servers else ModelReply.model_json_schema(), images=images,
             on_submission_started=on_submission_started,
             reasoning_effort=self.settings.reasoning_effort,
             reject_native_tools=not bool(mcp_servers), validate_usage=True,
             mcp_servers=mcp_servers,
         )
         try:
-            reply = ModelReply.model_validate_json(output)
+            reply = ModelReply(content=output, tool_calls=[]) if mcp_servers else ModelReply.model_validate_json(output)
             names = {tool["function"]["name"] for tool in tools}
             if any(call.name not in names for call in reply.tool_calls):
                 raise ValueError("model proposed an unregistered runtime tool")
@@ -188,7 +194,7 @@ class CodexCLIModel:
             raise CodexModelError("Codex CLI did not return a valid structured judge response") from error
 
     def _run_structured_cli(
-        self, prompt: str, output_schema: dict[str, Any], *,
+        self, prompt: str, output_schema: dict[str, Any] | None, *,
         images: list[tuple[bytes, str]] | None = None,
         on_submission_started=None, reasoning_effort: str | None,
         reject_native_tools: bool, validate_usage: bool,
@@ -200,14 +206,21 @@ class CodexCLIModel:
             root = Path(directory)
             schema = root / "response-schema.json"
             output = root / "response.json"
-            schema.write_text(json.dumps(output_schema), encoding="utf-8")
-            schema.chmod(0o600)
+            if output_schema is not None:
+                schema.write_text(json.dumps(output_schema), encoding="utf-8")
+                schema.chmod(0o600)
             command = [settings.executable, "--ask-for-approval", "never", "exec",
                 "--ignore-user-config", "--ignore-rules", "--strict-config",
                 "--sandbox", "read-only", "--skip-git-repo-check", "--ephemeral",
                 "--model", settings.model, "--cd", str(root), "--json",
-                "--output-schema", str(schema), "--output-last-message", str(output)]
+                "--output-last-message", str(output)]
+            if output_schema is not None:
+                command.extend(["--output-schema", str(schema)])
             for feature in DISABLED_FEATURES:
+                # Native Codex tool dispatch needs its standard execution host.
+                # Benchmark inference still executes no native tools.
+                if mcp_servers and feature in {"code_mode", "code_mode_host"}:
+                    continue
                 command.extend(["--disable", feature])
             for server_name, server in (mcp_servers or {}).items():
                 for key, value in server.items():
@@ -258,6 +271,22 @@ class CodexCLIModel:
                 events = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
                 if any(event.get("type") in {"turn.failed", "error"} for event in events):
                     raise ValueError("Codex CLI reported an unsuccessful turn")
+                if mcp_servers:
+                    calls = [event["item"] for event in events
+                             if event.get("type") == "item.completed"
+                             and event.get("item", {}).get("type") == "mcp_tool_call"]
+                    diagnostic_codes = (
+                        "invalid_action_target", "invalid_params", "stale_snapshot", "permission_denied",
+                        "existing-profile", "capture_required", "window_not_found", "unsupported_key",
+                        "code-mode host", "disabled", "not supported",
+                    )
+                    LOG.info("Employee native CUA turn completed tool_calls=%d tool_statuses=%s item_types=%s",
+                             len(calls), [(item.get("server"), item.get("tool"), item.get("status"),
+                                           [code for code in diagnostic_codes
+                                            if code in json.dumps(item.get("error") or item.get("result") or {}).lower()])
+                                          for item in calls],
+                             sorted({event.get("item", {}).get("type", "unknown") for event in events
+                                     if event.get("type") == "item.completed"}))
                 if reject_native_tools and any(event.get("item", {}).get("type") in {
                     "command_execution", "file_change", "mcp_tool_call", "web_search",
                 } for event in events):

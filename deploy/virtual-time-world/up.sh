@@ -284,10 +284,21 @@ codex_version=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[
 codex_model=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["codex"]["model"])' "$PROFILE")
 [[ $codex_version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail 'codex.cli_version must be an exact npm version'
 [[ $codex_model =~ ^[A-Za-z0-9._-]+$ ]] || fail 'codex.model contains unsupported characters'
-if ! command -v codex >/dev/null 2>&1 || [[ $(codex --version) != "codex $codex_version" ]]; then
-  npm install --global "@openai/codex@$codex_version"
+# Install the complete official package, including its native tool host. A lone
+# copied codex executable can report the right version but cannot execute tools.
+codex_npm_root=$(npm root --global --prefix /usr/local)
+if ! command -v codex >/dev/null 2>&1 || [[ $(codex --version) != "codex-cli $codex_version" ]] ||
+   [[ $(readlink -f "$(command -v codex)") != "$codex_npm_root/@openai/codex/bin/codex.js" ]]; then
+  npm install --global --prefix /usr/local --force "@openai/codex@$codex_version"
 fi
 [[ $(codex --version) == "codex-cli $codex_version" ]] || fail 'installed Codex CLI does not match codex.cli_version'
+python3 - "$codex_npm_root/@openai" <<'PYCODEX'
+import os
+from pathlib import Path
+import sys
+if not any(os.access(path, os.X_OK) for path in Path(sys.argv[1]).rglob('codex-code-mode-host')):
+    raise SystemExit('official Codex package is missing its native tool host; reinstall the pinned package')
+PYCODEX
 install -o company -g company -m 0600 "$host_token" /home/company/.codex-inference-token
 cat > /home/company/.codex-inference.env <<EOF2
 CODEX_INFERENCE_BEARER_TOKEN=$(cat "$host_token")

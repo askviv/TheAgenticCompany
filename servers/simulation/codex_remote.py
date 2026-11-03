@@ -39,6 +39,7 @@ DesktopEnvironmentKey = Literal[
 ]
 CUA_TOOLS = [
     "list_apps", "list_windows", "get_window_state", "get_desktop_state", "get_guide",
+    "bring_to_front", "set_window_frame",
     "get_screen_size", "get_cursor_position", "move_cursor", "click", "double_click",
     "right_click", "drag", "scroll", "type_text", "press_key", "hotkey",
     "set_agent_cursor_enabled", "get_agent_cursor_state",
@@ -58,6 +59,7 @@ def employee_cua_mcp(container: str, environment: dict[str, str]) -> dict[str, d
                  "-o", "UserKnownHostsFile=" + str(Path.home() / ".ssh/tac-guest-known-hosts"),
                  "-p", os.environ.get("CODEX_CUA_GUEST_SSH_PORT", "22220"), "ubuntu@127.0.0.1", shlex.join(remote)],
         "required": True,
+        "default_tools_approval_mode": "approve",
         "enabled_tools": CUA_TOOLS,
     }}
 
