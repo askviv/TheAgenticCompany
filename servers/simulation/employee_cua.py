@@ -284,11 +284,6 @@ class EmployeeCuaAction:
             delivery_field = next((field for field in ("delivery_mode", "delivery") if field in properties), None)
             if delivery_field:
                 call_arguments[delivery_field] = "foreground"
-        if name in {"move_cursor", "click", "double_click", "right_click", "drag", "scroll"}:
-            if ("target" in properties and "target" not in call_arguments
-                    and "element_token" not in call_arguments
-                    and call_arguments.get("scope") == "desktop"):
-                call_arguments["target"] = {"kind": "desktop", "display_id": "primary"}
         if name in OBSERVATION_TOOLS:
             if "include_screenshot" in properties:
                 call_arguments["include_screenshot"] = True
@@ -517,6 +512,8 @@ def _recoverable_native_refusal(details: str) -> bool:
         "stale_element_token", "stale_snapshot", "background_unavailable",
         "element_not_found", "window_not_found", "target_not_found",
         "element_not_interactable", "ambiguous_target",
+        "invalid_action_target", "invalid_arguments", "desktop_coordinate_scope_required",
+        "point_outside_window",
     }
 
     def inspect(item: Any) -> bool:
@@ -543,9 +540,12 @@ def _system_prompt(*, submission: bool) -> str:
     )
     return (
         "You control one employee's real Selkies X11 desktop using the supplied native CUA MCP tools. "
-        "Use fresh get_window_state observations with the accessibility tree and screenshot before acting. "
-        "For mouse actions, use screen coordinates from the screenshot with the desktop target so the real "
-        "pointer visibly moves; use foreground delivery. Use type_text for ordinary text, never clipboard tools. "
+        "Observe fresh native accessibility state and screenshots before acting. "
+        "Use get_desktop_state screenshots for screen coordinates with scope=desktop; "
+        "get_window_state coordinates are window-local and require that window's pid and window_id. "
+        "Use either target or the scope/pid/window_id fields, never both forms in one call. "
+        "Use foreground delivery so native pointer and keyboard actions are visible. "
+        "Use type_text for ordinary text, never clipboard tools. "
         "For configured account credentials, call type_credential with username or password; credential "
         "values are local and are never in this prompt. Do not infer or request those values. "
         "Credential-entry tool results withhold screenshots; later fresh screenshots remain available, and "
