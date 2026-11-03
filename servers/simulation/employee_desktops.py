@@ -640,6 +640,9 @@ class EmployeeDesktopRuntime:
                 if self.view_only:
                     output.write("SELKIES_BASIC_AUTH_VIEWONLY_PASSWORD=" + credentials["password"] + "\n")
                 output.write("SELKIES_MODE=websockets\n")
+                output.write("SELKIES_MANUAL_WIDTH=1920\n")
+                output.write("SELKIES_MANUAL_HEIGHT=1080\n")
+                output.write("SELKIES_ENABLE_RESIZE=false|locked\n")
                 output.write("SELKIES_FRAME_ANCESTORS='self'\n")
                 if self.caddy_proxy is not None:
                     output.write("SELKIES_SUBFOLDER=" + self.caddy_proxy.subfolder_for(employee_id) + "\n")

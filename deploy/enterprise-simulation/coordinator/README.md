@@ -454,3 +454,7 @@ stream credentials. Employee automation continues through its private Chrome
 DevTools connection. Set the value to `false` to allow viewer control.
 Docker environment settings apply when a desktop container is created; existing
 containers must be recreated to apply a changed mode, retaining their profile volumes.
+
+Employee desktops use Selkies' native fixed 1920 × 1080 resolution with dynamic
+resize locked off. Grid thumbnails and focused viewers scale the same desktop;
+connecting, focusing or disconnecting a viewer does not change its resolution.
