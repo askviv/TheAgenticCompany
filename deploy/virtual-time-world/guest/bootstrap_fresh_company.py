@@ -223,6 +223,7 @@ def _mailu_compose(source: Path, profile: dict, mail_domain: str, ports: dict[st
 
 
 def _prepare_erp(source: Path, profile: dict, sandbox_password: str, identities_path: Path) -> Path:
+    _run(["bash", str(source / "deploy/enterprise-simulation/erpnext/business-apps/build.sh")])
     erp_root = ENTERPRISE_ROOT / "erpnext"
     secrets_root = erp_root / "secrets"
     secrets_root.mkdir(parents=True, exist_ok=True, mode=0o700)

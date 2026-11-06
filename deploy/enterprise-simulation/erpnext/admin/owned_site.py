@@ -77,6 +77,22 @@ def _erpnext_is_installed(site: str) -> bool:
     return any(line.split() and line.split()[0] == "erpnext" for line in completed.stdout.splitlines())
 
 
+def _install_business_apps(site: str) -> dict[str, object]:
+    subprocess.run([str(BENCH_EXECUTABLE), "--site", site, "install-app", "hrms", "lending", "helpdesk", "crm"],
+                   cwd=BENCH_ROOT, check=True, stdout=sys.stderr)
+    sys.path.insert(0, "/opt/erpnext-admin")
+    import frappe
+    from business_apps import configure_directory
+
+    frappe.init(site, sites_path=str(SITES_ROOT))
+    frappe.connect()
+    frappe.set_user("Administrator")
+    try:
+        return configure_directory()
+    finally:
+        frappe.destroy()
+
+
 def _create(site: str, *, company_only: bool = False) -> dict[str, object]:
     site_path = SITES_ROOT / site
     manifest_path = RUNTIME_ROOT / f"{site}.json"
@@ -128,7 +144,7 @@ def _create(site: str, *, company_only: bool = False) -> dict[str, object]:
                 admin_password=secret("/run/secrets/site-admin-password"),
                 no_mariadb_socket=True,
                 mariadb_user_host_login_scope="%",
-                install_app=("erpnext",),
+                install_app=("erpnext", "hrms", "lending", "helpdesk", "crm") if company_only else ("erpnext",),
                 set_default=False,
                 db_host="db",
                 db_port=3306,
@@ -586,7 +602,7 @@ def _refresh_seed(site: str) -> dict[str, object]:
 def main() -> None:
     Path("/home/frappe/logs").mkdir(mode=0o700, parents=True, exist_ok=True)
     parser = argparse.ArgumentParser(description="Manage coordinator-owned ERPNext sites and native task imports")
-    parser.add_argument("operation", choices=("create", "company-only", "reset", "probe", "refresh-seed", "ensure-erp-contract", "seed-tau-retail", "observe-tau-retail", "reconcile-finance-sources", "read-due-obligations", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence"))
+    parser.add_argument("operation", choices=("create", "company-only", "install-business-apps", "reset", "probe", "refresh-seed", "ensure-erp-contract", "seed-tau-retail", "observe-tau-retail", "reconcile-finance-sources", "read-due-obligations", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence"))
     parser.add_argument("run_id", help="run UUID or τ experiment UUID")
     parser.add_argument("task_id", nargs="?", help="τ retail task id for seed-tau-retail")
     args = parser.parse_args()
@@ -608,6 +624,8 @@ def main() -> None:
     try:
         if args.operation in ("create", "company-only"):
             result = _create(site, company_only=args.operation == "company-only")
+        elif args.operation == "install-business-apps":
+            result = _install_business_apps(site)
         elif args.operation == "reset":
             result = _reset(site)
         elif args.operation == "refresh-seed":

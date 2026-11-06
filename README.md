@@ -45,6 +45,7 @@ refund or delivery. Unsupported mappings are reported rather than invented.
 | --- | --- |
 | The Agent Company workplace | Existing chat, ownCloud documents, projects and workplace assignments |
 | ERPNext | Company customers, suppliers, orders, inventory, invoices and financial records |
+| Frappe HR, Lending, CRM and Helpdesk | Payroll, loans, sales and support using the shared company employee directory |
 | Mailu and midPoint | Employee inboxes, linked company identities and account management |
 | Simulation coordinator and SimPy | Shared company time, event ordering, source mappings, durable state and evaluation |
 | CoffeeBench | Pinned native business economy, counterparties and negotiations connected through company adapters |
@@ -102,6 +103,7 @@ host requirements. Domain mappings and clock speed belong in deployment files.
 | --- | --- |
 | [Workplace deployment](deploy/single-host/README.md) | Application stack, persistent storage and service configuration |
 | [Company email and identities](deploy/single-host/company-mail.md) | Mailu, employee accounts, smtp4dev routing and midPoint |
+| [Business applications](docs/enterprise-simulation/business-apps.md) | Shared-directory payroll, lending, CRM and Helpdesk setup |
 | [ERPNext runtime](docs/enterprise-simulation/erpnext-runtime.md) | Existing company site, roles and native integration evidence |
 | [Coordinator deployment](deploy/enterprise-simulation/coordinator/README.md) | Private configuration, bootstrap, service operations and persistence |
 | [Actor workers](deploy/enterprise-simulation/actors/README.md) | Pinned upstream runtimes, isolated environments and Codex transport |

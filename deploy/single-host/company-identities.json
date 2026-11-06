@@ -405,7 +405,12 @@
       "erpRoles": [
         "Employee",
         "Purchase User"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     },
     {
       "id": "li-ming",
@@ -439,7 +444,12 @@
       "erpRoles": [
         "Employee",
         "Accounts Manager"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     },
     {
       "id": "zhang-wei",
@@ -472,7 +482,12 @@
       },
       "erpRoles": [
         "Employee"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     },
     {
       "id": "wang-fang",
@@ -505,7 +520,12 @@
       },
       "erpRoles": [
         "Employee"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     },
     {
       "id": "mike-chen",
@@ -538,7 +558,12 @@
       },
       "erpRoles": [
         "Employee"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     },
     {
       "id": "emily-zhou",
@@ -571,7 +596,12 @@
       },
       "erpRoles": [
         "Employee"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     },
     {
       "id": "liu-qiang",
@@ -604,7 +634,12 @@
       },
       "erpRoles": [
         "Employee"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     },
     {
       "id": "priya-sharma",
@@ -637,7 +672,12 @@
       },
       "erpRoles": [
         "Employee"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     },
     {
       "id": "mark-johnson",
@@ -670,7 +710,15 @@
       },
       "erpRoles": [
         "Employee"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ],
+        "crm": [
+          "Sales User"
+        ]
+      }
     },
     {
       "id": "jessica-lee",
@@ -703,7 +751,15 @@
       },
       "erpRoles": [
         "Employee"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ],
+        "crm": [
+          "Sales User"
+        ]
+      }
     },
     {
       "id": "chen-xinyi",
@@ -737,7 +793,16 @@
       "erpRoles": [
         "Employee",
         "Delivery User"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent",
+          "Agent Manager"
+        ],
+        "hrms": [
+          "HR Manager"
+        ]
+      }
     },
     {
       "id": "david-wong",
@@ -769,8 +834,20 @@
         "plane_email": "david.wong@agentcompany.com"
       },
       "erpRoles": [
-        "Employee"
-      ]
+        "Employee",
+        "Accounts Manager"
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ],
+        "hrms": [
+          "HR Manager"
+        ],
+        "lending": [
+          "Loan Manager"
+        ]
+      }
     },
     {
       "id": "huang-jie",
@@ -803,7 +880,12 @@
       },
       "erpRoles": [
         "Employee"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     },
     {
       "id": "sophia-rodriguez",
@@ -836,7 +918,12 @@
       },
       "erpRoles": [
         "Employee"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     },
     {
       "id": "alex-turner",
@@ -870,7 +957,12 @@
       "erpRoles": [
         "Employee",
         "Stock User"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     },
     {
       "id": "emma-lewis",
@@ -903,7 +995,12 @@
       },
       "erpRoles": [
         "Employee"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     },
     {
       "id": "jessica-chen",
@@ -936,7 +1033,12 @@
       },
       "erpRoles": [
         "Employee"
-      ]
+      ],
+      "frappeAppRoles": {
+        "helpdesk": [
+          "Agent"
+        ]
+      }
     }
   ],
   "storageAccountIds": [
