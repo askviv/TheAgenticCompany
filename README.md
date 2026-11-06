@@ -5,11 +5,9 @@ through ordinary business tools: company email, ERPNext, documents, chat and
 projects. It extends [The Agent Company](https://github.com/TheAgentCompany/TheAgentCompany)
 with shared-company simulations, native benchmark adapters and durable results.
 
-This is an independent platform, deliberately decoupled from Viv and any other
-agent under evaluation. External agents connect through configured company tools,
-email routes and optional webhooks; Viv is not a required dependency. Its
-company-adapted experiments and results are separate from the original benchmarks’
-leaderboards.
+Agents connect through configured company tools, email routes and optional
+webhooks. Company-adapted experiments and results are separate from the original
+benchmarks’ leaderboards.
 
 ## How it works
 
