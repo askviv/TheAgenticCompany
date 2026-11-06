@@ -45,7 +45,9 @@ persistent import archive is copied.
 
 Deploy the updated repository files, including the directory configuration and
 `admin` modules, to the locations mounted by the ERP Compose project. Preserve
-instance-specific identity settings when updating its private directory file.
+instance-specific identity settings when updating its private directory file. The
+upgrade initializes missing application-role bindings from the repository directory
+by employee ID; existing configured bindings and employee identities are retained.
 Load the native app image first if the guest clock has already advanced, then run
 inside the company VM:
 

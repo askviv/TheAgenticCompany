@@ -10,6 +10,19 @@ print(json.loads(Path(sys.argv[1]).read_text())['erp_compose'])
 PYCODE
 )}
 image=tac-erpnext-apps:2026-11-06
+# Forward-initialize app role bindings in the existing authoritative directory.
+python3 - "$runtime" "$apps_dir/../../../single-host/company-identities.json" <<'PYROLES'
+import json,sys
+from pathlib import Path
+runtime=json.loads(Path(sys.argv[1]).read_text())
+directory=Path(runtime['company_profile_file'])
+current=json.loads(directory.read_text())
+defaults={e['id']:e['frappeAppRoles'] for e in json.loads(Path(sys.argv[2]).read_text())['employees']}
+for employee in current['employees']:
+    if 'frappeAppRoles' not in employee:
+        employee['frappeAppRoles']=defaults[employee['id']]
+directory.write_text(json.dumps(current,indent=2,ensure_ascii=False)+'\n')
+PYROLES
 bash "$apps_dir/build.sh"
 # Render with Compose before changing the image, retaining deployment-specific settings.
 rendered=$(mktemp)
