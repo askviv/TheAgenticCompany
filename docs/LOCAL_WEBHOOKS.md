@@ -6,8 +6,7 @@ payload or start an experiment. The URL must be the actual webhook route exposed
 by your assistant, not a dashboard page or a made-up path.
 
 Copy [the connection example](../deploy/virtual-time-world/local-connections.example.json)
-to a private file and set `chmod 600 /path/to/local-connections.json`. It has two
-sections:
+to a private file and set `chmod 600 /path/to/local-connections.json`. It contains the following settings:
 
 | Setting | Meaning |
 | --- | --- |
@@ -47,7 +46,8 @@ validate its JSON token. A generic endpoint requiring signed adapter envelopes
 is not interchangeable with this receiver. This is not a combined feed of every
 ERP or platform event; ERPNext has separate native webhook configuration.
 
-A directly reachable HTTPS receiver can also be configured with just its URL.
+For a directly reachable HTTPS receiver, configure its URL together with the
+nonempty token, channel list and explicit enabled state.
 The existing SSH mail setup is independent and remains unchanged.
 
 ## Apply the outgoing integration

@@ -311,8 +311,17 @@ if __name__ == "__main__":
     parser.add_argument("--webhook-config", type=Path, required=True)
     args = parser.parse_args()
     hook = json.loads(args.webhook_config.read_text())["webhooks"]["rocketchat"]
-    if not hook["token"]:
-        parser.error("webhooks.rocketchat.token must be nonempty")
+    if not isinstance(hook["token"], str) or not hook["token"]:
+        parser.error("webhooks.rocketchat.token must be a nonempty string")
+    if not isinstance(hook["endpoint"], str) or not hook["endpoint"]:
+        parser.error("webhooks.rocketchat.endpoint must be a nonempty string")
+    if not isinstance(hook["channels"], list) or not hook["channels"] or not all(
+            isinstance(channel, str) and channel.startswith("#") and len(channel) > 1
+            and not any(character.isspace() or character == "," for character in channel)
+            for channel in hook["channels"]):
+        parser.error("webhooks.rocketchat.channels must be a nonempty list of #channel names")
+    if type(hook["enabled"]) is not bool:
+        parser.error("webhooks.rocketchat.enabled must be a JSON boolean")
     RocketChatClient.from_env().setup_outgoing_webhook(
         token=hook["token"], endpoint=hook["endpoint"], name="TACAssistantEvents",
         channels=hook["channels"], enabled=hook["enabled"],

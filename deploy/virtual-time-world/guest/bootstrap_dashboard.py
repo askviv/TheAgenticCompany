@@ -89,7 +89,7 @@ def main() -> None:
         cwd=source, env={**os.environ, **environment})
     if profile.get('webhooks', {}).get('rocketchat') is not None:
         run(str(venv / 'bin/python'), '-m', 'servers.experiments.runner',
-            '--webhook-config', str(args.profile),
+            '--webhook-config', str(args.profile.resolve(strict=True)),
             cwd=source, env={**os.environ, **environment})
     (root / 'experiments-data').mkdir(mode=0o700, parents=True, exist_ok=True)
     unit = f'''[Unit]

@@ -15,9 +15,11 @@ if config_args.config is not None:
     import json
     if config_args.config.stat().st_mode & 0o077:
         raise PermissionError('Local connection configuration must be mode 0600')
-    defaults=json.loads(config_args.config.read_text())['tunnel']
+    defaults=json.loads(config_args.config.read_text()).get('tunnel', {})
+    if not isinstance(defaults, dict):
+        config_parser.error('tunnel must be an object')
 parser=argparse.ArgumentParser(description=__doc__,parents=[config_parser])
-parser.add_argument('--ssh-key',type=Path,required='ssh_key' not in defaults)
+parser.add_argument('--ssh-key',type=Path,required=not defaults.get('ssh_key'))
 parser.add_argument('--mini',default='company@192.0.2.10')
 parser.add_argument('--smtp-port',type=int,default=19126)
 parser.add_argument('--api-port',type=int,default=19158)
@@ -26,6 +28,20 @@ parser.add_argument('--label-prefix',default='org.example')
 parser.add_argument('--reply-listen-port',type=int,help='Optional Mac loopback port for company SMTP submission')
 parser.add_argument('--reply-smtp-host',help='Company submission hostname reachable from the SSH server')
 parser.add_argument('--reply-smtp-port',type=int,help='Company submission port reachable from the SSH server')
+actions={action.dest: action for action in parser._actions if action.dest not in {'help','config'}}
+unknown=set(defaults)-set(actions)
+if unknown:
+    parser.error('Unknown tunnel settings: '+', '.join(sorted(unknown)))
+for key,value in defaults.items():
+    action=actions[key]
+    if isinstance(action,argparse._StoreTrueAction):
+        if type(value) is not bool:
+            parser.error(key+' must be a JSON boolean')
+    elif action.type is int:
+        if type(value) is not int:
+            parser.error(key+' must be a JSON integer')
+    elif value is None or not isinstance(value,str) or not value:
+        parser.error(key+' must be a nonempty string')
 parser.set_defaults(**defaults)
 args=parser.parse_args()
 reply_options=(args.reply_listen_port,args.reply_smtp_host,args.reply_smtp_port)
