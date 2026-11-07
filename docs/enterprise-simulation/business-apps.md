@@ -28,6 +28,8 @@ and `helpdesk` alongside the existing tools. Configure their full URLs there;
 the dashboard does not hard-code a deployment domain. Fresh bootstrap derives
 these four URLs from the configured ERP domain. See
 `servers/experiments/company-tools-urls.example.json` for the complete mapping.
+The CRM dashboard link uses Frappe's native login redirect because its app page
+requires a signed-in user with CRM access.
 
 ## Image packaging
 

@@ -53,7 +53,7 @@ def main() -> None:
                  for key, value in tools.items()}
     tool_urls.update({key: f'https://{domains["erp"]}{path}' for key, path in {
         'payroll': '/hrms', 'lending': '/app/lending',
-        'crm': '/crm', 'helpdesk': '/helpdesk',
+        'crm': '/login?redirect-to=%2Fcrm', 'helpdesk': '/helpdesk',
     }.items()})
     tools_path = config / 'company-tools-urls.json'
     tools_path.write_text(json.dumps(tool_urls, indent=2) + '\n')
