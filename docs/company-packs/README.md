@@ -1,5 +1,9 @@
 # Company pack v1 authoring
 
+For an agent-ready handoff, start with [Instructions for a company-pack authoring
+agent](AUTHORING_AGENT.md). Give the agent that document, repository access (or the
+listed source files), your job description and the target deployment inventory.
+
 A pack is a ZIP containing exactly one structured contract, `manifest.json`, and exactly the files declared by that manifest. Staff evidence goes under `files/`; private evaluation evidence goes under `private/`. Do not include another manifest, executable import scripts, SQL, environment configuration or credentials. Documents are inert bytes; the importer never executes their contents. XLSX workbooks are normal evidence files. No file-extension allowlist substitutes for native document validation.
 
 The authoritative Python contract is `servers/company/packs/models.py`. Its generated JSON Schema is `schemas/company-packs/manifest-v1.schema.json`. Every model forbids unknown keys. Required keys and native DocType names are enumerated in that schema. `manifest.json` in the example directory is a complete authoring example.
