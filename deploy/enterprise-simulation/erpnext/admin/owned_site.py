@@ -85,6 +85,7 @@ def _install_business_apps(site: str) -> dict[str, object]:
     import frappe
     from business_apps import configure_directory
 
+    os.chdir(SITES_ROOT)
     frappe.init(site, sites_path=str(SITES_ROOT))
     frappe.connect()
     frappe.set_user("Administrator")
@@ -92,6 +93,7 @@ def _install_business_apps(site: str) -> dict[str, object]:
         return configure_directory()
     finally:
         frappe.destroy()
+        os.chdir(BENCH_ROOT)
 
 
 def _create(site: str, *, company_only: bool = False) -> dict[str, object]:
