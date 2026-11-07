@@ -3,9 +3,14 @@
 For an agent-ready handoff, start with [Instructions for a company-pack authoring
 agent](AUTHORING_AGENT.md). Give the agent that document, repository access (or the
 listed source files), your job description and the target deployment inventory.
-The [two-job-description generation prompt](JOB_DESCRIPTION_PROMPT.md) applies
-that handoff to finance/payroll/customer-service and engineering admin/accounts,
-with an optional construction-company adaptation.
+Use either plain-language scenario prompt with those shared instructions:
+
+- [Finance, payroll and customer service](FINANCE_PAYROLL_CUSTOMER_SERVICE.md).
+- [Engineering admin/accounts](ENGINEERING_ADMIN_ACCOUNTS.md), with an optional
+  construction-company adaptation.
+
+The scenario files describe the business and work to generate. The shared
+authoring instructions contain the technical format and delivery requirements.
 
 A pack is a ZIP containing exactly one structured contract, `manifest.json`, and exactly the files declared by that manifest. Staff evidence goes under `files/`; private evaluation evidence goes under `private/`. Do not include another manifest, executable import scripts, SQL, environment configuration or credentials. Documents are inert bytes; the importer never executes their contents. XLSX workbooks are normal evidence files. No file-extension allowlist substitutes for native document validation.
 
