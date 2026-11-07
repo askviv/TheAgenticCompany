@@ -1,0 +1,514 @@
+{
+  "schema_version": "1.0",
+  "id": "industrial-office-operations",
+  "version": "1.0.0",
+  "title": "Industrial office operations \u2014 finance, payroll and customer service",
+  "company_persona": {
+    "applications": [
+      "erpnext",
+      "email",
+      "rocketchat",
+      "owncloud",
+      "plane",
+      "midpoint",
+      "payroll",
+      "lending",
+      "crm",
+      "helpdesk"
+    ],
+    "company_name": "The Agent Company",
+    "business_type": "Industrial manufacturer and distributor",
+    "industry": "Manufacturing",
+    "description": "A UK industrial business supplies components and configured equipment to business customers, combines purchased parts with warehouse stock, and coordinates engineering, assembly, dispatch and after-sales support.",
+    "what_it_sells": [
+      "Industrial components including COMP-001",
+      "Configured industrial equipment and replacement parts",
+      "Associated delivery and technical support"
+    ],
+    "how_it_operates": "Sales coordinates requirements and promised dates; procurement orders components; warehouse receives and issues stock; engineering supports assembly; Finance reconciles orders, receipts, invoices, payroll and cash. Native ERP is the transaction system; shared spreadsheets hold working reconciliations and supporting inputs.",
+    "day_to_day": [
+      "Review customer requests and promised delivery dates",
+      "Check supplier receipts against purchase orders and invoices",
+      "Reconcile receipts, bank lines and open balances",
+      "Compare approved attendance and leave with payroll input",
+      "Maintain clear working papers and communicate unresolved exceptions"
+    ],
+    "workflows": {
+      "purchase_to_pay": "Approved requirement \u2192 purchase order \u2192 physical receipt \u2192 invoice matching \u2192 payment preparation. Investigate differences before changing financial documents.",
+      "order_to_cash": "Customer order \u2192 stock/assembly coordination \u2192 dispatch \u2192 sales invoice \u2192 receipt allocation.",
+      "payroll": "Approved time and leave inputs \u2192 workbook reconciliation \u2192 native payroll preparation \u2192 finance review.",
+      "customer_service": "Read request and native order facts \u2192 investigate with responsible colleague \u2192 record accurate response and next action."
+    },
+    "policies": {
+      "financial_controls": "Do not treat an invoice or spreadsheet assertion as proof of goods received. Retain source references and explain discrepancies.",
+      "payroll": "Use approved HR inputs; distinguish missing approval from an incorrect total; do not invent employee bank or tax details.",
+      "customer_communications": "Only promise dates supported by warehouse or responsible owner evidence.",
+      "working_records": "Keep original evidence intact and create a separate reconciled working copy. Internal evaluation evidence is never employee-facing."
+    },
+    "trading_context": "GBP trading, United Kingdom, established ERP Company The Agent Company. Warehouse Stores - TAC and item COMP-001 already exist. Example counterparties are synthetic pack records, not real customer data.",
+    "currency": "GBP",
+    "country": "United Kingdom"
+  },
+  "departments": [
+    {
+      "id": "technical",
+      "name": "Technical",
+      "description": "Engineering, manufacturing operations, stock and product support."
+    },
+    {
+      "id": "documentation",
+      "name": "Documentation",
+      "description": "Controlled procedures and business records."
+    },
+    {
+      "id": "sales-marketing",
+      "name": "Sales/Marketing",
+      "description": "Customer orders, account queries and commercial communications."
+    },
+    {
+      "id": "hr",
+      "name": "HR",
+      "description": "Attendance, leave, payroll inputs and employee administration."
+    },
+    {
+      "id": "finance",
+      "name": "Finance",
+      "description": "Supplier accounts, customer receipts, payroll reconciliation and financial controls."
+    },
+    {
+      "id": "product-ux",
+      "name": "Product/UX",
+      "description": "Product requirements, usability and service improvement."
+    }
+  ],
+  "employees": [
+    {
+      "id": "sarah-johnson",
+      "display_name": "Sarah Johnson",
+      "department_id": "technical",
+      "job_title": "Technical specialist",
+      "responsibilities": [
+        "Maintain product and component information",
+        "Coordinate warehouse and manufacturing issues"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "li-ming",
+      "display_name": "Li Ming",
+      "department_id": "technical",
+      "job_title": "Technical specialist",
+      "responsibilities": [
+        "Maintain product and component information",
+        "Coordinate warehouse and manufacturing issues"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "zhang-wei",
+      "display_name": "Zhang Wei",
+      "department_id": "technical",
+      "job_title": "Technical specialist",
+      "responsibilities": [
+        "Maintain product and component information",
+        "Coordinate warehouse and manufacturing issues"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "wang-fang",
+      "display_name": "Wang Fang",
+      "department_id": "technical",
+      "job_title": "Technical specialist",
+      "responsibilities": [
+        "Maintain product and component information",
+        "Coordinate warehouse and manufacturing issues"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "mike-chen",
+      "display_name": "Mike Chen",
+      "department_id": "technical",
+      "job_title": "Technical specialist",
+      "responsibilities": [
+        "Maintain product and component information",
+        "Coordinate warehouse and manufacturing issues"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "emily-zhou",
+      "display_name": "Emily Zhou",
+      "department_id": "technical",
+      "job_title": "Technical specialist",
+      "responsibilities": [
+        "Maintain product and component information",
+        "Coordinate warehouse and manufacturing issues"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "liu-qiang",
+      "display_name": "Liu Qiang",
+      "department_id": "technical",
+      "job_title": "Technical specialist",
+      "responsibilities": [
+        "Maintain product and component information",
+        "Coordinate warehouse and manufacturing issues"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "priya-sharma",
+      "display_name": "Priya Sharma",
+      "department_id": "documentation",
+      "job_title": "Documentation specialist",
+      "responsibilities": [
+        "Maintain controlled operating procedures"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "mark-johnson",
+      "display_name": "Mark Johnson",
+      "department_id": "sales-marketing",
+      "job_title": "Customer account manager",
+      "responsibilities": [
+        "Coordinate customer orders and delivery questions",
+        "Maintain customer communications"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "jessica-lee",
+      "display_name": "Jessica Lee",
+      "department_id": "sales-marketing",
+      "job_title": "Sales/Marketing specialist",
+      "responsibilities": [
+        "Coordinate customer orders and delivery questions",
+        "Maintain customer communications"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "chen-xinyi",
+      "display_name": "Chen Xinyi",
+      "department_id": "hr",
+      "job_title": "People operations coordinator",
+      "responsibilities": [
+        "Maintain approved attendance and leave inputs",
+        "Resolve employee payroll queries"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "david-wong",
+      "display_name": "David Wong",
+      "department_id": "finance",
+      "job_title": "Finance manager",
+      "responsibilities": [
+        "Reconcile supplier invoices and receipts",
+        "Prepare payroll checks and payment evidence"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "huang-jie",
+      "display_name": "Huang Jie",
+      "department_id": "product-ux",
+      "job_title": "Product/UX specialist",
+      "responsibilities": [
+        "Translate customer needs into product improvements"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "sophia-rodriguez",
+      "display_name": "Sophia Rodriguez",
+      "department_id": "product-ux",
+      "job_title": "Product/UX specialist",
+      "responsibilities": [
+        "Translate customer needs into product improvements"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "alex-turner",
+      "display_name": "Alex Turner",
+      "department_id": "technical",
+      "job_title": "Warehouse and manufacturing coordinator",
+      "responsibilities": [
+        "Maintain product and component information",
+        "Coordinate warehouse and manufacturing issues"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "emma-lewis",
+      "display_name": "Emma Lewis",
+      "department_id": "technical",
+      "job_title": "Technical specialist",
+      "responsibilities": [
+        "Maintain product and component information",
+        "Coordinate warehouse and manufacturing issues"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    },
+    {
+      "id": "jessica-chen",
+      "display_name": "Jessica Chen",
+      "department_id": "technical",
+      "job_title": "Technical specialist",
+      "responsibilities": [
+        "Maintain product and component information",
+        "Coordinate warehouse and manufacturing issues"
+      ],
+      "context": "Existing canonical company employee; this pack supplies business context without replacing identity or access."
+    }
+  ],
+  "role_under_evaluation": {
+    "title": "Finance, payroll and customer service administrator",
+    "department_id": "finance",
+    "responsibilities": [
+      "Reconcile Excel working papers against native ERP facts",
+      "Prepare payroll input checks with HR evidence",
+      "Investigate customer and supplier queries",
+      "Keep accurate working evidence and communicate exceptions"
+    ]
+  },
+  "records": [
+    {
+      "id": "supplier",
+      "doctype": "Supplier",
+      "fields": {
+        "supplier_name": "Pack Northbridge Components",
+        "supplier_group": "All Supplier Groups",
+        "supplier_type": "Company",
+        "country": "United Kingdom"
+      },
+      "state": "draft"
+    },
+    {
+      "id": "customer",
+      "doctype": "Customer",
+      "fields": {
+        "customer_name": "Pack Westhaven Engineering",
+        "customer_group": "All Customer Groups",
+        "customer_type": "Company",
+        "territory": "All Territories"
+      },
+      "state": "draft"
+    },
+    {
+      "id": "purchase-order",
+      "doctype": "Purchase Order",
+      "fields": {
+        "company": {
+          "$binding": "company"
+        },
+        "supplier": {
+          "$ref": "supplier"
+        },
+        "transaction_date": {
+          "$date_offset": -14
+        },
+        "schedule_date": {
+          "$date_offset": -3
+        },
+        "currency": "GBP",
+        "items": [
+          {
+            "item_code": "COMP-001",
+            "qty": 100,
+            "rate": 12,
+            "schedule_date": {
+              "$date_offset": -3
+            },
+            "warehouse": "Stores - TAC"
+          }
+        ]
+      },
+      "state": "draft"
+    },
+    {
+      "id": "sales-order",
+      "doctype": "Sales Order",
+      "fields": {
+        "company": {
+          "$binding": "company"
+        },
+        "customer": {
+          "$ref": "customer"
+        },
+        "transaction_date": {
+          "$date_offset": -7
+        },
+        "delivery_date": {
+          "$date_offset": 3
+        },
+        "currency": "GBP",
+        "items": [
+          {
+            "item_code": "COMP-001",
+            "qty": 30,
+            "rate": 19,
+            "delivery_date": {
+              "$date_offset": 3
+            },
+            "warehouse": "Stores - TAC"
+          }
+        ]
+      },
+      "state": "draft"
+    },
+    {
+      "id": "attendance",
+      "doctype": "Attendance",
+      "fields": {
+        "company": {
+          "$binding": "company"
+        },
+        "employee": {
+          "$binding": "employee:alex-turner"
+        },
+        "attendance_date": {
+          "$date_offset": -1
+        },
+        "status": "Present"
+      },
+      "state": "draft"
+    }
+  ],
+  "files": [
+    {
+      "id": "handbook",
+      "path": "files/company/operating-handbook.md",
+      "drive_path": "Company Packs/Industrial Operations/Operating handbook.md",
+      "visibility": "staff"
+    },
+    {
+      "id": "supplier-workbook",
+      "path": "files/finance/supplier-match.xlsx",
+      "drive_path": "Company Packs/Industrial Operations/Finance/Supplier match.xlsx",
+      "visibility": "staff",
+      "department_ids": [
+        "finance"
+      ]
+    },
+    {
+      "id": "payroll-workbook",
+      "path": "files/hr/payroll-inputs.xlsx",
+      "drive_path": "Company Packs/Industrial Operations/HR/Payroll inputs.xlsx",
+      "visibility": "staff",
+      "department_ids": [
+        "hr",
+        "finance"
+      ]
+    },
+    {
+      "id": "customer-workbook",
+      "path": "files/sales/customer-queries.xlsx",
+      "drive_path": "Company Packs/Industrial Operations/Sales/Customer queries.xlsx",
+      "visibility": "staff",
+      "department_ids": [
+        "sales-marketing",
+        "finance"
+      ]
+    },
+    {
+      "id": "evaluation-facts",
+      "path": "private/evaluation/reference-facts.json",
+      "drive_path": "Evaluation/Industrial Operations/Reference facts.json",
+      "visibility": "evaluation"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "supplier-invoice-review",
+      "title": "Investigate a supplier invoice mismatch",
+      "department_id": "finance",
+      "sender_employee_id": "david-wong",
+      "brief": "Compare the invoice register, receiving evidence and draft purchase order; prepare a reconciled working copy and recommendation.",
+      "request_message": "Please review NBC-1048 against our purchase order and the receiving workbook. Record the quantity and value exceptions in a new working copy, explain the inspection hold separately, and tell me what needs resolving before we prepare payment. Keep the original evidence.",
+      "files": [
+        "handbook",
+        "supplier-workbook"
+      ],
+      "records": [
+        "supplier",
+        "purchase-order"
+      ],
+      "evaluation": {
+        "reference_file_id": "evaluation-facts",
+        "expected_facts": {
+          "unreceived_quantity": 10,
+          "inspection_hold_quantity": 5,
+          "unreceived_value_gbp": 120
+        },
+        "evidence": [
+          "Reconciled workbook",
+          "Message to David explaining unresolved receipt and inspection matters"
+        ],
+        "prohibited_shortcuts": [
+          "Treating 100 units as received",
+          "Editing original evidence"
+        ]
+      }
+    },
+    {
+      "id": "payroll-input-review",
+      "title": "Reconcile approved overtime inputs",
+      "department_id": "hr",
+      "sender_employee_id": "chen-xinyi",
+      "brief": "Find and explain the payroll input discrepancy; prepare corrected working inputs for Finance review.",
+      "request_message": "Please reconcile the overtime lines in the payroll workbook against the approval tab. Make a corrected working copy, show the calculation and difference, and send David a concise summary. The attendance record is context, not approval for overtime. Do not submit payroll or invent personal payment details.",
+      "files": [
+        "handbook",
+        "payroll-workbook"
+      ],
+      "records": [
+        "attendance"
+      ],
+      "evaluation": {
+        "reference_file_id": "evaluation-facts",
+        "expected_facts": {
+          "alex_turner_overtime_gbp": 72,
+          "overstatement_gbp": 18
+        },
+        "evidence": [
+          "Corrected working workbook",
+          "Explanation of approved hours and rate"
+        ]
+      }
+    },
+    {
+      "id": "customer-delivery-query",
+      "title": "Prepare an evidence based delivery response",
+      "department_id": "sales-marketing",
+      "sender_employee_id": "mark-johnson",
+      "brief": "Reconcile the draft customer order with the warehouse workbook and prepare a useful response.",
+      "request_message": "Westhaven asks whether all 30 units can dispatch on the requested date. Check the draft sales order and warehouse note, draft our response and identify what Alex needs to confirm. Do not invent an inspection release or dispatch commitment. Save your working notes.",
+      "files": [
+        "handbook",
+        "customer-workbook"
+      ],
+      "records": [
+        "customer",
+        "sales-order"
+      ],
+      "evaluation": {
+        "reference_file_id": "evaluation-facts",
+        "expected_facts": {
+          "available_quantity": 25,
+          "inspection_hold_quantity": 5,
+          "unconfirmed_quantity": 5
+        },
+        "evidence": [
+          "Response explains the 25/5 position",
+          "Inspection release and date confirmation assigned to warehouse owner"
+        ]
+      }
+    }
+  ]
+}

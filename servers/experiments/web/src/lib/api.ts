@@ -430,3 +430,47 @@ export async function retryRun(runId: string): Promise<RunResponse> {
 export async function getCompanyClock(): Promise<{ simulated_time: string | null; clock_mode: string }> {
   return requestJson<{ simulated_time: string | null; clock_mode: string }>("/api/company/clock")
 }
+
+export type CompanyPackImport = {
+  id: string
+  pack_id: string
+  version: string
+  title: string
+  status: "validated" | "queued" | "importing" | "completed" | "failed"
+  persona: { name: string; business_type: string; description: string; applications: string[] }
+  counts: { employees: number; departments: number; records: number; files: number; experiments: number }
+  completed_steps: number
+  total_steps: number
+  error?: string | null
+  created_at: string
+}
+
+export async function getCompanyPacks(): Promise<CompanyPackImport[]> {
+  const result = await requestJson<{ packs: CompanyPackImport[] }>("/api/company-packs")
+  return result.packs
+}
+
+export async function getCompanyPack(id: string): Promise<CompanyPackImport> {
+  return requestJson(`/api/company-packs/${encodeURIComponent(id)}`)
+}
+
+export async function uploadCompanyPack(file: File): Promise<CompanyPackImport> {
+  const session = await getSession()
+  const body = new FormData()
+  body.append("file", file)
+  body.append("csrf_token", session.csrf_token)
+  return requestJson("/api/company-packs", {
+    method: "POST",
+    headers: { "Idempotency-Key": session.idempotency_key },
+    body,
+  })
+}
+
+export async function importCompanyPack(id: string): Promise<CompanyPackImport> {
+  const session = await getSession()
+  return requestJson(`/api/company-packs/${encodeURIComponent(id)}/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body: new URLSearchParams({ csrf_token: session.csrf_token, idempotency_key: session.idempotency_key }),
+  })
+}

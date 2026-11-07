@@ -497,6 +497,62 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         except (StoreConflict, IdempotencyConflict) as exc:
             raise HTTPException(status_code=409, detail="CoffeeBench recovery conflicts with current state") from exc
 
+    def company_pack_service():
+        service = getattr(engine, "company_packs", None)
+        if service is None:
+            raise HTTPException(status_code=503, detail="Company pack imports are not configured")
+        return service
+
+    @app.post("/company/packs", status_code=201)
+    async def upload_company_pack(request: Request, principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        from servers.company.packs import ArchiveLimits
+        from .company_packs import PackVersionConflict
+        maximum = ArchiveLimits().max_archive_bytes
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > maximum:
+                raise HTTPException(status_code=413, detail="Company pack archive exceeds the upload limit")
+            data.extend(chunk)
+        try:
+            # ZIP validation/storage is CPU/file work; keep it off the event loop.
+            from starlette.concurrency import run_in_threadpool
+            return await run_in_threadpool(company_pack_service().upload, bytes(data))
+        except PackVersionConflict as error:
+            raise HTTPException(status_code=409, detail="pack_version_conflict") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="pack_invalid_archive") from error
+
+    @app.get("/company/packs")
+    def list_company_packs(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        service = company_pack_service()
+        return {"packs": service.list(), "applications": service.applications()}
+
+    @app.get("/company/packs/catalog")
+    def company_pack_catalog(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        return company_pack_service().catalog()
+
+    @app.get("/company/packs/{identifier}")
+    def get_company_pack(identifier: UUID, principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        service = company_pack_service()
+        try:
+            return service.public(service.get(str(identifier)))
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Company pack import not found") from error
+
+    @app.post("/company/packs/{identifier}/import", status_code=202)
+    def import_company_pack(identifier: UUID, principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        try:
+            return company_pack_service().queue(str(identifier))
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Company pack import not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=503, detail="pack_clock_unavailable") from error
+
     @app.get("/company/problem-catalog")
     def get_problem_catalog(principal: Principal = Depends(authenticate)):
         require_role(principal, "controller")

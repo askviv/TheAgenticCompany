@@ -97,6 +97,23 @@ class SimulationCoordinatorClient:
             raise CoordinatorError(endpoint, "invalid_response")
         return payload
 
+    def company_packs(self) -> dict[str, Any]:
+        return self._request("GET", "/company/packs")
+
+    def company_pack(self, pack_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/company/packs/{quote(pack_id, safe='')}")
+
+    def upload_company_pack(self, archive: Any, *, idempotency_key: str) -> dict[str, Any]:
+        return self._request("POST", "/company/packs", data=archive,
+                             idempotency_key=idempotency_key)
+
+    def import_company_pack(self, pack_id: str, *, idempotency_key: str) -> dict[str, Any]:
+        return self._request("POST", f"/company/packs/{quote(pack_id, safe='')}/import",
+                             idempotency_key=idempotency_key, json={})
+
+    def company_pack_catalog(self) -> dict[str, Any]:
+        return self._request("GET", "/company/packs/catalog")
+
     def company(self) -> dict[str, Any]:
         return self._request("GET", "/company")
 

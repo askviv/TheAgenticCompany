@@ -50,6 +50,7 @@ PRESERVED_RUNTIME_SETTINGS = frozenset({
     "shared_company_clock_file", "shared_company_clock_state",
     "company_issues_enabled", "erp_base_url", "erp_public_url", "issue_config_path",
     "employee_chat_credentials_file", "rocketchat_base_url",
+    "company_pack_credentials_file", "company_application_services_file",
     "retail_operator_users", "workers_enabled",
 })
 
@@ -745,6 +746,8 @@ def main() -> int:
         "mail_credentials_file": str(credentials_path),
         "employee_chat_credentials_file": str(secrets_root / "employee-chat-credentials.json"),
         "company_profile_file": str(company_profile_path),
+        "company_pack_credentials_file": "/etc/company-workplace/secrets/midpoint-connector-secrets.json",
+        "company_application_services_file": "/etc/company-workplace/application-services.json",
         "employee_desktop_image": employee_desktop_image,
         "employee_desktop_view_only": True,
         "employee_cua_driver_file": str(cua_driver),

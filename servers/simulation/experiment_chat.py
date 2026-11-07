@@ -73,14 +73,19 @@ class ExperimentChatDispatch:
         company = profile.get("company")
         mapping = company.get("experimentDepartmentMap") if isinstance(company, dict) else None
         department = mapping.get(role) if isinstance(mapping, dict) else None
-        if not isinstance(department, str) or not department:
+        if employee_id is None and (not isinstance(department, str) or not department):
             raise ExperimentChatError("sender_department_unmapped")
         employees = profile.get("employees")
         if not isinstance(employees, list):
             raise ExperimentChatError("company_identity_profile_invalid")
         candidates = []
         for employee in employees:
-            if not isinstance(employee, dict) or employee.get("department") != department:
+            if not isinstance(employee, dict):
+                continue
+            if employee_id is not None:
+                if employee.get("id") != employee_id:
+                    continue
+            elif employee.get("department") != department:
                 continue
             account = employee.get("accounts", {}).get("rocketchat") if isinstance(employee.get("accounts"), dict) else None
             if (isinstance(employee.get("id"), str) and employee["id"]
@@ -88,7 +93,7 @@ class ExperimentChatDispatch:
                     and isinstance(account, dict) and isinstance(account.get("id"), str) and account["id"]
                     and isinstance(account.get("username"), str) and account["username"]):
                 candidates.append({
-                    "employee_id": employee["id"], "department": department,
+                    "employee_id": employee["id"], "department": employee["department"],
                     "email": employee["email"], "author_id": account["id"],
                     "username": account["username"],
                 })

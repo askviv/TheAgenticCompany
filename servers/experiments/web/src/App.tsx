@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
+import { CompanyPackImport } from "@/CompanyPackImport"
 import { Switch } from "@base-ui/react/switch"
 import {
   ArrowLeft,
@@ -825,6 +826,7 @@ function BackgroundSimulations() {
 
 function LibraryPage() {
   const refreshKey = useRefreshKey()
+  const [importRevision, setImportRevision] = useState(0)
   const [experiments, setExperiments] = useState<Experiment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -863,7 +865,7 @@ function LibraryPage() {
         if (active) setLoading(false)
       })
     return () => { active = false }
-  }, [refreshKey])
+  }, [refreshKey, importRevision])
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase()
@@ -888,6 +890,7 @@ function LibraryPage() {
           </div>
         </div>
       </div>
+      <CompanyPackImport onImported={() => setImportRevision((value) => value + 1)} />
       <BackgroundSimulations />
 
       <fieldset className="space-y-3">

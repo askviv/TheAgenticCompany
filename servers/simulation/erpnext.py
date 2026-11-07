@@ -980,7 +980,7 @@ class ERPNextSiteAdmin:
             raise RuntimeError("private ERP runtime volume is required for native company operations")
         if operation not in {"reconcile-finance-sources", "read-due-obligations",
                              "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance",
-                             "capture-evaluation-evidence"}:
+                             "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"}:
             raise ValueError("unsupported native company operation")
         operation_id = str(uuid.uuid4())
         directory = self.runtime_dir / "finance-sources"
@@ -1018,6 +1018,21 @@ class ERPNextSiteAdmin:
         finally:
             temporary.unlink(missing_ok=True)
             manifest_path.unlink(missing_ok=True)
+
+    def resolve_company_pack_directory(self, payload: dict[str, Any]) -> dict[str, str]:
+        result = self._finance_operation("resolve-company-pack-directory", payload)
+        if not isinstance(result, dict) or any(not isinstance(key, str) or not isinstance(value, str) for key, value in result.items()):
+            raise ERPNextError("resolve-company-pack-directory returned invalid bindings")
+        return result
+
+    def import_company_pack(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Import an approved pack through the private native operation boundary."""
+        result = self._finance_operation("import-company-pack", payload)
+        if (not isinstance(result, dict) or not isinstance(result.get("records"), dict)
+                or not isinstance(result.get("created_count"), int)
+                or not isinstance(result.get("reused_count"), int)):
+            raise ERPNextError("import-company-pack returned an invalid receipt")
+        return result
 
     def reconcile_finance_sources(
         self, source_records: list[dict[str, Any]], company_binding: dict[str, Any], as_of: str | datetime,

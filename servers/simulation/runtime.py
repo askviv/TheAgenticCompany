@@ -53,6 +53,8 @@ class RuntimeConfig(BaseModel):
     retail_operator_users: list[str] = Field(default_factory=list, min_length=0)
     company_binding: dict[str, Any] | None = None
     company_profile_file: Path = Path(__file__).resolve().parents[2] / "deploy/single-host/company-identities.json"
+    company_application_services_file: Path = Path("/etc/company-workplace/application-services.json")
+    company_pack_credentials_file: Path = Path("/etc/company-workplace/secrets/midpoint-connector-secrets.json")
     employee_chat_credentials_file: Path | None = None
     rocketchat_base_url: str = "https://chat.company.example.test"
     background_model_id: str = "gpt-6-luna"
@@ -727,6 +729,29 @@ def build_app(config_path: str | Path):
             engine.company_issue_reconcile = lambda: issue_action(issue_workflow.reconcile)
             engine.company_issue_observe = lambda: issue_action(issue_workflow.observe_mail)
             engine.company_issue_activity = issue_workflow.service.activity
+    company_packs = None
+    if config.company_binding is not None:
+        from .application_services import apply_company_applications
+        from .company_packs import CompanyPackService
+        from servers.company.owncloud import OwnCloudClient
+
+        def pack_owncloud_factory():
+            profile = json.loads(config.company_profile_file.read_text())
+            owncloud = profile["company"]["background"]["owncloud"]
+            credentials = private_json(config.company_pack_credentials_file)["owncloud"]
+            if credentials["username"] != owncloud["service_owner"]["owncloud_uid"]:
+                raise ValueError("Company pack ownCloud credentials do not match the canonical service owner")
+            return OwnCloudClient(owncloud["base_url"], credentials["username"], credentials["app_password"]), owncloud
+
+        company_packs = CompanyPackService(
+            config.state_root / "company-packs", engine=engine,
+            native=ERPNextSiteAdmin(config.erp_compose, config.erp_credentials_root.parent),
+            binding=config.company_binding,
+            profile_path=config.company_profile_file, owncloud_factory=pack_owncloud_factory,
+            erp_public_url=config.erp_public_url,
+            apply_applications=lambda applications: apply_company_applications(applications, config.company_application_services_file),
+        )
+        engine.company_packs = company_packs
     app = create_app(engine, private_json(config.principals_file))
     workers = MailWorkers(engine, config.mail["actors"],
                           mailbox_idle_renewal_seconds=config.mailbox_idle_renewal_seconds)
@@ -1018,14 +1043,20 @@ def build_app(config_path: str | Path):
                           type(error).__name__, frames)
                 if isinstance(error, KernelCompanyClockConfigurationError):
                     LOG.error("kernel company clock configuration failed: %s", error)
+        if company_packs is not None:
+            company_packs.reconcile_applications()
         if config.workers_enabled:
             workers.start()
             company_clock.start()
             if company_background is not None:
                 company_background.start()
+        if company_packs is not None:
+            company_packs.start()
         try:
             yield
         finally:
+            if company_packs is not None:
+                company_packs.stop()
             # Stop new work in every worker before joining any of them. This
             # prevents ongoing producers from starving a draining DB operation.
             workers.stopped.set()

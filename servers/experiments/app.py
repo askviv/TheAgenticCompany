@@ -7,6 +7,7 @@ import re
 import secrets
 import sqlite3
 import threading
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, closing
@@ -228,8 +229,17 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         with coordinator_lock:
             if coordinator_instance is None: coordinator_instance=coordinator_factory()
             return coordinator_instance
+    def imported_catalog():
+        payload = coordinator().company_pack_catalog()
+        entries = payload.get('experiments')
+        if not isinstance(entries, list):
+            raise CoordinatorError('company/packs/catalog', 'invalid_response')
+        return {entry['id']: entry for entry in entries}
+
     def definition_for(experiment_id):
         definition = experiments.get(experiment_id)
+        if definition is None:
+            definition = imported_catalog().get(experiment_id)
         if definition is None:
             abort(404)
         return definition
@@ -448,8 +458,9 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 role=definition.get('role')
                 if not isinstance(role,str) or not role:
                     raise CoordinatorError('experiment-chat','sender_department_unavailable')
-                employee_id=item.get('sender_employee_id')
-                employee_id,employee_user_id=company_experiment_sender(role,employee_id)
+                employee_id=item.get('sender_employee_id') or definition.get('sender_employee_id')
+                employee_id,employee_user_id=company_experiment_sender(
+                    role, employee_id, explicit_sender=bool(definition.get('sender_employee_id')))
                 if not item.get('sender_employee_id'):
                     update(run_id,sender_employee_id=employee_id)
                 sent=client().dispatch_employee_browser(
@@ -578,6 +589,9 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     @app.before_request
     def request_csrf():
         if 'csrf_token' not in session: session['csrf_token']=secrets.token_urlsafe(32)
+        if request.endpoint == 'api_upload_company_pack':
+            # Flask's per-request limit preserves the small default for other endpoints.
+            request.max_content_length = 50 * 1024 * 1024 + 65536
         if request.method=='POST' and request.endpoint!='chat_events':
             json_body=request.get_json(silent=True) if request.is_json else None
             token=request.form.get('csrf_token','')
@@ -599,15 +613,83 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def api_session(): return jsonify(csrf_token=session['csrf_token'],idempotency_key=str(uuid.uuid4()))
     @app.get('/api/catalog')
     def api_catalog():
-        return jsonify(experiments=list(experiments.values()))
+        try:
+            return jsonify(experiments=list((experiments | imported_catalog()).values()))
+        except CoordinatorError as error:
+            return company_pack_error(error)
+
+    def company_pack_error(error):
+        logging.exception('Company pack request failed code=%s', error.code)
+        status = {'pack_invalid_archive': 422, 'pack_version_conflict': 409,
+                  'pack_clock_unavailable': 503}.get(error.code, 503)
+        if re.fullmatch(r'http_4[0-9]{2}', error.code):
+            status = int(error.code.removeprefix('http_'))
+        return jsonify(error={'code': error.code, 'correlation_id': error.correlation_id}), status
+
+    @app.get('/api/company-packs')
+    def api_company_packs():
+        try:
+            return jsonify(coordinator().company_packs())
+        except CoordinatorError as error:
+            return company_pack_error(error)
+
+    @app.post('/api/company-packs')
+    def api_upload_company_pack():
+        archive = request.files.get('file')
+        key = request.headers.get('Idempotency-Key')
+        if archive is None or not key: abort(400)
+        try:
+            return jsonify(coordinator().upload_company_pack(archive.stream, idempotency_key=key))
+        except CoordinatorError as error:
+            return company_pack_error(error)
+
+    @app.get('/api/company-packs/<pack_id>')
+    def api_company_pack(pack_id):
+        try:
+            return jsonify(coordinator().company_pack(pack_id))
+        except CoordinatorError as error:
+            return company_pack_error(error)
+
+    @app.post('/api/company-packs/<pack_id>/import')
+    def api_import_company_pack(pack_id):
+        key = request.form.get('idempotency_key')
+        if not key: abort(400)
+        try:
+            return jsonify(coordinator().import_company_pack(pack_id, idempotency_key=key))
+        except CoordinatorError as error:
+            return company_pack_error(error)
+
+    @app.get('/api/company-packs/<pack_id>/events')
+    def api_company_pack_events(pack_id):
+        def stream():
+            # Status is durable upstream. Bound this condition polling stream to 15 minutes;
+            # reconnect is explicit in the UI, and no database transaction is held waiting.
+            deadline = time.monotonic() + 900
+            wait = threading.Event()
+            while time.monotonic() < deadline:
+                try:
+                    pack = coordinator().company_pack(pack_id)
+                except CoordinatorError as error:
+                    logging.exception('Company pack status stream failed code=%s', error.code)
+                    yield 'event: error\ndata: ' + json.dumps({'code': error.code}) + '\n\n'
+                    return
+                yield 'data: ' + json.dumps(pack) + '\n\n'
+                if pack['status'] not in {'queued', 'importing'}: return
+                wait.wait(min(1, max(0, deadline - time.monotonic())))
+            yield 'event: error\ndata: {"code":"pack_status_stream_expired"}\n\n'
+        return Response(stream(), mimetype='text/event-stream',
+                        headers={'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no'})
     @app.get('/api/compatibility')
     def api_compatibility(): return jsonify(compatibility)
     @app.get('/api/company-tools')
     def api_company_tools():
         try:
             mapping = company_tools_urls(app.config['COMPANY_TOOLS_URLS_FILE'])
-            links = [{'id': key, 'name': name, 'url': mapping[key]} for key, name in COMPANY_TOOLS]
-        except (OSError, TypeError, ValueError) as error:
+            applications = coordinator().company_packs()['applications']
+            enabled = set(applications) if applications is not None else set(mapping)
+            links = [{'id': key, 'name': name, 'url': mapping[key]}
+                     for key, name in COMPANY_TOOLS if key in enabled]
+        except (CoordinatorError, OSError, KeyError, TypeError, ValueError) as error:
             logging.exception('Company tools URL mapping unavailable (%s)', type(error).__name__)
             return jsonify(error='Company tools URL mapping is unavailable or invalid.'), 503
         return jsonify(tools=links)
@@ -738,7 +820,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             }
         return roster
 
-    def company_experiment_sender(role, employee_id=None):
+    def company_experiment_sender(role, employee_id=None, *, explicit_sender=False):
         path=Path(app.config['COMPANY_PROFILE_FILE'])
         try:
             document=json.loads(path.read_text(encoding='utf-8'))
@@ -749,12 +831,17 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         if not isinstance(company,dict) or not isinstance(employees,list):
             raise CoordinatorError('experiment-chat','company_identity_profile_invalid')
         department_map=company.get('experimentDepartmentMap')
+        # Pack manifests choose a canonical sender independently of the work's business area.
         department=department_map.get(role) if isinstance(department_map,dict) else None
-        if not isinstance(department,str) or not department or not isinstance(employees,list):
+        if not explicit_sender and (not isinstance(department,str) or not department):
             raise CoordinatorError('experiment-chat','sender_department_unmapped')
         candidates=[]
         for employee in employees:
-            if not isinstance(employee,dict) or employee.get('department')!=department:
+            if not isinstance(employee,dict):
+                continue
+            if explicit_sender:
+                if employee.get('id') != employee_id: continue
+            elif employee.get('department') != department:
                 continue
             account=employee.get('accounts',{}).get('rocketchat') if isinstance(employee.get('accounts'),dict) else None
             if (isinstance(employee.get('id'),str) and employee['id']

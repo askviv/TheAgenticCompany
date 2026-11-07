@@ -1,0 +1,39 @@
+[
+  {
+    "id": "frappe",
+    "compose_file": "/etc/company-workplace/compose/erpnext.json",
+    "services": ["db", "redis-cache", "redis-queue", "configurator", "backend", "frontend", "websocket", "queue-long", "queue-short"],
+    "applications": ["erpnext", "payroll", "lending", "crm", "helpdesk"]
+  },
+  {
+    "id": "email",
+    "compose_file": "/etc/company-workplace/compose/mailu.json",
+    "services": [],
+    "applications": ["email"]
+  },
+  {
+    "id": "rocketchat",
+    "compose_file": "/etc/company-workplace/compose/tac-workplace.json",
+    "services": ["rocketchat", "mongodb", "redis-stack"],
+    "applications": ["rocketchat"]
+  },
+  {
+    "id": "owncloud",
+    "compose_file": "/etc/company-workplace/compose/tac-workplace.json",
+    "services": ["owncloud", "owncloud-collabora"],
+    "applications": ["owncloud"]
+  },
+  {
+    "id": "plane",
+    "compose_file": "/etc/company-workplace/compose/tac-plane.json",
+    "services": [],
+    "applications": ["plane"]
+  },
+  {
+    "id": "midpoint-directory",
+    "compose_file": "/etc/company-workplace/compose/tac-midpoint.json",
+    "services": [],
+    "applications": ["midpoint"],
+    "required": true
+  }
+]

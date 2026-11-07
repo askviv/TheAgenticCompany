@@ -400,7 +400,7 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
         raise ValueError("finance operation_id must be a canonical UUID")
     if operation not in ("reconcile-finance-sources", "read-due-obligations",
                          "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance",
-                         "capture-evaluation-evidence"):
+                         "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"):
         raise ValueError("unsupported native finance source operation")
     payload_path = RUNTIME_ROOT / "finance-sources" / f"{operation_id}.json"
     if not payload_path.is_file() or payload_path.resolve().parent != (RUNTIME_ROOT / "finance-sources").resolve():
@@ -421,7 +421,7 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
         if operation == "capture-evaluation-evidence":
             if payload.get("erp_company") != "The Agent Company":
                 raise ValueError("Evaluation evidence capture must target the existing company")
-        elif operation in ("reconcile-finance-sources", "reconcile-company-issues", "reconcile-ecommerce-finance"):
+        elif operation in ("reconcile-finance-sources", "reconcile-company-issues", "reconcile-ecommerce-finance", "import-company-pack", "resolve-company-pack-directory"):
             binding = payload.get("company_binding")
             if (not isinstance(binding, dict) or binding.get("company_id") != "company"
                     or binding.get("erp_company") != "The Agent Company"):
@@ -471,6 +471,13 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
                         capture_error.add_note(
                             f"Read-only evidence rollback failed: {type(rollback_error).__name__}"
                         )
+            elif operation == "resolve-company-pack-directory":
+                from company_packs import resolve_company_pack_directory
+                result = resolve_company_pack_directory(payload)
+                frappe.db.rollback()
+            elif operation == "import-company-pack":
+                from company_packs import import_company_pack
+                result = import_company_pack(payload)
             elif operation == "reconcile-ecommerce-finance":
                 from ecommerce_finance import reconcile
                 result = reconcile(payload["records"], payload["company_binding"], payload["as_of"])
@@ -611,7 +618,7 @@ def _refresh_seed(site: str) -> dict[str, object]:
 def main() -> None:
     Path("/home/frappe/logs").mkdir(mode=0o700, parents=True, exist_ok=True)
     parser = argparse.ArgumentParser(description="Manage coordinator-owned ERPNext sites and native task imports")
-    parser.add_argument("operation", choices=("create", "company-only", "install-business-apps", "reset", "probe", "refresh-seed", "ensure-erp-contract", "seed-tau-retail", "observe-tau-retail", "reconcile-finance-sources", "read-due-obligations", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence"))
+    parser.add_argument("operation", choices=("create", "company-only", "install-business-apps", "reset", "probe", "refresh-seed", "ensure-erp-contract", "seed-tau-retail", "observe-tau-retail", "reconcile-finance-sources", "read-due-obligations", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"))
     parser.add_argument("run_id", help="run UUID or τ experiment UUID")
     parser.add_argument("task_id", nargs="?", help="τ retail task id for seed-tau-retail")
     args = parser.parse_args()
@@ -622,7 +629,7 @@ def main() -> None:
                   else _observe_tau_retail(args.run_id, args.task_id))
         print(json.dumps(result, sort_keys=True))
         return
-    if args.operation in ("reconcile-finance-sources", "read-due-obligations", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence"):
+    if args.operation in ("reconcile-finance-sources", "read-due-obligations", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"):
         result = _run_finance_source_operation(args.run_id, args.operation)
         print(json.dumps(result, sort_keys=True))
         return

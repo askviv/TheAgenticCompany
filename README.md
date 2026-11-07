@@ -69,6 +69,11 @@ Open the configured company dashboard to view Activity, browse `/experiments`
 and track `/runs`. Application addresses and employee accounts come from the
 deployment configuration. Runtime credentials stay outside Git.
 
+The Experiments page also accepts a company-pack ZIP. Preview its company
+persona, then import its native business records and shared working files before
+choosing an experiment to run. See the [pack schema, validator and authoring guide](docs/company-packs/README.md)
+and the [current-company example pack](examples/company-packs/industrial-office-operations-v1.zip).
+
 Each background provider has its own Start/Stop button. Stop preserves its saved
 state. An operation already in flight can finish; the status shows **Stopping**
 until it completes. Starting resumes the existing company activity rather than

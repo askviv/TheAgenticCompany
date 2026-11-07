@@ -307,6 +307,30 @@ class OwnCloudClient:
             raise OwnCloudError("OWNCLOUD_GROUP_MEMBERSHIP_NOT_CONFIRMED")
         return True
 
+    def upload_pack_file(self, path: str, content: bytes) -> dict[str, Any]:
+        """Create a namespaced file once, preserving any later human edits."""
+        path = _relative_file_path(path)
+        parts = path.split("/")
+        base = f"{_WEBDAV}/{quote(self.username, safe='')}/"
+        for end in range(1, len(parts)):
+            url = self._url(base + "/".join(quote(part, safe="") for part in parts[:end]))
+            response = self.session.request(
+                "MKCOL", url, auth=(self.username, self.password),
+                timeout=self.timeout, verify=self.verify, allow_redirects=False,
+            )
+            if response.status_code not in {201, 405}:
+                raise OwnCloudError(f"OWNCLOUD_PACK_MKCOL_HTTP_{response.status_code}")
+        url = self._url(base + "/".join(quote(part, safe="") for part in parts))
+        response = self.session.request(
+            "PUT", url, data=content, headers={"If-None-Match": "*"},
+            auth=(self.username, self.password), timeout=self.timeout,
+            verify=self.verify, allow_redirects=False,
+        )
+        if response.status_code not in {201, 204, 412}:
+            raise OwnCloudError(f"OWNCLOUD_PACK_PUT_HTTP_{response.status_code}")
+        metadata, _ = self.resource_metadata(self.username, path)
+        return metadata
+
     def resource_metadata(self, uid: str, path: str) -> tuple[dict[str, Any], bytes | None]:
         if uid != self.username:
             raise PermissionError("WebDAV file snapshots must use the linked file-owner account")
