@@ -730,9 +730,14 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             return None, codex_auth_json({'error':{'code':'codex_auth_bridge_rejected'}},502)
         try:
             data=response.json()
-            if (not isinstance(data,dict)
-                    or data.get('state') not in {'authenticated','unauthenticated','starting','pending','completed','failed','expired'}):
+            if not isinstance(data, dict):
                 raise ValueError('invalid response')
+            if path == '/v1/model-control':
+                if not isinstance(data.get('enabled'), bool):
+                    raise ValueError('invalid model control status')
+                return {'enabled': data['enabled']}, None
+            if data.get('state') not in {'authenticated','unauthenticated','starting','pending','completed','failed','expired'}:
+                raise ValueError('invalid response state')
             safe={'state':data['state']}
             if 'authenticated' in data:
                 if not isinstance(data['authenticated'],bool):
@@ -761,6 +766,19 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         except (ValueError,requests.JSONDecodeError) as error:
             logging.warning('Codex auth bridge returned an invalid response exception_type=%s',type(error).__name__)
             return None, codex_auth_json({'error':{'code':'codex_auth_bridge_invalid_response'}},502)
+
+    @app.get('/api/company/model-control')
+    def api_company_model_control_status():
+        result, failure = codex_auth_bridge('/v1/model-control')
+        return failure if failure else codex_auth_json(result)
+
+    @app.post('/api/company/model-control')
+    def api_company_model_control():
+        raw = request.form.get('enabled')
+        if raw not in {'true', 'false'}:
+            abort(400)
+        result, failure = codex_auth_bridge('/v1/model-control', method='POST', payload={'enabled': raw == 'true'})
+        return failure if failure else codex_auth_json(result)
 
     @app.get('/api/company/model-auth/status')
     def api_company_model_auth_status():

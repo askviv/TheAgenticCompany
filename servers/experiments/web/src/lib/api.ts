@@ -474,3 +474,16 @@ export async function importCompanyPack(id: string): Promise<CompanyPackImport> 
     body: new URLSearchParams({ csrf_token: session.csrf_token, idempotency_key: session.idempotency_key }),
   })
 }
+
+export async function getModelControl(): Promise<{ enabled: boolean }> {
+  return requestJson<{ enabled: boolean }>("/api/company/model-control")
+}
+
+export async function setModelControl(enabled: boolean): Promise<{ enabled: boolean }> {
+  const session = await getSession()
+  return requestJson<{ enabled: boolean }>("/api/company/model-control", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body: new URLSearchParams({ csrf_token: session.csrf_token, enabled: String(enabled) }),
+  })
+}

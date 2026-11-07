@@ -5,8 +5,9 @@ through ordinary business tools: company email, ERPNext, documents, chat and
 projects. It extends [The Agent Company](https://github.com/TheAgentCompany/TheAgentCompany)
 with shared-company simulations, native benchmark adapters and durable results.
 
-This is an independent project. Its company-adapted experiments and results are
-separate from the original benchmarks’ leaderboards.
+Agents connect through configured company tools, email routes and optional
+webhooks. Company-adapted experiments and results are separate from the original
+benchmarks’ leaderboards.
 
 ## How it works
 
@@ -22,7 +23,8 @@ run IDs and evidence references, while sharing orders, invoices, stock and email
 - **Results:** inspect saved evaluations, criteria, warnings and history for a run.
   Missing evidence, incomplete integration and evaluation failures remain explicit.
 
-Viv works through normal company tools and communications. Benchmark runtimes,
+The agent under evaluation works through normal company tools and communications.
+Benchmark runtimes,
 private task criteria and evaluator credentials remain behind the coordinator.
 
 ```mermaid
@@ -90,7 +92,7 @@ shared by applications, databases and employee desktops. The host keeps normal
 time for external transport and model authentication.
 
 Configure the [deployment profile](deploy/virtual-time-world/deployment-profile.example.json)
-with your domains, host address, Viv email connection and Codex CLI version, then run:
+with your domains, host address, external agent email connection and Codex CLI version, then run:
 
 ```sh
 sudo env DEPLOYMENT_PROFILE=/etc/agentic-company/deployment-profile.json \
@@ -138,7 +140,7 @@ python -m pytest servers/simulation/tests/test_company_background.py \
 Keep the native actor dependency environments separate; use their committed
 locks and deployment guides. Integration checks use synthetic evidence and
 controlled transports. Do not launch experiments, live benchmark episodes,
-judging or Viv work as an infrastructure smoke test.
+judging or external-agent work as an infrastructure smoke test.
 
 ## Evaluation and coverage
 
@@ -149,7 +151,7 @@ Private evidence is stored separately. Idempotent retries return the saved
 attempt rather than judging again.
 
 Scores retain their original scales; there is no combined percentage across
-benchmarks. Native provider-assistant scores are not Viv performance scores.
+benchmarks. Native provider-assistant scores do not measure the external agent’s performance.
 Company-adapted evaluations are labelled, and shared-record interactions can make
 attribution inconclusive. See [evaluation history](docs/enterprise-simulation/evaluation-history.md),
 [results UI](docs/experiments-results.md) and [feedback contracts](docs/enterprise-simulation/company-feedback.md).
@@ -163,7 +165,7 @@ the current scope.
 
 Deployment health, native service boundaries and controlled integration checks
 do not establish a successful live benchmark episode or agent performance.
-The latest integration/control verification did not run experiments or test Viv.
+The latest integration/control verification did not run experiments or evaluate an external agent.
 Historical workplace smoke tests are recorded separately. For requirement coverage,
 exact checks and remaining limits, see [requirements](docs/enterprise-simulation/requirements.md)
 and [integration verification](docs/enterprise-simulation/verification.md).

@@ -31,6 +31,8 @@ import {
 } from "react-router"
 import {
   getActivity,
+  getModelControl,
+  setModelControl,
   getCatalog,
   getCompany,
   getCompanyClock,
@@ -159,6 +161,34 @@ function LoadingCards() {
   )
 }
 
+function ModelCallControl() {
+  const [enabled, setEnabled] = useState<boolean | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    getModelControl().then((state) => setEnabled(state.enabled)).catch((reason: unknown) => {
+      setError(reason instanceof Error ? reason.message : "Model call status unavailable")
+    })
+  }, [])
+  const change = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const state = await setModelControl(enabled === false)
+      setEnabled(state.enabled)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Model call control failed")
+    } finally { setBusy(false) }
+  }
+  return <div className="flex items-center gap-2" aria-live="polite">
+    <span className="text-sm">{enabled === false ? "Model calls stopped" : enabled === true ? "Model calls enabled" : "Model call status unavailable"}</span>
+    <Button variant={enabled === false ? "outline" : "destructive"} disabled={busy} onClick={() => void change()}>
+      {busy ? "Updating…" : enabled === false ? "Resume model calls" : "Stop all model calls"}
+    </Button>
+    {error && <span role="alert" className="text-sm text-destructive">{error}</span>}
+  </div>
+}
+
 function AppLayout() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [companyTime, setCompanyTime] = useState<string | null>(null)
@@ -232,6 +262,7 @@ function AppLayout() {
               Help
             </NavLink>
           </nav>
+          <ModelCallControl />
           <p className="basis-full pb-2 text-center text-xs text-muted-foreground lg:basis-auto lg:pb-0">Company time {companyTime ? formatDate(companyTime) : "—"}</p>
         </div>
       </header>
