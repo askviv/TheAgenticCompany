@@ -21,6 +21,8 @@ if [[ ${1:-} == --fresh ]]; then fresh=1; shift; fi
 [[ $EUID == 0 ]] || fail 'run as root (sudo deploy/virtual-time-world/up.sh)'
 [[ $WORLD_ROOT == /* ]] || fail 'WORLD_ROOT must be an absolute path'
 [[ -f $PROFILE ]] || fail "deployment profile is required at $PROFILE; see deployment-profile.example.json"
+install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/90-company-multihomed-arp.conf" /etc/sysctl.d/90-company-multihomed-arp.conf
+sysctl --load /etc/sysctl.d/90-company-multihomed-arp.conf
 if systemctl is-active --quiet caddy.service; then
   fail 'caddy.service already owns the default Caddy process; refusing to replace that unrelated service'
 fi

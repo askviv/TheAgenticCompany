@@ -323,3 +323,21 @@ existing image path. The original HDD directory is retained only until the
 operator verifies startup, then must be removed. No company reset is performed.
 
 Architecture-specific kernel entry points and Apple Silicon/UTM limitations are documented in the [build guide](../../docs/enterprise-simulation/architecture-builds.md).
+
+### Host Ethernet and Wi-Fi on the same subnet
+
+`up.sh` installs `90-company-multihomed-arp.conf` into `/etc/sysctl.d/` and loads
+it with the native `sysctl` command. It makes address replies and announcements
+use the interface that owns the address, preventing Wi-Fi from advertising the
+Ethernet address. Ubuntu reapplies the settings during boot. Existing hosts can
+apply the same configuration without restarting the network or the company:
+
+```sh
+sudo install -m 0644 deploy/virtual-time-world/90-company-multihomed-arp.conf /etc/sysctl.d/90-company-multihomed-arp.conf
+sudo sysctl --load /etc/sysctl.d/90-company-multihomed-arp.conf
+```
+
+These settings preserve DHCP addresses and routes. Peers with a stale address
+cache may need a gratuitous ARP announcement from the correct interface, e.g.
+`sudo arping -U -c 3 -I enp3s0f0 192.168.0.200` on the Mini. Interface names and
+addresses in that maintenance command are deployment-specific.
