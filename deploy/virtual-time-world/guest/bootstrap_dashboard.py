@@ -48,10 +48,15 @@ def main() -> None:
     domains = profile['domains']
     tools = {'erpnext': 'erp', 'email': 'mail', 'rocketchat': 'chat',
              'owncloud': 'owncloud', 'plane': 'plane', 'midpoint': 'midpoint'}
+    tool_urls = {key: f'https://{domains[value]}'
+                 + ('/webmail/' if key == 'email' else '')
+                 for key, value in tools.items()}
+    tool_urls.update({key: f'https://{domains["erp"]}{path}' for key, path in {
+        'payroll': '/hrms', 'lending': '/app/lending',
+        'crm': '/crm', 'helpdesk': '/helpdesk',
+    }.items()})
     tools_path = config / 'company-tools-urls.json'
-    tools_path.write_text(json.dumps({key: f'https://{domains[value]}'
-                                     + ('/webmail/' if key == 'email' else '')
-                                     for key, value in tools.items()}, indent=2) + '\n')
+    tools_path.write_text(json.dumps(tool_urls, indent=2) + '\n')
     tools_path.chmod(0o600)
     env_path = config / 'dashboard.env'
     previous = {}

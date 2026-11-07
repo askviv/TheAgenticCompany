@@ -25,6 +25,10 @@ from .coordinator import CoordinatorError, SimulationCoordinatorClient
 ROLES = {'admin':'Administration','hr':'People','finance':'Finance','ds':'Data','pm':'Product','bm':'Business'}
 COMPANY_TOOLS = (
     ('erpnext', 'ERPNext'),
+    ('payroll', 'Payroll'),
+    ('lending', 'Lending'),
+    ('crm', 'CRM'),
+    ('helpdesk', 'Helpdesk'),
     ('email', 'Email'),
     ('rocketchat', 'Rocket.Chat'),
     ('owncloud', 'ownCloud'),

@@ -79,7 +79,8 @@ def _erpnext_is_installed(site: str) -> bool:
 
 def _install_business_apps(site: str) -> dict[str, object]:
     subprocess.run([str(BENCH_EXECUTABLE), "--site", site, "install-app", "hrms", "lending", "helpdesk", "crm"],
-                   cwd=BENCH_ROOT, check=True, stdout=sys.stderr)
+                   cwd=BENCH_ROOT, check=True, stdout=sys.stderr,
+                   user="frappe", group=0, env={**os.environ, "HOME": "/home/frappe"})
     sys.path.insert(0, "/opt/erpnext-admin")
     import frappe
     from business_apps import configure_directory

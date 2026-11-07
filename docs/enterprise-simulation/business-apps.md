@@ -22,6 +22,13 @@ Applications use the ERPNext origin; no new domain or database is required:
 - Helpdesk: `/helpdesk`.
 - Accounting: the existing ERPNext Desk accounting workspace.
 
+The dashboard's Company tools links use the deployment's
+`COMPANY_TOOLS_URLS_FILE` JSON mapping. It includes `payroll`, `lending`, `crm`
+and `helpdesk` alongside the existing tools. Configure their full URLs there;
+the dashboard does not hard-code a deployment domain. Fresh bootstrap derives
+these four URLs from the configured ERP domain. See
+`servers/experiments/company-tools-urls.example.json` for the complete mapping.
+
 ## Image packaging
 
 `deploy/enterprise-simulation/erpnext/business-apps/build.sh` uses the unmodified
