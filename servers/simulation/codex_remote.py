@@ -17,6 +17,7 @@ from servers.simulation.codex_model import (
     CodexAuthenticationError, CodexCLIModel, CodexCLISettings, CodexConfigurationError,
     CodexModelAccessError, CodexModelError, CodexOutputSchemaError, CodexRateLimitError,
     ModelReply, CodexNoDesktopActionsError,
+    model_calls_enabled, set_model_calls_enabled, CodexModelCallsStopped,
 )
 from servers.simulation.codex_device_auth import (
     CodexDeviceAuthManager,
@@ -64,6 +65,12 @@ def employee_cua_mcp(container: str, environment: dict[str, str]) -> dict[str, d
     }}
 
 
+class ModelControl(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+
+
+
 class CodexInferenceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
@@ -100,6 +107,7 @@ _ERROR_TYPES = {
     "rate_limit": CodexRateLimitError,
     "output_schema": CodexOutputSchemaError,
     "inference": CodexModelError,
+    "model_calls_stopped": CodexModelCallsStopped,
     "no_desktop_actions": CodexNoDesktopActionsError,
 }
 _SAFE_ERRORS = {
@@ -178,6 +186,18 @@ def create_codex_inference_app(settings: CodexCLISettings, bearer_token: SecretS
         raise ValueError("Codex inference bearer token is required")
     app.include_router(create_codex_auth_router(token, manager=auth_manager))
 
+    @app.get("/v1/model-control")
+    def model_control_status(authorization: str | None = Header(default=None)):
+        if not hmac.compare_digest(authorization or "", "Bearer " + token):
+            raise HTTPException(status_code=401, detail="unauthorized")
+        return {"enabled": model_calls_enabled(settings)}
+
+    @app.post("/v1/model-control")
+    def model_control(request: ModelControl, authorization: str | None = Header(default=None)):
+        if not hmac.compare_digest(authorization or "", "Bearer " + token):
+            raise HTTPException(status_code=401, detail="unauthorized")
+        return set_model_calls_enabled(settings, request.enabled)
+
     @app.get("/health")
     def health():
         return {"status": "ok"}
@@ -193,6 +213,8 @@ def create_codex_inference_app(settings: CodexCLISettings, bearer_token: SecretS
                 mcp_servers=employee_cua_mcp(request.desktop_container, request.desktop_environment)
                 if request.desktop_container is not None else None,
             )
+        except CodexModelCallsStopped as error:
+            raise HTTPException(status_code=423, detail={"error": "model_calls_stopped"}) from error
         except CodexModelError as error:
             logging.getLogger(__name__).exception(
                 "Codex inference failed exception_type=%s", type(error).__name__
@@ -214,6 +236,8 @@ def create_codex_inference_app(settings: CodexCLISettings, bearer_token: SecretS
                 request.prompt, request.output_schema, image=request.image_bytes,
                 image_filename=request.image_filename,
             )
+        except CodexModelCallsStopped as error:
+            raise HTTPException(status_code=423, detail={"error": "model_calls_stopped"}) from error
         except CodexModelError as error:
             logging.getLogger(__name__).exception(
                 "Codex judge failed exception_type=%s", type(error).__name__

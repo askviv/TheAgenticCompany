@@ -430,3 +430,16 @@ export async function retryRun(runId: string): Promise<RunResponse> {
 export async function getCompanyClock(): Promise<{ simulated_time: string | null; clock_mode: string }> {
   return requestJson<{ simulated_time: string | null; clock_mode: string }>("/api/company/clock")
 }
+
+export async function getModelControl(): Promise<{ enabled: boolean }> {
+  return requestJson<{ enabled: boolean }>("/api/company/model-control")
+}
+
+export async function setModelControl(enabled: boolean): Promise<{ enabled: boolean }> {
+  const session = await getSession()
+  return requestJson<{ enabled: boolean }>("/api/company/model-control", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body: new URLSearchParams({ csrf_token: session.csrf_token, enabled: String(enabled) }),
+  })
+}

@@ -13,6 +13,8 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import signal
+import threading
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -23,6 +25,34 @@ LOG = logging.getLogger("uvicorn.error.employee_cua")
 
 class CodexModelError(RuntimeError):
     """A failed inference transport; never replace this with a canned response."""
+
+
+class CodexModelCallsStopped(CodexModelError):
+    """The operator stopped model calls."""
+
+
+_MODEL_PROCESS_LOCK = threading.Lock()
+_MODEL_PROCESSES: set[subprocess.Popen] = set()
+
+
+def model_calls_enabled(settings) -> bool:
+    return not (Path(settings.codex_home) / "model-calls-stopped").exists()
+
+
+def set_model_calls_enabled(settings, enabled: bool) -> dict:
+    # Serialize admission with stop; never hold this lock during inference.
+    with _MODEL_PROCESS_LOCK:
+        marker = Path(settings.codex_home) / "model-calls-stopped"
+        if enabled:
+            marker.unlink(missing_ok=True)
+        else:
+            marker.touch(mode=0o600, exist_ok=True)
+            for process in tuple(_MODEL_PROCESSES):
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # Already exited before cancellation.
+        return {"enabled": enabled}
 
 
 class CodexNoDesktopActionsError(CodexModelError):
@@ -255,14 +285,32 @@ class CodexCLIModel:
                 # immediately before the single external inference request.
                 if on_submission_started is not None:
                     on_submission_started()
-                completed = subprocess.run(command, input=prompt, text=True,
-                    capture_output=True, cwd=root, env=environment,
-                    timeout=settings.timeout_seconds, check=False)
+                with _MODEL_PROCESS_LOCK:
+                    if not model_calls_enabled(settings):
+                        raise CodexModelCallsStopped("Model calls are stopped by the operator")
+                    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE, text=True, cwd=root, env=environment, start_new_session=True)
+                    _MODEL_PROCESSES.add(process)
+                try:
+                    stdout, stderr = process.communicate(prompt, timeout=settings.timeout_seconds)
+                    completed = subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    process.communicate()
+                    raise
+                finally:
+                    with _MODEL_PROCESS_LOCK:
+                        _MODEL_PROCESSES.discard(process)
             except subprocess.TimeoutExpired as error:
                 cause = subprocess.TimeoutExpired([settings.executable, "exec"], error.timeout)
                 raise CodexModelError("Codex CLI inference timed out without a confirmed result") from cause
             except OSError as error:
                 raise CodexModelError("Codex CLI inference failed before a confirmed result") from error
+            if not model_calls_enabled(settings):
+                raise CodexModelCallsStopped("Model call cancelled by the operator")
             if completed.returncode:
                 # Do not attach stdout/stderr: either can include private prompts
                 # or account/provider diagnostics. Preserve the safe exit cause.
