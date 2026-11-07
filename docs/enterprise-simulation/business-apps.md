@@ -63,6 +63,13 @@ in the normal Frappe image; it introduces no custom agent runtime or app patches
 The upstream builder's `CACHE_BUST` argument uses the app manifest's SHA-256 because
 Docker does not include secret-file content in cache keys. Changing the manifest
 therefore updates the installed apps while preserving unrelated build layers.
+Docker's standard container build driver keeps temporary build storage in the
+Docker data directory. `ERP_IMAGE_OUTPUT` can select a Docker image archive on a
+data drive (for example `type=docker,dest=/data/build/company-apps.tar`) when the
+host system disk is tight. Load that image into the VM with `docker image load`
+and remove the temporary archive afterward. The default output loads the image
+into the local Docker daemon. The build container is stopped after a successful
+build; its cache contains application packages, never company records.
 
 Fresh VM bootstrap builds this image before the accelerated clock is activated,
 then installs the apps and applies the directory configuration to the shared
