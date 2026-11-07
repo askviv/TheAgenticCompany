@@ -1,0 +1,30 @@
+[
+  {
+    "url": "https://github.com/frappe/erpnext",
+    "branch": "v16.53.0"
+  },
+  {
+    "url": "https://github.com/frappe/hrms",
+    "branch": "v16.53.1"
+  },
+  {
+    "url": "https://github.com/frappe/lending",
+    "branch": "v16.8.0"
+  },
+  {
+    "url": "https://github.com/frappe/telephony",
+    "branch": "develop"
+  },
+  {
+    "url": "https://github.com/frappe/helpdesk",
+    "branch": "v16.1.0"
+  },
+  {
+    "url": "https://github.com/frappe/crm",
+    "branch": "v16.0.2"
+  },
+  {
+    "url": "https://github.com/Andrometiq/frappe-passkeys",
+    "branch": "v16.0.7"
+  }
+]

@@ -1,5 +1,9 @@
 {
   "erpnext": "https://erp.example.test",
+  "payroll": "https://erp.example.test/hrms",
+  "lending": "https://erp.example.test/app/lending",
+  "crm": "https://erp.example.test/login?redirect-to=%2Fcrm",
+  "helpdesk": "https://erp.example.test/helpdesk",
   "email": "https://mail.example.test",
   "rocketchat": "https://chat.example.test",
   "owncloud": "https://files.example.test",
