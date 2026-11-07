@@ -834,7 +834,8 @@
         "plane_email": "david.wong@agentcompany.com"
       },
       "erpRoles": [
-        "Employee"
+        "Employee",
+        "Accounts Manager"
       ],
       "frappeAppRoles": {
         "helpdesk": [
@@ -845,9 +846,6 @@
         ],
         "lending": [
           "Loan Manager"
-        ],
-        "erpnext": [
-          "Accounts Manager"
         ]
       }
     },

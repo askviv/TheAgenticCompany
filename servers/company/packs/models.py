@@ -154,6 +154,9 @@ class Manifest(Model):
         for experiment in self.experiments:
             if experiment.department_id not in departments or experiment.sender_employee_id not in employees or not set(experiment.files) <= files or not set(experiment.records) <= records:
                 raise ValueError('Unknown experiment directory, file or record reference')
+            sender = next(employee for employee in self.employees if employee.id == experiment.sender_employee_id)
+            if sender.department_id != experiment.department_id:
+                raise ValueError('Experiment sender must belong to its department')
         for experiment in self.experiments:
             if any(file.visibility != 'staff' for file in self.files if file.id in experiment.files):
                 raise ValueError('Experiment request files must be staff-visible')

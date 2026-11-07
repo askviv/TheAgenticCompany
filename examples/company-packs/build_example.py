@@ -1,12 +1,17 @@
 """Author the example archive only. Does not validate, import, seed or run it."""
 from pathlib import Path
 from io import BytesIO
+from datetime import datetime
 import json
-from zipfile import ZipFile, ZIP_DEFLATED
+from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
 from openpyxl import Workbook
+from openpyxl.writer.excel import ExcelWriter
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = Path(__file__).resolve().parent
+# Artifact metadata is fixed; business dates are resolved relative to import time.
+ARTIFACT_TIME = datetime(2026, 1, 1)
+ZIP_TIME = (2026, 1, 1, 0, 0, 0)
 identity = json.loads((ROOT / 'deploy/single-host/company-identities.json').read_text())
 department_names = list(dict.fromkeys(e['department'] for e in identity['employees']))
 def slug(s):
@@ -26,22 +31,39 @@ for r in records:r['state']='draft'
 files={}
 def workbook(path,sheets):
     wb=Workbook();wb.remove(wb.active)
+    wb.properties.created = wb.properties.modified = ARTIFACT_TIME
     for title,rows in sheets.items():
         ws=wb.create_sheet(title)
         for row in rows:ws.append(row)
         ws.freeze_panes='A2';ws.auto_filter.ref=ws.dimensions
-    out=BytesIO();wb.save(out);files[path]=out.getvalue()
+    # Workbook.save() rewrites modified to the current time; the native writer
+    # accepts the already-set document properties. Canonicalize its ZIP metadata
+    # too, including worksheet members written from temporary files.
+    out=BytesIO()
+    ExcelWriter(wb, ZipFile(out, 'w', ZIP_DEFLATED, compresslevel=9)).save()
+    canonical=BytesIO()
+    with ZipFile(BytesIO(out.getvalue())) as source, ZipFile(canonical, 'w', ZIP_DEFLATED, compresslevel=9) as target:
+        for name in sorted(source.namelist()):
+            entry = ZipInfo(name, date_time=ZIP_TIME)
+            entry.create_system = 3
+            entry.external_attr = 0o100644 << 16
+            target.writestr(entry, source.read(name), compress_type=ZIP_DEFLATED, compresslevel=9)
+    files[path]=canonical.getvalue()
 workbook('files/finance/supplier-match.xlsx',{'Invoice register':[['Supplier','Invoice reference','Item','Invoiced qty','Unit GBP','Invoice GBP'],['Pack Northbridge Components','NBC-1048','COMP-001',100,12,1200]],'Receiving notes':[['Delivery note','Item','Received qty','Inspection hold qty','Source'],['DN-1048','COMP-001',90,5,'Warehouse signed note']], 'Working reconciliation':[['Invoice reference','Matched qty','Exception','Next action'],['NBC-1048',None,None,None]]})
 workbook('files/hr/payroll-inputs.xlsx',{'Payroll input':[['Employee directory ID','Ordinary hours','Overtime hours','Overtime rate GBP','Entered overtime GBP'],['alex-turner',37.5,4,18,90],['emma-lewis',37.5,0,18,0]],'Approvals':[['Employee directory ID','Approved overtime hours','Approver','Evidence'],['alex-turner',4,'Chen Xinyi','HR approved input']], 'Reconciliation':[['Employee directory ID','Difference GBP','Action'],['alex-turner',None,None]]})
 workbook('files/sales/customer-queries.xlsx',{'Open queries':[['Customer','Order reference','Question','Customer requested qty','Requested delivery offset days'],['Pack Westhaven Engineering','pack:sales-order','Can all units dispatch by the promised date?',30,3]],'Warehouse note':[['Item','Available for this order','Awaiting inspection','Owner'],['COMP-001',25,5,'Alex Turner']], 'Response working':[['Customer','Evidence checked','Proposed response','Next owner'],['Pack Westhaven Engineering',None,None,None]]})
 files['files/company/operating-handbook.md']=('# The Agent Company — operating context\n\n'+persona['description']+'\n\n'+'\n'.join('## '+k.replace('_',' ').title()+'\n'+v+'\n' for k,v in persona['workflows'].items())+'\n'+'\n'.join('## '+k.replace('_',' ').title()+'\n'+v+'\n' for k,v in persona['policies'].items())).encode()
 files['private/evaluation/reference-facts.json']=json.dumps({'supplier':{'invoiced_quantity':100,'physical_receipt':90,'inspection_hold':5,'unreceived':10,'note':'Hold is part of received quantity; do not count it as an additional shortage.'},'payroll':{'approved_overtime_hours':4,'rate_gbp':18,'expected_overtime_gbp':72,'entered_overtime_gbp':90,'overstatement_gbp':18},'customer':{'requested_quantity':30,'available':25,'inspection_hold':5,'date_promise_supported':False}},indent=2).encode()
-file_descriptors=[{'id':'handbook','path':'files/company/operating-handbook.md','drive_path':'Company Packs/Industrial Operations/Operating handbook.md','visibility':'staff'}, {'id':'supplier-workbook','path':'files/finance/supplier-match.xlsx','drive_path':'Company Packs/Industrial Operations/Finance/Supplier match.xlsx','visibility':'staff','department_ids':['finance']}, {'id':'payroll-workbook','path':'files/hr/payroll-inputs.xlsx','drive_path':'Company Packs/Industrial Operations/HR/Payroll inputs.xlsx','visibility':'staff','department_ids':['hr','finance']}, {'id':'customer-workbook','path':'files/sales/customer-queries.xlsx','drive_path':'Company Packs/Industrial Operations/Sales/Customer queries.xlsx','visibility':'staff','department_ids':['sales-marketing','finance']}, {'id':'evaluation-facts','path':'private/evaluation/reference-facts.json','drive_path':'Evaluation/Industrial Operations/Reference facts.json','visibility':'evaluation'}]
+file_descriptors=[{'id':'handbook','path':'files/company/operating-handbook.md','drive_path':'Operating handbook.md','visibility':'staff'}, {'id':'supplier-workbook','path':'files/finance/supplier-match.xlsx','drive_path':'Finance/Supplier match.xlsx','visibility':'staff','department_ids':['finance']}, {'id':'payroll-workbook','path':'files/hr/payroll-inputs.xlsx','drive_path':'HR/Payroll inputs.xlsx','visibility':'staff','department_ids':['hr','finance']}, {'id':'customer-workbook','path':'files/sales/customer-queries.xlsx','drive_path':'Sales/Customer queries.xlsx','visibility':'staff','department_ids':['sales-marketing','finance']}, {'id':'evaluation-facts','path':'private/evaluation/reference-facts.json','drive_path':'Evaluation/Industrial Operations/Reference facts.json','visibility':'evaluation'}]
 experiments=[{'id':'supplier-invoice-review','title':'Investigate a supplier invoice mismatch','department_id':'finance','sender_employee_id':'david-wong','brief':'Compare the invoice register, receiving evidence and draft purchase order; prepare a reconciled working copy and recommendation.','request_message':'Please review NBC-1048 against our purchase order and the receiving workbook. Record the quantity and value exceptions in a new working copy, explain the inspection hold separately, and tell me what needs resolving before we prepare payment. Keep the original evidence.','files':['handbook','supplier-workbook'],'records':['supplier','purchase-order'],'evaluation':{'reference_file_id':'evaluation-facts','expected_facts':{'unreceived_quantity':10,'inspection_hold_quantity':5,'unreceived_value_gbp':120},'evidence':['Reconciled workbook','Message to David explaining unresolved receipt and inspection matters'],'prohibited_shortcuts':['Treating 100 units as received','Editing original evidence']}}, {'id':'payroll-input-review','title':'Reconcile approved overtime inputs','department_id':'hr','sender_employee_id':'chen-xinyi','brief':'Find and explain the payroll input discrepancy; prepare corrected working inputs for Finance review.','request_message':'Please reconcile the overtime lines in the payroll workbook against the approval tab. Make a corrected working copy, show the calculation and difference, and send David a concise summary. The attendance record is context, not approval for overtime. Do not submit payroll or invent personal payment details.','files':['handbook','payroll-workbook'],'records':['attendance'],'evaluation':{'reference_file_id':'evaluation-facts','expected_facts':{'alex_turner_overtime_gbp':72,'overstatement_gbp':18},'evidence':['Corrected working workbook','Explanation of approved hours and rate']}}, {'id':'customer-delivery-query','title':'Prepare an evidence based delivery response','department_id':'sales-marketing','sender_employee_id':'mark-johnson','brief':'Reconcile the draft customer order with the warehouse workbook and prepare a useful response.','request_message':'Westhaven asks whether all 30 units can dispatch on the requested date. Check the draft sales order and warehouse note, draft our response and identify what Alex needs to confirm. Do not invent an inspection release or dispatch commitment. Save your working notes.','files':['handbook','customer-workbook'],'records':['customer','sales-order'],'evaluation':{'reference_file_id':'evaluation-facts','expected_facts':{'available_quantity':25,'inspection_hold_quantity':5,'unconfirmed_quantity':5},'evidence':['Response explains the 25/5 position','Inspection release and date confirmation assigned to warehouse owner']}}]
 manifest={'schema_version':'1.0','id':'industrial-office-operations','version':'1.0.0','title':'Industrial office operations — finance, payroll and customer service','company_persona':persona,'departments':departments,'employees':employees,'role_under_evaluation':{'title':'Finance, payroll and customer service administrator','department_id':'finance','responsibilities':['Reconcile Excel working papers against native ERP facts','Prepare payroll input checks with HR evidence','Investigate customer and supplier queries','Keep accurate working evidence and communicate exceptions']},'records':records,'files':file_descriptors,'experiments':experiments}
 OUT.mkdir(parents=True,exist_ok=True)
-(OUT/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
-with ZipFile(OUT/'industrial-office-operations-v1.zip','w',ZIP_DEFLATED) as z:
-    z.writestr('manifest.json',json.dumps(manifest,indent=2)+'\n')
-    for path,body in files.items():z.writestr(path,body)
+(OUT/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n', encoding='utf-8', newline='\n')
+members = {'manifest.json': (json.dumps(manifest,indent=2)+'\n').encode(), **files}
+with ZipFile(OUT/'industrial-office-operations-v1.zip','w',ZIP_DEFLATED,compresslevel=9) as z:
+    for path,body in sorted(members.items()):
+        entry = ZipInfo(path, date_time=ZIP_TIME)
+        entry.create_system = 3
+        entry.external_attr = 0o100644 << 16
+        z.writestr(entry, body, compress_type=ZIP_DEFLATED, compresslevel=9)
 print(OUT/'industrial-office-operations-v1.zip')

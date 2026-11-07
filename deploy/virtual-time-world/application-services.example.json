@@ -2,7 +2,7 @@
   {
     "id": "frappe",
     "compose_file": "/etc/company-workplace/compose/erpnext.json",
-    "services": ["db", "redis-cache", "redis-queue", "configurator", "backend", "frontend", "websocket", "queue-long", "queue-short"],
+    "services": ["db", "redis-cache", "redis-queue", "configurator", "backend", "frontend", "websocket", "queue-long", "queue-short", "scheduler"],
     "applications": ["erpnext", "payroll", "lending", "crm", "helpdesk"]
   },
   {

@@ -71,6 +71,10 @@ Open the configured company dashboard to view Activity, browse `/experiments`
 and track `/runs`. Application addresses and employee accounts come from the
 deployment configuration. Runtime credentials stay outside Git.
 
+The [company switcher](docs/company-environments.md) names, duplicates and switches
+whole company application datasets on the shared VM. Inactive companies retain
+their work and paused company clocks.
+
 The Experiments page also accepts a company-pack ZIP. Preview its company
 persona, then import its native business records and shared working files before
 choosing an experiment to run. See the [pack schema, validator and authoring guide](docs/company-packs/README.md)

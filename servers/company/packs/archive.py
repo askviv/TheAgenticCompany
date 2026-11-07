@@ -4,6 +4,7 @@ from hashlib import sha256
 from io import BytesIO
 import json
 import stat
+import zlib
 from zipfile import ZipFile, BadZipFile
 from .models import Manifest, safe_path
 
@@ -28,6 +29,10 @@ def _unique_object(pairs):
             raise ValueError('Duplicate JSON object key')
         result[key] = value
     return result
+
+
+def _reject_constant(value):
+    raise ValueError('Manifest must contain only standard JSON numbers')
 
 
 def load_pack(data: bytes, limits: ArchiveLimits | None = None) -> LoadedPack:
@@ -56,12 +61,12 @@ def load_pack(data: bytes, limits: ArchiveLimits | None = None) -> LoadedPack:
                 raise ValueError('Pack archive exceeds expanded size limit')
             if 'manifest.json' not in names:
                 raise ValueError('Pack requires manifest.json')
-            raw = json.loads(archive.read('manifest.json'), object_pairs_hook=_unique_object)
+            raw = json.loads(archive.read('manifest.json'), object_pairs_hook=_unique_object, parse_constant=_reject_constant)
             manifest = Manifest.model_validate(raw)
             expected = {'manifest.json'} | {file.path for file in manifest.files}
             if names != expected:
                 raise ValueError('Archive members must exactly match declared files and manifest.json')
             files = {file.path: archive.read(file.path) for file in manifest.files}
-    except BadZipFile as exc:
+    except (BadZipFile, zlib.error, NotImplementedError, EOFError) as exc:
         raise ValueError('Invalid ZIP archive') from exc
     return LoadedPack(manifest=manifest, files=files, digest=sha256(data).hexdigest())

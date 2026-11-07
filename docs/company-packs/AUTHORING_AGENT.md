@@ -93,7 +93,7 @@ Populate all required top-level fields:
 - `schema_version`, `id`, `version`, `title`.
 - `company_persona`, including its required `applications` and business context.
 - `departments`, `employees`, `role_under_evaluation`.
-- `records`, `files`, `experiments` (use empty records/files arrays when appropriate).
+- `experiments` (required). `records` and `files` are optional and default to empty arrays.
 
 Use the schema for every nested field; unknown keys are rejected. Use meaningful
 lowercase hyphenated IDs. IDs must be unique within each entity type. Reuse

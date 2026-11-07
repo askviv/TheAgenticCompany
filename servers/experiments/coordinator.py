@@ -97,6 +97,21 @@ class SimulationCoordinatorClient:
             raise CoordinatorError(endpoint, "invalid_response")
         return payload
 
+    def company_environments(self) -> dict[str, Any]:
+        return self._request("GET", "/company/environments")
+
+    def clone_company_environment(self, name: str, *, idempotency_key: str) -> dict[str, Any]:
+        return self._request("POST", "/company/environments/clone",
+                             idempotency_key=idempotency_key, json={"name": name})
+
+    def switch_company_environment(self, identifier: str, *, idempotency_key: str) -> dict[str, Any]:
+        return self._request("POST", f"/company/environments/{quote(identifier, safe='')}/switch",
+                             idempotency_key=idempotency_key, json={})
+
+    def rename_company_environment(self, identifier: str, name: str) -> dict[str, Any]:
+        return self._request("POST", f"/company/environments/{quote(identifier, safe='')}/rename",
+                             json={"name": name})
+
     def company_packs(self) -> dict[str, Any]:
         return self._request("GET", "/company/packs")
 

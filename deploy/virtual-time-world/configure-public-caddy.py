@@ -76,13 +76,28 @@ def main() -> int:
 
     sites = []
     for domain in selected.values():
+        job_status = ''
+        if domain == selected['experiments']:
+            job_status = '''
+\t@company_job_status {
+\t\tpath /api/company-environments/jobs/*
+\t\tmethod GET POST
+\t}
+\thandle @company_job_status {
+\t\turi strip_prefix /api/company-environments/jobs
+\t\trewrite * /company-switch/jobs{path}
+\t\treverse_proxy 127.0.0.1:8133
+\t}
+'''
         sites.append(f'''{domain} {{{tls_directive}
+{job_status}\thandle {{
 \treverse_proxy https://127.0.0.1:18443 {{
 \t\theader_up Host {{host}}
 \t\ttransport http {{
 \t\t\ttls_server_name {domain}
 \t\t\ttls_trust_pool file {root_ca}
 \t\t}}
+\t}}
 \t}}
 }}''')
     caddyfile = ('{\n\tadmin unix//run/tac-https/admin.sock\n'

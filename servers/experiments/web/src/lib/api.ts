@@ -214,6 +214,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function getCatalog(): Promise<{
   experiments: Experiment[]
+  error?: { code: string; correlation_id?: string | null }
 }> {
   return requestJson("/api/catalog")
 }
@@ -485,5 +486,53 @@ export async function setModelControl(enabled: boolean): Promise<{ enabled: bool
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
     body: new URLSearchParams({ csrf_token: session.csrf_token, enabled: String(enabled) }),
+  })
+}
+
+export type CompanyEnvironmentJob = {
+  id: string
+  status: "queued" | "running" | "completed" | "failed"
+  stage: string
+  operation: "clone" | "switch"
+  source_id: string
+  target_id: string
+  error?: string | null
+  status_token?: string
+}
+export type CompanyEnvironments = {
+  active_id: string
+  companies: { id: string; name: string; active: boolean; created_at: string }[]
+  operation?: CompanyEnvironmentJob | null
+}
+export async function getCompanyEnvironments(signal?: AbortSignal): Promise<CompanyEnvironments> {
+  return requestJson("/api/company-environments", { signal })
+}
+export async function getCompanyEnvironmentJob(id: string, token: string, signal?: AbortSignal): Promise<CompanyEnvironmentJob> {
+  return requestJson(`/api/company-environments/jobs/${encodeURIComponent(id)}`, {
+    headers: { "X-Company-Job-Token": token },
+    signal,
+  })
+}
+export async function startCompanyEnvironmentJob(id: string, token: string, signal?: AbortSignal): Promise<void> {
+  await requestJson(`/api/company-environments/jobs/${encodeURIComponent(id)}/start`, {
+    method: "POST",
+    headers: { "X-Company-Job-Token": token },
+    signal,
+  })
+}
+export async function changeCompanyEnvironment(action: "clone" | "switch", id: string, name?: string): Promise<CompanyEnvironmentJob> {
+  const session = await getSession()
+  return requestJson(action === "clone" ? "/api/company-environments/clone" : `/api/company-environments/${encodeURIComponent(id)}/switch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body: new URLSearchParams({ csrf_token: session.csrf_token, idempotency_key: session.idempotency_key, ...(name === undefined ? {} : { name }) }),
+  })
+}
+export async function renameCompanyEnvironment(id: string, name: string): Promise<CompanyEnvironments> {
+  const session = await getSession()
+  return requestJson(`/api/company-environments/${encodeURIComponent(id)}/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body: new URLSearchParams({ csrf_token: session.csrf_token, name }),
   })
 }

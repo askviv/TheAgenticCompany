@@ -149,6 +149,8 @@ class CompanyPackService:
                 raise KeyError(identifier)
             row = json.loads(stored["payload"])
             if row["status"] in {"queued", "importing", "completed"}:
+                if row["status"] != "completed":
+                    self.changed.set()
                 return self.public(row)
             row.setdefault("anchor_time", anchor)
             row.update(status="queued", error=None)
@@ -174,9 +176,12 @@ class CompanyPackService:
         self.worker.start()
         self.changed.set()
 
-    def stop(self):
+    def signal_stop(self):
         self.stopped.set()
         self.changed.set()
+
+    def stop(self):
+        self.signal_stop()
         if self.worker is not None:
             self.worker.join()
 
@@ -184,31 +189,40 @@ class CompanyPackService:
         while not self.stopped.is_set():
             self.changed.wait()
             self.changed.clear()
-            with self._db() as db:
-                rows = db.execute("SELECT payload FROM packs ORDER BY rowid").fetchall()
-            for stored in rows:
-                row = json.loads(stored["payload"])
-                if self.stopped.is_set():
-                    return
-                if row["status"] != "queued":
-                    continue
-                row["status"] = "importing"
-                self._save(row)
-                try:
-                    self._import(row)
-                    row["status"] = "completed"
-                except Exception as error:
-                    frames = [(f.filename, f.lineno, f.name) for f in traceback.extract_tb(error.__traceback__)]
-                    causes = []
-                    diagnostic = str(error)
-                    safe_code = diagnostic if re.fullmatch(r"[A-Z][A-Z0-9_]{1,100}", diagnostic) else None
-                    cause = error.__cause__ or error.__context__
-                    while cause is not None:
-                        causes.append(type(cause).__name__)
-                        cause = cause.__cause__ or cause.__context__
-                    LOG.error("company pack import failed import_id=%s step=%s exception_type=%s code=%s status_code=%s causes=%s stack=%s", row["id"], row.get("active_step"), type(error).__name__, safe_code, getattr(error, "status_code", None), causes, frames)
-                    row.update(status="failed", error=f"Import failed ({type(error).__name__}). Retry this import after the operator resolves the recorded failure.")
-                self._save(row)
+            try:
+                self._drain_queue()
+            except Exception as error:
+                # Retry on the next queue/retry event, never spin on a broken DB.
+                # Persisted importing records remain resumable via native provenance.
+                frames = [(f.filename, f.lineno, f.name) for f in traceback.extract_tb(error.__traceback__)]
+                LOG.error("company pack worker persistence failed exception_type=%s stack=%s", type(error).__name__, frames)
+
+    def _drain_queue(self):
+        with self._db() as db:
+            rows = db.execute("SELECT payload FROM packs ORDER BY rowid").fetchall()
+        for stored in rows:
+            row = json.loads(stored["payload"])
+            if self.stopped.is_set():
+                return
+            if row["status"] not in {"queued", "importing"}:
+                continue
+            row["status"] = "importing"
+            self._save(row)
+            try:
+                self._import(row)
+                row["status"] = "completed"
+            except Exception as error:
+                frames = [(f.filename, f.lineno, f.name) for f in traceback.extract_tb(error.__traceback__)]
+                causes = []
+                diagnostic = str(error)
+                safe_code = diagnostic if re.fullmatch(r"[A-Z][A-Z0-9_]{1,100}", diagnostic) else None
+                cause = error.__cause__ or error.__context__
+                while cause is not None:
+                    causes.append(type(cause).__name__)
+                    cause = cause.__cause__ or cause.__context__
+                LOG.error("company pack import failed import_id=%s step=%s exception_type=%s code=%s status_code=%s causes=%s stack=%s", row["id"], row.get("active_step"), type(error).__name__, safe_code, getattr(error, "status_code", None), causes, frames)
+                row.update(status="failed", error=f"Import failed ({type(error).__name__}). Retry this import after the operator resolves the recorded failure.")
+            self._save(row)
 
     def _checkpoint(self, row, step):
         row["steps"].append(step)

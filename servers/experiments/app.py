@@ -234,6 +234,9 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         entries = payload.get('experiments')
         if not isinstance(entries, list):
             raise CoordinatorError('company/packs/catalog', 'invalid_response')
+        if any(not isinstance(entry, dict) or not isinstance(entry.get('id'), str)
+               or not entry['id'] for entry in entries):
+            raise CoordinatorError('company/packs/catalog', 'invalid_response')
         return {entry['id']: entry for entry in entries}
 
     def definition_for(experiment_id):
@@ -616,7 +619,9 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         try:
             return jsonify(experiments=list((experiments | imported_catalog()).values()))
         except CoordinatorError as error:
-            return company_pack_error(error)
+            logging.exception('Imported experiment catalog unavailable code=%s', error.code)
+            return jsonify(experiments=list(experiments.values()),
+                           error={'code': error.code, 'correlation_id': error.correlation_id})
 
     def company_pack_error(error):
         logging.exception('Company pack request failed code=%s', error.code)
@@ -625,6 +630,41 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         if re.fullmatch(r'http_4[0-9]{2}', error.code):
             status = int(error.code.removeprefix('http_'))
         return jsonify(error={'code': error.code, 'correlation_id': error.correlation_id}), status
+
+    @app.get('/api/company-environments')
+    def api_company_environments():
+        try:
+            return jsonify(coordinator().company_environments())
+        except CoordinatorError as error:
+            return company_pack_error(error)
+
+    @app.post('/api/company-environments/clone')
+    def api_clone_company_environment():
+        key = request.form.get('idempotency_key')
+        name = request.form.get('name')
+        if not key or not name: abort(400)
+        try:
+            return jsonify(coordinator().clone_company_environment(name, idempotency_key=key))
+        except CoordinatorError as error:
+            return company_pack_error(error)
+
+    @app.post('/api/company-environments/<identifier>/switch')
+    def api_switch_company_environment(identifier):
+        key = request.form.get('idempotency_key')
+        if not key: abort(400)
+        try:
+            return jsonify(coordinator().switch_company_environment(identifier, idempotency_key=key))
+        except CoordinatorError as error:
+            return company_pack_error(error)
+
+    @app.post('/api/company-environments/<identifier>/rename')
+    def api_rename_company_environment(identifier):
+        name = request.form.get('name')
+        if not name: abort(400)
+        try:
+            return jsonify(coordinator().rename_company_environment(identifier, name))
+        except CoordinatorError as error:
+            return company_pack_error(error)
 
     @app.get('/api/company-packs')
     def api_company_packs():
@@ -689,7 +729,11 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             enabled = set(applications) if applications is not None else set(mapping)
             links = [{'id': key, 'name': name, 'url': mapping[key]}
                      for key, name in COMPANY_TOOLS if key in enabled]
-        except (CoordinatorError, OSError, KeyError, TypeError, ValueError) as error:
+        except CoordinatorError as error:
+            logging.exception('Company application selection unavailable code=%s', error.code)
+            return jsonify(error={'code': 'company_tools_coordinator_unavailable',
+                                  'correlation_id': error.correlation_id}), 503
+        except (OSError, KeyError, TypeError, ValueError) as error:
             logging.exception('Company tools URL mapping unavailable (%s)', type(error).__name__)
             return jsonify(error='Company tools URL mapping is unavailable or invalid.'), 503
         return jsonify(tools=links)
@@ -849,17 +893,17 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         if not isinstance(company,dict) or not isinstance(employees,list):
             raise CoordinatorError('experiment-chat','company_identity_profile_invalid')
         department_map=company.get('experimentDepartmentMap')
-        # Pack manifests choose a canonical sender independently of the work's business area.
         department=department_map.get(role) if isinstance(department_map,dict) else None
-        if not explicit_sender and (not isinstance(department,str) or not department):
+        if department is None and explicit_sender:
+            department=next((item.get('department') for item in employees
+                             if isinstance(item,dict) and item.get('department')==role),None)
+        if not isinstance(department,str) or not department:
             raise CoordinatorError('experiment-chat','sender_department_unmapped')
         candidates=[]
         for employee in employees:
             if not isinstance(employee,dict):
                 continue
-            if explicit_sender:
-                if employee.get('id') != employee_id: continue
-            elif employee.get('department') != department:
+            if employee.get('department') != department:
                 continue
             account=employee.get('accounts',{}).get('rocketchat') if isinstance(employee.get('accounts'),dict) else None
             if (isinstance(employee.get('id'),str) and employee['id']

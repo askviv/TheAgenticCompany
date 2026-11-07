@@ -61,8 +61,12 @@ provider. Telephony has no published version tag and uses its upstream develop
 branch. The remaining applications use explicit release tags. This packages apps
 in the normal Frappe image; it introduces no custom agent runtime or app patches.
 The upstream builder's `CACHE_BUST` argument uses the app manifest's SHA-256 because
-Docker does not include secret-file content in cache keys. Changing the manifest
-therefore updates the installed apps while preserving unrelated build layers.
+Docker does not include secret-file content in cache keys. The image records the
+manifest digest, upstream builder revision and Frappe branch as labels. A local
+image is reused only when all three match; a missing label or changed manifest
+causes a native rebuild, preserving unrelated BuildKit layers. The default image
+tag comes from `erpnext/compose.yml`; `ERP_IMAGE` overrides it consistently for the
+build and installer.
 Docker's standard container build driver keeps temporary build storage in the
 Docker data directory. `ERP_IMAGE_OUTPUT` can select a Docker image archive on a
 data drive (for example `type=docker,dest=/data/build/company-apps.tar`) when the
@@ -95,12 +99,22 @@ sudo bash /data/theagentcompany/enterprise/source/deploy/enterprise-simulation/e
 ```
 
 `ERP_COMPOSE` and `SIMULATION_CONFIG` override deployment paths. The command
-preserves the rendered Compose settings, changes only app service images, stops
-app workers during native schema installation, installs apps on the existing
-company site, provisions directory projections, and starts the services again.
-It never creates a new company or restores a fixture snapshot. Native application
-errors stop the upgrade and remain visible; resolve them and rerun the command.
+preserves other rendered Compose settings, updates app service images, and sets
+the `site-admin` service's `TAC_ERP_PUBLIC_URL` from the configured `erpnext` URL in
+`COMPANY_TOOLS_URLS_FILE`. The directory and rendered Compose file are written
+atomically. App workers stop during native schema installation; apps are installed
+on the existing company site, directory projections are provisioned, and services
+start again. It never creates a new company or restores a fixture snapshot.
+
+If stopping, native installation or the final startup fails, the exit handler
+attempts to bring back the app services that were running before the upgrade.
+The original failure exit code and native error output are retained; a failed
+recovery is reported separately. This does not roll back native database migrations.
+Resolve the reported native problem and rerun the installer if recovery cannot
+start the services. A host power loss cannot run a shell exit handler.
 
 Salary structures, loan products, support mail accounts and CRM integration
 settings are configured through the native applications. No external phone,
 lending, payment, tax or model provider is activated by this setup.
+
+Record the deployed native image identity with `docker image inspect --format '{{.Id}}' "$ERP_IMAGE"` (use the configured Compose backend image when `ERP_IMAGE` is unset). The local build must exist on the target host before Compose starts; bootstrap builds it before rendering the stack. App branches/tags remain upstream references: Bench’s native apps manifest does not support commit checkout, so Telephony’s `develop` reference is not an immutable source pin.

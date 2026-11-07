@@ -5,6 +5,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
 import requests
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictInt
@@ -77,6 +78,18 @@ class GuestKernelClockClient:
     def register_deadline(self, issue_key: str, deadline: datetime) -> None:
         registration = DeadlineRegistration(issue_key=issue_key, deadline_at=deadline)
         self._request("POST", "/issue-deadlines", payload=registration.model_dump(mode="json"))
+
+    def company_environments(self):
+        return self._request("GET", "/companies")
+
+    def clone_company_environment(self, name: str, key: str):
+        return self._request("POST", "/companies/clone", payload={"name": name}, idempotency_key=key)
+
+    def switch_company_environment(self, identifier: str, key: str):
+        return self._request("POST", f"/companies/{quote(identifier, safe='')}/switch", payload={}, idempotency_key=key)
+
+    def rename_company_environment(self, identifier: str, name: str):
+        return self._request("POST", f"/companies/{quote(identifier, safe='')}/rename", payload={"name": name})
 
     def close(self) -> None:
         self.client.close()

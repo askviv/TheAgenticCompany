@@ -334,6 +334,7 @@ fi
 # Install stock systemd/Compose wiring, without starting the company target yet.
 if (( stage < 2 )); then
 ssh_cmd "sudo install -d -m 0755 /usr/local/lib/virtual-time-world /etc/systemd/system/agentic-company.target.d && sudo install -m 0755 $GUEST_SOURCE/deploy/virtual-time-world/prepare-healthcheck-cadence.py /usr/local/lib/virtual-time-world/prepare-healthcheck-cadence.py && sudo install -m 0755 $GUEST_SOURCE/deploy/virtual-time-world/prepare-containerd-timeouts.py /usr/local/lib/virtual-time-world/prepare-containerd-timeouts.py && sudo install -m 0755 $GUEST_SOURCE/deploy/virtual-time-world/company-compose-stop.py /usr/local/lib/virtual-time-world/company-compose-stop && sudo install -m 0644 $GUEST_SOURCE/deploy/virtual-time-world/agentic-company.target /etc/systemd/system/agentic-company.target && sudo install -m 0644 $GUEST_SOURCE/deploy/virtual-time-world/agentic-company.target.d/services.conf /etc/systemd/system/agentic-company.target.d/services.conf && sudo install -m 0644 $GUEST_SOURCE/deploy/virtual-time-world/agentic-company-compose.service /etc/systemd/system/agentic-company-compose.service && sudo install -m 0644 $GUEST_SOURCE/deploy/virtual-time-world/guest/tac-company-clock-caddy.service /etc/systemd/system/tac-https.service && for unit in $GUEST_SOURCE/deploy/enterprise-simulation/coordinator/*.service $GUEST_SOURCE/deploy/enterprise-simulation/coordinator/*.timer $GUEST_SOURCE/deploy/enterprise-simulation/actors/tac-customer-actor.service $GUEST_SOURCE/deploy/enterprise-simulation/actors/tac-supplier-actor.service; do sudo install -m 0644 \$unit /etc/systemd/system/; done && for dropin in $GUEST_SOURCE/deploy/virtual-time-world/tac-*.service.d; do sudo install -d -m 0755 /etc/systemd/system/\$(basename \$dropin); sudo install -m 0644 \$dropin/* /etc/systemd/system/\$(basename \$dropin)/; done && sudo systemctl daemon-reload"
+ssh_cmd "sudo /data/theagentcompany/enterprise/venv/bin/python $GUEST_SOURCE/deploy/virtual-time-world/guest/configure_company_environments.py --source $GUEST_SOURCE"
 mark_stage 2
 fi
 
@@ -345,6 +346,7 @@ python3 -m venv --system-site-packages "$WORLD_ROOT/host-venv"
 "$WORLD_ROOT/host-venv/bin/pip" install --disable-pip-version-check --constraint "$REPO_ROOT/servers/simulation/requirements.txt" fastapi uvicorn requests
 install -m 0755 "$REPO_ROOT/deploy/virtual-time-world/clock_control.py" "$HOST_LIB/clock_control.py"
 install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/clock_api.py" "$HOST_LIB/clock_api.py"
+install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/company_environments.py" "$HOST_LIB/company_environments.py"
 install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/prepare-healthcheck-cadence.py" "$HOST_LIB/prepare-healthcheck-cadence.py"
 install -m 0644 "$REPO_ROOT/deploy/virtual-time-world/company-compose-stop.py" "$HOST_LIB/company-compose-stop"
 install -m 0755 "$REPO_ROOT/deploy/virtual-time-world/sync-public-mail-tls-to-guest.sh" "$HOST_LIB/sync-public-mail-tls-to-guest.sh"

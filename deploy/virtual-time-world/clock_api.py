@@ -6,7 +6,9 @@ import os
 from pathlib import Path
 import time
 from datetime import datetime, timezone
+from contextlib import asynccontextmanager
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -32,8 +34,46 @@ class IssueDeadlineRequest(BaseModel):
     deadline_at: AwareDatetime
 
 
+class CompanyNameRequest(BaseModel):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=160)]
+
+
+@asynccontextmanager
+async def lifespan(application):
+    from company_environments import CompanyEnvironmentManager
+    manager = CompanyEnvironmentManager(controller)
+    application.state.company_environments = manager
+    manager.start()
+    try:
+        yield
+    finally:
+        manager.stop()
+
+
 app = FastAPI(title='Private virtual clock API', docs_url=None,
-              redoc_url=None, openapi_url=None)
+              redoc_url=None, openapi_url=None, lifespan=lifespan)
+
+
+def environments():
+    return app.state.company_environments
+
+
+def clock_available():
+    if environments().busy:
+        raise HTTPException(status_code=409, detail='company_environment_changing')
+
+
+def environment_operation(function, *args, **kwargs):
+    try:
+        return function(*args, **kwargs)
+    except KeyError as error:
+        raise HTTPException(status_code=404, detail='company_environment_not_found') from error
+    except PermissionError as error:
+        raise HTTPException(status_code=401, detail='company_job_token_invalid') from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail='company_environment_request_invalid') from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=409, detail='company_environment_conflict') from error
 
 
 def expected_token():
@@ -67,8 +107,52 @@ def require_bearer(credentials: HTTPAuthorizationCredentials | None = Depends(BE
                             headers={'WWW-Authenticate': 'Bearer'})
 
 
+@app.get('/companies')
+def list_companies(_authorized: None = Depends(require_bearer)):
+    return environments().list()
+
+
+@app.post('/companies/clone', status_code=202)
+def clone_company(body: CompanyNameRequest,
+                  idempotency_key: Annotated[str, StringConstraints(min_length=1)] = Header(alias='Idempotency-Key'),
+                  _authorized: None = Depends(require_bearer)):
+    return environment_operation(environments().submit, operation='clone', name=body.name,
+                                 idempotency_key=idempotency_key)
+
+
+@app.post('/companies/{identifier}/switch', status_code=202)
+def switch_company(identifier: str,
+                   idempotency_key: Annotated[str, StringConstraints(min_length=1)] = Header(alias='Idempotency-Key'),
+                   _authorized: None = Depends(require_bearer)):
+    return environment_operation(environments().submit, operation='switch', target_id=identifier,
+                                 idempotency_key=idempotency_key)
+
+
+@app.post('/companies/{identifier}/rename')
+def rename_company(identifier: str, body: CompanyNameRequest,
+                   _authorized: None = Depends(require_bearer)):
+    return environment_operation(environments().rename, identifier, body.name)
+
+
+@app.get('/company-switch/jobs/{identifier}')
+def company_switch_job(identifier: UUID,
+                       token: Annotated[str, Header(alias='X-Company-Job-Token')]):
+    # The scoped read-only job token survives guest service shutdown. Mutations
+    # above retain the private controller bearer and dashboard CSRF boundary.
+    return environment_operation(environments().get_job, str(identifier), status_token=token)
+
+
+@app.post('/company-switch/jobs/{identifier}/start', status_code=202)
+def start_company_switch_job(identifier: UUID,
+                             token: Annotated[str, Header(alias='X-Company-Job-Token')]):
+    # Acknowledge the receipt before stopping the guest that returned it. The
+    # capability cannot change the already-authorized job's company or action.
+    return environment_operation(environments().start_job, str(identifier), token)
+
+
 @app.get('/clock')
 def get_clock(_authorized: None = Depends(require_bearer)):
+    clock_available()
     try:
         with controller.operation_lock():
             return controller.clock_snapshot()
@@ -86,6 +170,7 @@ def get_real_time(_authorized: None = Depends(require_bearer)):
 @app.post('/issue-deadlines')
 def register_issue_deadline(request: IssueDeadlineRequest,
                             _authorized: None = Depends(require_bearer)):
+    clock_available()
     deadline = request.deadline_at.astimezone(timezone.utc).isoformat()
     try:
         with controller.operation_lock():
@@ -103,6 +188,7 @@ def set_clock_speed(
     _authorized: None = Depends(require_bearer),
     idempotency_key: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = Header(alias='Idempotency-Key'),
 ):
+    clock_available()
     with controller.operation_lock():
         try:
             with controller.state() as db:

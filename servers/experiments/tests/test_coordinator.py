@@ -69,6 +69,41 @@ class CoordinatorClientTests(unittest.TestCase):
             'Authorization':'Bearer private-token','Idempotency-Key':'legacy-eval-key'})
         self.assertEqual([call.args[0] for call in session.request.call_args_list[2:]],['GET']*3)
 
+    def test_company_pack_upload_sends_raw_archive_with_controller_auth_and_retry_identity(self):
+        response = Mock()
+        response.json.return_value = {'pack_id': 'finance-pack'}
+        session = Mock()
+        session.request.return_value = response
+        client = SimulationCoordinatorClient('http://coordinator:8131', 'private-token', session=session)
+        archive = b'PK\x03\x04\x00\xffbinary-archive'
+
+        self.assertEqual(client.upload_company_pack(archive, idempotency_key='upload-uuid'),
+                         {'pack_id': 'finance-pack'})
+        session.request.assert_called_once_with(
+            'POST', 'http://coordinator:8131/company/packs',
+            headers={'Authorization': 'Bearer private-token', 'Idempotency-Key': 'upload-uuid'},
+            timeout=15.0, data=archive)
+
+    def test_company_pack_identifiers_cannot_change_lookup_or_import_route(self):
+        response = Mock()
+        response.json.return_value = {'pack_id': 'finance /?#%'}
+        session = Mock()
+        session.request.return_value = response
+        client = SimulationCoordinatorClient('http://coordinator:8131', 'private-token', session=session)
+
+        client.company_pack('finance /?#%')
+        client.import_company_pack('finance /?#%', idempotency_key='import-uuid')
+
+        first, second = session.request.call_args_list
+        self.assertEqual(first.args, ('GET',
+            'http://coordinator:8131/company/packs/finance%20%2F%3F%23%25'))
+        self.assertEqual(first.kwargs['headers'], {'Authorization': 'Bearer private-token'})
+        self.assertEqual(second.args, ('POST',
+            'http://coordinator:8131/company/packs/finance%20%2F%3F%23%25/import'))
+        self.assertEqual(second.kwargs['headers'], {
+            'Authorization': 'Bearer private-token', 'Idempotency-Key': 'import-uuid'})
+        self.assertEqual(second.kwargs['json'], {})
+
     def test_provider_error_body_is_not_exposed_in_safe_exception(self):
         response=Mock()
         response.status_code=503

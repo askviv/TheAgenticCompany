@@ -253,7 +253,7 @@ def _prepare_erp(source: Path, profile: dict, sandbox_password: str, identities_
     )
     _private_write(yaml_path, compose)
     json_path = COMPOSE_ROOT / "erpnext.json"
-    rendered = json.loads(_run(["docker", "compose", "--file", str(yaml_path), "--profile", "*", "config", "--format", "json"], capture=True))
+    rendered = json.loads(_run(["docker", "compose", "--file", str(yaml_path), "--profile", "admin", "config", "--format", "json"], capture=True))
     rendered['services']['site-admin']['environment']['TAC_ERP_PUBLIC_URL'] = f"https://{profile['domains']['erp']}"
     _private_write(json_path, json.dumps(rendered, indent=2) + "\n")
     return json_path

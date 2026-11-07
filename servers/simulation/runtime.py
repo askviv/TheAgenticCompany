@@ -659,6 +659,10 @@ def build_app(config_path: str | Path):
     engine = SimulationEngine(store, gateway, erp_factory,
                               ERPNextSiteAdmin(config.erp_compose, config.erp_credentials_root.parent),
                               config.mail["actors"])
+    from .guest_kernel_clock import GuestKernelClockClient
+    environment_client = GuestKernelClockClient(
+        config.kernel_company_clock_url, config.kernel_company_clock_token_file, private_secret)
+    engine.company_environments = environment_client
     try:
         engine.employee_desktops = employee_desktop_manager(config)
     except ValueError as error:
@@ -1044,7 +1048,14 @@ def build_app(config_path: str | Path):
                 if isinstance(error, KernelCompanyClockConfigurationError):
                     LOG.error("kernel company clock configuration failed: %s", error)
         if company_packs is not None:
-            company_packs.reconcile_applications()
+            try:
+                company_packs.reconcile_applications()
+            except Exception as error:
+                engine.company_pack_configuration_error = type(error).__name__
+                frames = [(frame.filename, frame.lineno, frame.name)
+                          for frame in traceback.extract_tb(error.__traceback__)]
+                LOG.error("company pack application reconciliation failed exception_type=%s stack=%s",
+                          type(error).__name__, frames)
         if config.workers_enabled:
             workers.start()
             company_clock.start()
@@ -1056,7 +1067,7 @@ def build_app(config_path: str | Path):
             yield
         finally:
             if company_packs is not None:
-                company_packs.stop()
+                company_packs.signal_stop()
             # Stop new work in every worker before joining any of them. This
             # prevents ongoing producers from starving a draining DB operation.
             workers.stopped.set()
@@ -1066,6 +1077,8 @@ def build_app(config_path: str | Path):
             if company_background is not None:
                 company_background.stopped.set()
                 company_background.wake()
+            if company_packs is not None:
+                company_packs.stop()
             workers.stop()
             if company_background is not None:
                 company_background.stop()
@@ -1074,6 +1087,7 @@ def build_app(config_path: str | Path):
                 shared_clock_publisher.stop()
             if guest_kernel_clock is not None:
                 guest_kernel_clock.close()
+            environment_client.close()
             engine.actor_turn_client.session.close()
             provider_worker_client.session.close()
             if portal_client is not None:
@@ -1093,6 +1107,8 @@ def build_app(config_path: str | Path):
     @app.get("/health")
     def health():
         components = workers.health_components()
+        if getattr(engine, "company_pack_configuration_error", None):
+            components["company_pack_applications"] = engine.company_pack_configuration_error
         if config.company_binding is not None and provider_experiments_unavailable:
             components['provider_experiments'] = provider_experiments_unavailable['code']
         if feedback_configuration_error:

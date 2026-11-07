@@ -33,12 +33,15 @@ def configure_directory():
         user = frappe.get_doc("User", email)
         app_roles = {role for roles in employee["frappeAppRoles"].values() for role in roles}
         user.add_roles(*sorted(app_roles))
+        teams[employee["department"]]
+        name = frappe.db.get_value("HD Agent", {"user": email}, "name")
         if "Agent" in employee["frappeAppRoles"].get("helpdesk", []):
-            name = frappe.db.get_value("HD Agent", {"user": email}, "name")
             agent = frappe.get_doc("HD Agent", name) if name else frappe.new_doc("HD Agent")
             agent.update({"user": email, "agent_name": employee["displayName"], "is_active": 1})
             agent.save(ignore_permissions=True)
             teams[employee["department"]].append({"user": email})
+        elif name:
+            frappe.db.set_value("HD Agent", name, "is_active", 0)
     for department, members in teams.items():
         name = frappe.db.get_value("HD Team", {"team_name": department}, "name")
         team = frappe.get_doc("HD Team", name) if name else frappe.new_doc("HD Team")

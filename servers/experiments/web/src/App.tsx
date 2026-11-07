@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { CompanyPackImport } from "@/CompanyPackImport"
+import { CompanySwitcher } from "@/CompanySwitcher"
 import { Switch } from "@base-ui/react/switch"
 import {
   ArrowLeft,
@@ -266,6 +267,7 @@ function AppLayout() {
           <p className="basis-full pb-2 text-center text-xs text-muted-foreground lg:basis-auto lg:pb-0">Company time {companyTime ? formatDate(companyTime) : "—"}</p>
         </div>
       </header>
+      <CompanySwitcher />
       <main className="w-full px-4 py-8 sm:px-6 sm:py-10">
         <Outlet context={{ refreshKey } satisfies LayoutContext} />
       </main>
@@ -761,8 +763,10 @@ function HelpPage() {
     let active = true
     getCompanyTools().then((tools) => {
       if (active) setCompanyTools(tools)
-    }).catch(() => {
-      if (active) setCompanyToolsError("The deployment’s Company tools URL mapping is missing or invalid. An operator needs to correct it.")
+    }).catch((reason: unknown) => {
+      if (active) setCompanyToolsError(reason instanceof Error && reason.message.includes("company_tools_coordinator_unavailable")
+        ? "The coordinator could not provide the selected company applications. Restore its connection and reload to retrieve Company tools."
+        : "The deployment’s Company tools URL mapping is missing or invalid. An operator needs to correct it.")
     })
     return () => { active = false }
   }, [])
@@ -859,6 +863,7 @@ function LibraryPage() {
   const refreshKey = useRefreshKey()
   const [importRevision, setImportRevision] = useState(0)
   const [experiments, setExperiments] = useState<Experiment[]>([])
+  const [catalogWarning, setCatalogWarning] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -883,9 +888,10 @@ function LibraryPage() {
     let active = true
     setLoading(true)
     getCatalog()
-      .then(({ experiments: items }) => {
+      .then(({ experiments: items, error: importedError }) => {
         if (active) {
           setExperiments(items)
+          setCatalogWarning(importedError ? `Imported experiments are unavailable (${importedError.code}). Built-in experiments remain available. Refresh to retry.` : null)
           setError(null)
         }
       })
@@ -954,6 +960,7 @@ function LibraryPage() {
         <p className="text-xs text-muted-foreground">Select one or more types. No selection shows all types.</p>
       </fieldset>
 
+      {catalogWarning && <ErrorNotice message={catalogWarning} title="Imported library unavailable" />}
       {error && <ErrorNotice message={error} title="Library unavailable" />}
       {loading ? <LoadingCards /> : !error && filtered.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

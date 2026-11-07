@@ -384,13 +384,13 @@
     {
       "id": "handbook",
       "path": "files/company/operating-handbook.md",
-      "drive_path": "Company Packs/Industrial Operations/Operating handbook.md",
+      "drive_path": "Operating handbook.md",
       "visibility": "staff"
     },
     {
       "id": "supplier-workbook",
       "path": "files/finance/supplier-match.xlsx",
-      "drive_path": "Company Packs/Industrial Operations/Finance/Supplier match.xlsx",
+      "drive_path": "Finance/Supplier match.xlsx",
       "visibility": "staff",
       "department_ids": [
         "finance"
@@ -399,7 +399,7 @@
     {
       "id": "payroll-workbook",
       "path": "files/hr/payroll-inputs.xlsx",
-      "drive_path": "Company Packs/Industrial Operations/HR/Payroll inputs.xlsx",
+      "drive_path": "HR/Payroll inputs.xlsx",
       "visibility": "staff",
       "department_ids": [
         "hr",
@@ -409,7 +409,7 @@
     {
       "id": "customer-workbook",
       "path": "files/sales/customer-queries.xlsx",
-      "drive_path": "Company Packs/Industrial Operations/Sales/Customer queries.xlsx",
+      "drive_path": "Sales/Customer queries.xlsx",
       "visibility": "staff",
       "department_ids": [
         "sales-marketing",

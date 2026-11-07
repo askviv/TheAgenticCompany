@@ -50,8 +50,7 @@ def _safe_fields(fields: dict[str, Any], doctype: str) -> None:
     meta = frappe.get_meta(doctype)
     for key, value in fields.items():
         field = meta.get_field(key)
-        if (not field or key.startswith("custom_source_") or key in {
-                "custom_task_id", "custom_experiment_id", "custom_company_id"}):
+        if not field or key.startswith("custom_"):
             raise ValueError(f"Company pack cannot write native field {doctype}.{key}")
         if field.fieldtype in {"Table", "Table MultiSelect"}:
             if not isinstance(value, list):

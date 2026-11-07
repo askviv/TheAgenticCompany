@@ -43,9 +43,20 @@ function PackPreview({ pack, onUpdate, onImported }: { pack: Pack; onUpdate: (pa
         setError(`Import status could not be read: ${failureMessage(reason)}`)
       }
     }
-    source.onerror = () => {
+    source.onerror = (event) => {
       source.close()
-      setError("Live status disconnected. Refresh status to reconnect; the server keeps the saved import progress.")
+      if (event instanceof MessageEvent) {
+        try {
+          const payload = JSON.parse(event.data) as { code: string }
+          setError(payload.code === "pack_status_stream_expired"
+            ? "Live status reached its connection limit. Refresh status to reconnect; saved import progress is preserved."
+            : `Status lookup failed. ${failureMessage(new Error(`Request failed: ${payload.code}`))} Refresh status to retry.`)
+        } catch (reason) {
+          setError(`The status error could not be read. ${failureMessage(reason)} Refresh status to retry.`)
+        }
+      } else {
+        setError("Live status disconnected. Refresh status to reconnect; the server keeps the saved import progress.")
+      }
     }
     return () => source.close()
   }, [pack.id, active, connection])
@@ -110,7 +121,9 @@ export function CompanyPackImport({ onImported }: { onImported: () => void }) {
   }, [reload])
 
   function update(pack: Pack) {
-    setPacks((items) => [pack, ...items.filter((item) => item.id !== pack.id)])
+    setPacks((items) => items.some((item) => item.id === pack.id)
+      ? items.map((item) => item.id === pack.id ? pack : item)
+      : [pack, ...items])
   }
 
   async function upload(file: File) {

@@ -73,7 +73,10 @@ class ExperimentChatDispatch:
         company = profile.get("company")
         mapping = company.get("experimentDepartmentMap") if isinstance(company, dict) else None
         department = mapping.get(role) if isinstance(mapping, dict) else None
-        if employee_id is None and (not isinstance(department, str) or not department):
+        if department is None and isinstance(profile.get("employees"), list):
+            department = next((item.get("department") for item in profile["employees"]
+                               if isinstance(item, dict) and item.get("department") == role), None)
+        if not isinstance(department, str) or not department:
             raise ExperimentChatError("sender_department_unmapped")
         employees = profile.get("employees")
         if not isinstance(employees, list):
@@ -82,10 +85,7 @@ class ExperimentChatDispatch:
         for employee in employees:
             if not isinstance(employee, dict):
                 continue
-            if employee_id is not None:
-                if employee.get("id") != employee_id:
-                    continue
-            elif employee.get("department") != department:
+            if employee.get("department") != department:
                 continue
             account = employee.get("accounts", {}).get("rocketchat") if isinstance(employee.get("accounts"), dict) else None
             if (isinstance(employee.get("id"), str) and employee["id"]
