@@ -9,7 +9,8 @@ from pathlib import Path
 print(json.loads(Path(sys.argv[1]).read_text())['erp_compose'])
 PYCODE
 )}
-image=tac-erpnext-apps:2026-11-06
+image=tac-erpnext-apps:2026-11-07
+tools_urls=${COMPANY_TOOLS_URLS_FILE:-/data/theagentcompany/enterprise/secrets/company-tools-urls.json}
 # Forward-initialize app role bindings in the existing authoritative directory.
 python3 - "$runtime" "$apps_dir/../../../single-host/company-identities.json" <<'PYROLES'
 import json,sys
@@ -28,11 +29,12 @@ bash "$apps_dir/build.sh"
 rendered=$(mktemp)
 trap 'rm -f -- "$rendered"' EXIT
 docker compose --file "$compose" --profile "*" config --format json > "$rendered"
-python3 - "$rendered" "$compose" "$image" <<'PY'
+python3 - "$rendered" "$compose" "$image" "$tools_urls" <<'PY'
 import json,sys
 from pathlib import Path
-source, destination, image = sys.argv[1:]
+source, destination, image, tools_urls = sys.argv[1:]
 config=json.loads(Path(source).read_text())
+config['services']['site-admin']['environment']['TAC_ERP_PUBLIC_URL']=json.loads(Path(tools_urls).read_text())['erpnext']
 for name in config['services'].keys() & {'configurator','backend','frontend','websocket','queue-short','queue-long','scheduler','site-admin'}:
     config['services'][name]['image']=image
 Path(destination).write_text(json.dumps(config,indent=2)+'\n')

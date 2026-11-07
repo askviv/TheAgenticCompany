@@ -22,5 +22,9 @@
   {
     "url": "https://github.com/frappe/crm",
     "branch": "v16.0.2"
+  },
+  {
+    "url": "https://github.com/Andrometiq/frappe-passkeys",
+    "branch": "v16.0.7"
   }
 ]

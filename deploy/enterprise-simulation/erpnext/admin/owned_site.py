@@ -78,12 +78,12 @@ def _erpnext_is_installed(site: str) -> bool:
 
 
 def _install_business_apps(site: str) -> dict[str, object]:
-    subprocess.run([str(BENCH_EXECUTABLE), "--site", site, "install-app", "hrms", "lending", "helpdesk", "crm"],
+    subprocess.run([str(BENCH_EXECUTABLE), "--site", site, "install-app", "hrms", "lending", "helpdesk", "crm", "passkeys"],
                    cwd=BENCH_ROOT, check=True, stdout=sys.stderr,
                    user="frappe", group=0, env={**os.environ, "HOME": "/home/frappe"})
     sys.path.insert(0, "/opt/erpnext-admin")
     import frappe
-    from business_apps import configure_directory
+    from business_apps import configure_directory, configure_passkeys
 
     os.chdir(SITES_ROOT)
     frappe.init(site, sites_path=str(SITES_ROOT))
@@ -93,6 +93,7 @@ def _install_business_apps(site: str) -> dict[str, object]:
         from frappe.desk.page.setup_wizard.setup_wizard import disable_future_access
 
         result = configure_directory()
+        configure_passkeys()
         disable_future_access()
         frappe.db.commit()
         return result
@@ -152,7 +153,7 @@ def _create(site: str, *, company_only: bool = False) -> dict[str, object]:
                 admin_password=secret("/run/secrets/site-admin-password"),
                 no_mariadb_socket=True,
                 mariadb_user_host_login_scope="%",
-                install_app=("erpnext", "hrms", "lending", "helpdesk", "crm") if company_only else ("erpnext",),
+                install_app=("erpnext", "hrms", "lending", "helpdesk", "crm", "passkeys") if company_only else ("erpnext",),
                 set_default=False,
                 db_host="db",
                 db_port=3306,

@@ -588,8 +588,9 @@ def setup_company(site: str, runtime_dir: str) -> dict[str, str]:
     _ensure_workflow()
     _ensure_outgoing_email()
     _ensure_users(site, Path(runtime_dir) / "api-credentials")
-    from business_apps import configure_directory
+    from business_apps import configure_directory, configure_passkeys
     configure_directory()
+    configure_passkeys()
     from frappe.desk.page.setup_wizard.setup_wizard import disable_future_access, enable_setup_wizard_complete
 
     installed = set(frappe.get_all("Installed Application", pluck="app_name"))

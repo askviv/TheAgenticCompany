@@ -31,6 +31,26 @@ these four URLs from the configured ERP domain. See
 The CRM dashboard link uses Frappe's native login redirect because its app page
 requires a signed-in user with CRM access.
 
+## Optional passkey login
+
+The image also includes the third-party `Andrometiq/frappe-passkeys` app, pinned
+to `v16.0.7` for Frappe 16. Password login remains available. Provisioning applies
+the native fields in `admin/passkey-settings.json`: passwordless passkey login is
+enabled, second-factor mode is off, and no users are required or nudged to enrol.
+The RP ID and HTTPS origin come from the configured ERPNext public URL, not from
+request headers or a hard-coded deployment domain.
+
+For an existing company, `COMPANY_TOOLS_URLS_FILE` selects the host-side URL
+mapping read by `business-apps/install.sh` (default:
+`/data/theagentcompany/enterprise/secrets/company-tools-urls.json`). Fresh
+bootstrap uses the deployment profile's ERP domain. The native settings validator
+checks the resulting passkey configuration before enabling it.
+
+Users can sign in normally and open `/passkeys` to register their own passkey.
+Then they can use the passkey option on `/login`. System Managers can inspect the
+configuration at `/desk/passkey-settings`. No passkey is registered by deployment,
+and credentials remain in the existing Frappe site rather than a second directory.
+
 ## Image packaging
 
 `deploy/enterprise-simulation/erpnext/business-apps/build.sh` uses the unmodified
@@ -40,6 +60,9 @@ requires Frappe Telephony; this dependency is included without configuring a pho
 provider. Telephony has no published version tag and uses its upstream develop
 branch. The remaining applications use explicit release tags. This packages apps
 in the normal Frappe image; it introduces no custom agent runtime or app patches.
+The upstream builder's `CACHE_BUST` argument uses the app manifest's SHA-256 because
+Docker does not include secret-file content in cache keys. Changing the manifest
+therefore updates the installed apps while preserving unrelated build layers.
 
 Fresh VM bootstrap builds this image before the accelerated clock is activated,
 then installs the apps and applies the directory configuration to the shared

@@ -1,0 +1,7 @@
+{
+  "login_with_passkey": 1,
+  "passkey_as_second_factor": 0,
+  "passkey_enforce_scope": "No one",
+  "passkey_enforce_privileged_always": 0,
+  "passkey_everyone_else": "Off"
+}

@@ -1,8 +1,22 @@
 """Native business app projections from the canonical company directory."""
 from collections import defaultdict
 import json
+import os
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 import frappe
+
+
+def configure_passkeys():
+    public_url = urlsplit(os.environ["TAC_ERP_PUBLIC_URL"])
+    settings = frappe.get_single("Passkey Settings")
+    settings.update(json.loads(Path(__file__).with_name("passkey-settings.json").read_text()))
+    settings.passkey_rp_id = public_url.hostname
+    settings.passkey_origins = urlunsplit((public_url.scheme, public_url.netloc, "", "", ""))
+    settings.save(ignore_permissions=True)
+    frappe.db.commit()
+    frappe.clear_cache()
 
 
 def configure_directory():

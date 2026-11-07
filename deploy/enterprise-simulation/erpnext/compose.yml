@@ -1,7 +1,7 @@
 name: tac-enterprise-erp
 
 x-erpnext-image: &erpnext_image
-  image: tac-erpnext-apps:2026-11-06
+  image: tac-erpnext-apps:2026-11-07
   platform: linux/amd64
   restart: unless-stopped
   labels:
