@@ -590,14 +590,14 @@ def setup_company(site: str, runtime_dir: str) -> dict[str, str]:
     _ensure_users(site, Path(runtime_dir) / "api-credentials")
     from business_apps import configure_directory
     configure_directory()
-    from frappe.desk.page.setup_wizard.setup_wizard import enable_setup_wizard_complete
+    from frappe.desk.page.setup_wizard.setup_wizard import disable_future_access, enable_setup_wizard_complete
 
     installed = set(frappe.get_all("Installed Application", pluck="app_name"))
     if not {"frappe", "erpnext"}.issubset(installed):
         raise RuntimeError("Required ERPNext applications are not installed")
     for app_name in ("frappe", "erpnext"):
         enable_setup_wizard_complete(app_name)
-    frappe.db.set_single_value("System Settings", "setup_complete", 1)
+    disable_future_access()
     frappe.db.commit()
     frappe.clear_cache()
     return {

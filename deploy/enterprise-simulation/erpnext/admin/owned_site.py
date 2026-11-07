@@ -90,7 +90,12 @@ def _install_business_apps(site: str) -> dict[str, object]:
     frappe.connect()
     frappe.set_user("Administrator")
     try:
-        return configure_directory()
+        from frappe.desk.page.setup_wizard.setup_wizard import disable_future_access
+
+        result = configure_directory()
+        disable_future_access()
+        frappe.db.commit()
+        return result
     finally:
         frappe.destroy()
         os.chdir(BENCH_ROOT)
