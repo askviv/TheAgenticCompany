@@ -105,3 +105,10 @@ storage, job markers and control-plane credentials must remain root-owned.
 
 No automatic reset, namespace deletion, concurrent company execution or scheduled
 experiment execution is part of this feature.
+
+Recovery resumes the same durable operation through **Resume operation** when a
+job is paused in finalization or recovery. It does not create another switch or
+roll back newly accepted target-company writes. Clock restoration restores company
+deadlines and rebases company time; it preserves the host-wide API idempotency
+ledger and kernel/controller configuration. Explicit additional containers retain
+their recorded running state and restart policy alongside Compose services.

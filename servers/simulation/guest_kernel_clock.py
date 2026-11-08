@@ -54,7 +54,7 @@ class GuestKernelClockClient:
             headers["Idempotency-Key"] = idempotency_key
         response = self.client.request(
             method, f"{self.base_url}{path}", headers=headers,
-            json=payload if payload is not None else ({"speed": speed} if speed is not None else None), timeout=None,
+            json=payload if payload is not None else ({"speed": speed} if speed is not None else None), timeout=(5, 30),
         )
         response.raise_for_status()
         return response.json()

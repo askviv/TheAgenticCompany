@@ -747,13 +747,17 @@ def build_app(config_path: str | Path):
                 raise ValueError("Company pack ownCloud credentials do not match the canonical service owner")
             return OwnCloudClient(owncloud["base_url"], credentials["username"], credentials["app_password"]), owncloud
 
+        def apply_pack_applications(applications):
+            apply_company_applications(applications, config.company_application_services_file)
+            engine.company_pack_configuration_error = None
+
         company_packs = CompanyPackService(
             config.state_root / "company-packs", engine=engine,
             native=ERPNextSiteAdmin(config.erp_compose, config.erp_credentials_root.parent),
             binding=config.company_binding,
             profile_path=config.company_profile_file, owncloud_factory=pack_owncloud_factory,
             erp_public_url=config.erp_public_url,
-            apply_applications=lambda applications: apply_company_applications(applications, config.company_application_services_file),
+            apply_applications=apply_pack_applications,
         )
         engine.company_packs = company_packs
     app = create_app(engine, private_json(config.principals_file))

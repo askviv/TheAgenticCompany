@@ -233,6 +233,12 @@ class CompanyData:
                 })
             journal['source_lifecycle'] = {
                 'active_units': journal['active_units'], 'running_services': running,
+                'additional_containers': [
+                    {'name': container['Name'].lstrip('/'),
+                     'running': container['State']['Running'],
+                     'policy': container['HostConfig']['RestartPolicy']}
+                    for container in extra.values()
+                    if container['Name'].lstrip('/') in self.config.additional_containers],
                 'restart_policies': [{'project': container['Config']['Labels'].get('com.docker.compose.project'),
                     'service': container['Config']['Labels'].get('com.docker.compose.service'),
                     'policy': container['HostConfig']['RestartPolicy']} for container in project.values()],
@@ -472,9 +478,12 @@ class CompanyData:
         # project/service labels remain the stable policy identity.
         policies = {(item['project'], item['service']): item['policy']
                     for item in lifecycle['restart_policies']}
-        for container in self._project_containers():
-            labels = container['Config']['Labels']
-            policy = policies.get((labels.get('com.docker.compose.project'), labels.get('com.docker.compose.service')))
+        extras = {item['name']: item['policy']
+                  for item in lifecycle.get('additional_containers', [])}
+        for container in self._project_containers() + [
+                item for item in self._containers() if item['Name'].lstrip('/') in extras]:
+            labels = container['Config'].get('Labels') or {}
+            policy = extras.get(container['Name'].lstrip('/')) or policies.get((labels.get('com.docker.compose.project'), labels.get('com.docker.compose.service')))
             if policy is None:
                 continue
             spec = policy['Name']
@@ -517,7 +526,10 @@ class CompanyData:
         for config in self.config.compose_files:
             services = lifecycle['running_services'].get(str(config), [])
             if services:
-                run('docker', 'compose', '-f', str(config), 'up', '-d', '--pull', 'never', '--no-build', *services)
+                run('docker', 'compose', '-f', str(config), 'up', '-d', '--wait', '--pull', 'never', '--no-build', *services)
+        extras = [item['name'] for item in lifecycle.get('additional_containers', []) if item['running']]
+        if extras:
+            run('docker', 'start', *extras)
         self._restore_policies(lifecycle)
         units = [unit for unit in lifecycle['active_units']
                  if unit not in {'agentic-company.target', 'agentic-company-compose.service'}]
@@ -536,7 +548,10 @@ def boot(configuration):
     for config in configuration.compose_files:
         services = lifecycle['running_services'].get(str(config), [])
         if services:
-            run('docker', 'compose', '-f', str(config), 'up', '-d', '--pull', 'never', '--no-build', *services)
+            run('docker', 'compose', '-f', str(config), 'up', '-d', '--wait', '--pull', 'never', '--no-build', *services)
+    extras = [item['name'] for item in lifecycle.get('additional_containers', []) if item['running']]
+    if extras:
+        run('docker', 'start', *extras)
     return {'status': 'started'}
 
 

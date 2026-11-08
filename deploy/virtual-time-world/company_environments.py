@@ -88,7 +88,7 @@ class CompanyEnvironmentManager:
         public = {key: value for key, value in job.items() if key not in {'status_token', 'plan', 'boot_allowed'}}
         if isinstance(public.get('error'), dict):
             public['error_code'] = public['error']['code']
-            public['error'] = ('Company operation requires recovery; an operator can inspect its job ID.'
+            public['error'] = ('Company operation paused during recovery. Resume the operation to continue from its checkpoint.'
                                if job.get('status') == 'running' else
                                'Company operation failed; the previous company was restored.')
         return public
@@ -339,14 +339,19 @@ class CompanyEnvironmentManager:
         """Rebase a paused namespace, retaining the shared VM/kernel configuration."""
         import libvirt
         self.controller.cancel_issue_timers()
-        # SQLite backup operates on connections; replacing the file beneath WAL
-        # users would preserve stale pages. No database transaction spans SSH.
+        # Copy company-owned rows through SQLite connections without replacing
+        # the host database beneath WAL users. No transaction spans SSH.
         source = sqlite3.connect(Path(snapshot['clock']).resolve().as_uri() + '?mode=ro', uri=True, timeout=30)
-        destination = sqlite3.connect(self.controller.db_path, timeout=30)
         try:
-            source.backup(destination)
+            # Deadlines belong to the company. Controller identity, pending kernel
+            # operations and API idempotency receipts belong to the host.
+            deadlines = source.execute(
+                'SELECT issue_key,deadline_at,created_ns FROM issue_deadlines').fetchall()
+            with self.controller.state() as destination:
+                destination.execute('DELETE FROM issue_deadlines')
+                destination.executemany('INSERT INTO issue_deadlines VALUES(?,?,?)', deadlines)
+                destination.commit()
         finally:
-            destination.close()
             source.close()
         connection = libvirt.open('qemu:///system')
         if connection is None:
@@ -428,6 +433,8 @@ class CompanyEnvironmentManager:
                 self._save_job(job)
             self._step(job, 'start', lambda: self._helper('start', active, job['id']))
             self._step(job, 'commit', lambda: self._helper('commit', active, job['id']))
+            job.pop('error', None)
+            job.pop('recovery_error', None)
             job.update(status='completed', stage='completed', finished_at=self._now())
             self._save_job(job)
             self.controller.reconcile_issue_deadlines()

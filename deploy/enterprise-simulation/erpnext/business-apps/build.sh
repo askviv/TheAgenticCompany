@@ -8,7 +8,7 @@ builder=tac-business-apps
 builder_revision=46c7ced81efbd4a119e14b81bf78e3b77cad3309
 frappe_branch=v16.54.0
 manifest_digest=$(sha256sum "$hr_dir/apps.json" | cut -d ' ' -f1)
-if docker image inspect "$image" >/dev/null 2>&1; then
+if [[ ${ERP_IMAGE_OUTPUT:-type=docker} == type=docker ]] && docker image inspect "$image" >/dev/null 2>&1; then
   existing_manifest=$(docker image inspect --format '{{ index .Config.Labels "org.theagentcompany.apps-manifest.sha256" }}' "$image")
   existing_builder=$(docker image inspect --format '{{ index .Config.Labels "org.theagentcompany.frappe-builder.revision" }}' "$image")
   existing_frappe=$(docker image inspect --format '{{ index .Config.Labels "org.theagentcompany.frappe.branch" }}' "$image")

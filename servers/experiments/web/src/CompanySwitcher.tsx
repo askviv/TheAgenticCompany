@@ -100,7 +100,7 @@ export function CompanySwitcher() {
     }
     async function begin() {
       try {
-        if (job?.status === "queued") {
+        if (job?.status === "queued" || (job?.status === "running" && job.error)) {
           await startCompanyEnvironmentJob(id, token, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]))
         }
         if (mounted) await observe()
@@ -152,7 +152,7 @@ export function CompanySwitcher() {
       {job && <div className="space-y-2 text-sm" aria-live="polite">
         <p>{job.operation}: {job.status} — {job.stage}</p>
         {job.error && <p className="text-destructive">{job.error}</p>}
-        {active && <Button variant="outline" onClick={() => setObservation((value) => value + 1)}>Resume status</Button>}
+        {active && <Button variant="outline" onClick={() => setObservation((value) => value + 1)}>{job.error ? "Resume operation" : "Resume status"}</Button>}
       </div>}
       {error && <Alert variant="destructive"><AlertTitle>Company environment needs attention</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
       {storageError && <Alert><AlertTitle>Operation status cannot be saved in this browser</AlertTitle><AlertDescription>{storageError}</AlertDescription></Alert>}
