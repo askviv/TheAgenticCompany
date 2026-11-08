@@ -198,7 +198,7 @@ class RocketChatRest:
 def _configure_bot_token_permission(client: RocketChatRest) -> None:
     """Let service accounts create their own tokens without administrator roles."""
     listed = client.request("GET", "permissions.listAll")
-    permission = next(item for item in listed["permissions"]
+    permission = next(item for item in listed["update"]
                       if item["_id"] == "create-personal-access-tokens")
     roles = permission["roles"]
     if "bot" not in roles:
