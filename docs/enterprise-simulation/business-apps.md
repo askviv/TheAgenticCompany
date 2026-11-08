@@ -34,7 +34,7 @@ requires a signed-in user with CRM access.
 ## Optional passkey login
 
 The image also includes the third-party `Andrometiq/frappe-passkeys` app, pinned
-to `v16.0.7` for Frappe 16. Password login remains available. Provisioning applies
+to the recorded `v16.0.7` commit for Frappe 16. Password login remains available. Provisioning applies
 the native fields in `admin/passkey-settings.json`: passwordless passkey login is
 enabled, second-factor mode is off, and no users are required or nudged to enrol.
 The RP ID and HTTPS origin come from the configured ERPNext public URL, not from
@@ -53,20 +53,32 @@ and credentials remain in the existing Frappe site rather than a second director
 
 ## Image packaging
 
-`deploy/enterprise-simulation/erpnext/business-apps/build.sh` uses the unmodified
-Frappe Docker Containerfile from the recorded upstream revision and the native
-`apps.json` list. ERPNext and Frappe retain their existing versions. Helpdesk
-requires Frappe Telephony; this dependency is included without configuring a phone
-provider. Telephony has no published version tag and uses its upstream develop
-branch. The remaining applications use explicit release tags. This packages apps
-in the normal Frappe image; it introduces no custom agent runtime or app patches.
-The upstream builder's `CACHE_BUST` argument uses the app manifest's SHA-256 because
-Docker does not include secret-file content in cache keys. The image records the
-manifest digest, upstream builder revision and Frappe branch as labels. A local
-image is reused only when all three match; a missing label or changed manifest
-causes a native rebuild, preserving unrelated BuildKit layers. The default image
-tag comes from `erpnext/compose.yml`; `ERP_IMAGE` overrides it consistently for the
-build and installer.
+`deploy/enterprise-simulation/erpnext/business-apps/build.sh` uses the pinned
+Frappe Docker Containerfile and native Bench installation. `apps.json` records a
+full Git commit SHA for every app, and `framework.json` records the Frappe SHA.
+The version strings describe the source releases; only `revision` selects code.
+Telephony is a fixed development snapshot, not a moving branch.
+
+Bench's native app manifest accepts branches and local Git repositories, rather
+than remote commit checkout. `prepare-sources.py` therefore uses standard Git to
+fetch each recorded SHA, verifies the fetched commit and creates a local `pinned`
+branch at that commit. BuildKit copies these sources into the upstream builder
+with one build-only `COPY` instruction. The generated native apps manifest and
+Frappe source arguments point Bench at those local checkouts. No application,
+Bench implementation or agent runtime is patched, and the source staging area is
+not copied into the runtime image. The upstream Containerfile remains pinned;
+preparation fails clearly if its expected insertion point changes.
+
+The source digest includes both source manifests and the preparation script.
+The upstream `CACHE_BUST` argument uses that digest because Docker does not
+include secret-file content in cache keys. The image records the digest,
+upstream builder revision and Frappe version as labels. Default local-image reuse
+requires all three to match; explicit archive exports always run the builder.
+Changing a source SHA or the preparation script invalidates reuse. Updating a
+release means deliberately updating its SHA in Git, not re-resolving its tag.
+The default image tag comes from `erpnext/compose.yml`; `ERP_IMAGE` overrides it
+consistently for the build and installer. These are app-source identity locks,
+not a claim of byte-identical images across changing OS or package repositories.
 Docker's standard container build driver keeps temporary build storage in the
 Docker data directory. `ERP_IMAGE_OUTPUT` can select a Docker image archive on a
 data drive (for example `type=docker,dest=/data/build/company-apps.tar`) when the
@@ -117,4 +129,4 @@ Salary structures, loan products, support mail accounts and CRM integration
 settings are configured through the native applications. No external phone,
 lending, payment, tax or model provider is activated by this setup.
 
-Record the deployed native image identity with `docker image inspect --format '{{.Id}}' "$ERP_IMAGE"` (use the configured Compose backend image when `ERP_IMAGE` is unset). The local build must exist on the target host before Compose starts; bootstrap builds it before rendering the stack. App branches/tags remain upstream references: Bench’s native apps manifest does not support commit checkout, so Telephony’s `develop` reference is not an immutable source pin.
+Record the deployed native image identity with `docker image inspect --format '{{.Id}}' "$ERP_IMAGE"` (use the configured Compose backend image when `ERP_IMAGE` is unset). The local build must exist on the target host before Compose starts; bootstrap builds it before rendering the stack. App and framework source revisions are locked in the manifests, including Telephony. The recorded image ID identifies the complete built artifact independently of its local tag.
