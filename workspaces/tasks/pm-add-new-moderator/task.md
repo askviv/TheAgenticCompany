@@ -1,3 +1,3 @@
-Find the #help-desk channel in our company's platform's directory at {{ company_tools.rocketchat }}/home
+Find the #help-desk channel on Rocket.Chat
 And add Liu Qiang to the channel.
 Then make him a moderator.

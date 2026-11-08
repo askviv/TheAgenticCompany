@@ -7,6 +7,3 @@ Specifically, find the `beverage_stats.xlsx` under `Documents/Data Analysis` in 
 
 Answer each question with a short phrase and separate answers by lines.
 Write the responses to `/workspace/answer.docx` for ease of future revision.
-
-Here are the links for your reference:
-Cloud Drive: {{ company_tools.owncloud }}

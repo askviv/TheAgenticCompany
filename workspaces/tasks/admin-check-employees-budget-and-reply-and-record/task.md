@@ -3,9 +3,8 @@
    - Zhang Wei (Database)
    - Huang Jie (Product)
    - Sophia Rodriguez (Product)
-   at {{ company_tools.rocketchat }}/home
 
-2. Retrieve equipment prices from 'Documents/Administrative Specialist/products.pdf' on owncloud({{ company_tools.owncloud }})
+2. Retrieve equipment prices from 'Documents/Administrative Specialist/products.pdf' on ownCloud
 
 3. Tell them the total cost of the equipment they requested.
 

@@ -1,5 +1,5 @@
-Navigate to the Rocketchat website at {{ company_tools.rocketchat }}/home and ask the director of Finance for the folder path for the annual company updates. You can navigate to the path provided through Owncloud, using this link {{ company_tools.owncloud }}/
-Once you have navigated to OwnCloud and to the annual company updates, find the Amazon reports and the Alphabet report. Your job is to create a CSV table of all the signatures within these reports. 
+On Rocket.Chat, ask the director of Finance for the folder path for the annual company updates. Find that folder in ownCloud.
+In the annual company updates folder in ownCloud, find the Amazon reports and the Alphabet report. Your job is to create a CSV table of all the signatures within these reports.
 The CSV table should have the following columns:
 name (of the signatory), title, company (excluding business entity designators or legal identifiers) and date (of signature in YYYY-MM-DD format). Save this file as 'signatories.csv' in the '/workspace' folder.
 

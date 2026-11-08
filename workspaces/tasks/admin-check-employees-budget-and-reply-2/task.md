@@ -2,9 +2,8 @@
    - Huang Jie
    - Sophia Rodriguez
    - Mike Chen
-   at {{ company_tools.rocketchat }}/home
 
-2. Retrieve equipment prices from owncloud({{ company_tools.owncloud }}) with file path: /Documents/Administrative Specialist/products.pdf
+2. Retrieve equipment prices from ownCloud with file path: /Documents/Administrative Specialist/products.pdf
    
 3. Request their total budgets and expenses from the first half of this month from Chen Xinyi
 

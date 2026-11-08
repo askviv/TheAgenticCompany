@@ -1,4 +1,4 @@
-Go to our office cloud {{ company_tools.owncloud }}/,
+In ownCloud,
 find the i-9.pdf and TAC_personell_data.csv under /Documents/Admin folder.
 Filling out the section A of i-9.pdf (Employee Eligibility Verification) 
 for each of the employees in TAC_personell_data.csv, naming them as

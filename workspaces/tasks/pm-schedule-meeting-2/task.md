@@ -1,4 +1,4 @@
-Navigate to the Rocketchat web at {{ company_tools.rocketchat }}/home
+On Rocket.Chat,
 Based on the availability of both Emily Zhou and Liu Qiang, please schedule a mutually convenient meeting time for them on a workday (Monday through Friday) during regular business hours.
 
 * Ask Emily Zhou for his/her free time.

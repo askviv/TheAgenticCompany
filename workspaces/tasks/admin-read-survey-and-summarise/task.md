@@ -1,6 +1,5 @@
 We are collecting employees' preferences on drinks to help with our purchasing plan.
-Please navigate to {{ company_tools.owncloud }}/ and find drinks_survey.pdf, which contains
+In ownCloud, find drinks_survey.pdf, which contains
 a questionaire that we have placed in the office. Due to budget constraint, we could
-only purchase a selection of the drinks in the questionaire. Please goto
-{{ company_tools.rocketchat }} talk to HR manager Chen Xinyi and tell her the top
+only purchase a selection of the drinks in the questionaire. Tell HR manager Chen Xinyi on Rocket.Chat about the top
 3 most popular drinks.

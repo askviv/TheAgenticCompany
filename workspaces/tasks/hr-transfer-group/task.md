@@ -1,4 +1,4 @@
-Navigate to the Rocketchat web at {{ company_tools.rocketchat }}/home
+On Rocket.Chat,
 
 Transfer Li Ming from his current database group to AI group. 
 

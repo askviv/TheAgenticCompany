@@ -3,5 +3,3 @@ First, find the "Other Corp Area Totals.xlsx" spreadsheet under `Documents/Data 
 Then, check the list of questions below the table, put in the answers in the corresponding answer cell. You can use Excel formula if it makes the calculation process easier. 
 
 Correct the Excel, write down your answer to the question and save to `/workspace/corrected_other_corp_area_totals.xlsx`
-
-For your reference, the cloud drive link is {{ company_tools.owncloud }}

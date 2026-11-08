@@ -1,4 +1,4 @@
-Navigate to owncloud at {{ company_tools.owncloud }}.
+In ownCloud:
 * According to data files listed below, analyze actual spending against budgeted amounts across all departments and categories, identifying significant variances.
     * /Documents/Financials/budget.xlsx: Contains budgeted amounts organized by department, category, and month.
     * /Documents/Financials/actual_spending.xlsx: Contains actual spending data.
