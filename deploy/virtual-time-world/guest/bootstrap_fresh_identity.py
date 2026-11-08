@@ -194,6 +194,18 @@ class RocketChatRest:
         return user
 
 
+
+def _configure_bot_token_permission(client: RocketChatRest) -> None:
+    """Let service accounts create their own tokens without administrator roles."""
+    listed = client.request("GET", "permissions.listAll")
+    permission = next(item for item in listed["permissions"]
+                      if item["_id"] == "create-personal-access-tokens")
+    roles = permission["roles"]
+    if "bot" not in roles:
+        client.request("POST", "permissions.update", {"permissions": [{
+            "_id": permission["_id"], "roles": [*roles, "bot"],
+        }]})
+
 def _rocket_authentication(base: str, username: str, password: str) -> tuple[str, str]:
     endpoint = base.rstrip("/") + "/api/v1/login"
     payload = json.dumps({"user": username, "password": password}).encode("utf-8")
@@ -368,6 +380,7 @@ def _provision_chat_accounts(client: RocketChatRest, base: str, identities: dict
     employees = identities["employees"]
     if len(employees) != 17:
         raise RuntimeError("Fresh Rocket.Chat provisioning requires the approved 17-person roster")
+    _configure_bot_token_permission(client)
     for employee in employees:
         employee_id = employee["id"]
         account = employee.get("accounts", {}).get("rocketchat")
