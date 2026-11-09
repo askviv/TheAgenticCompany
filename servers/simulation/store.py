@@ -980,6 +980,7 @@ class SQLiteStore:
         result: dict[str, Any],
         intents: list[dict[str, Any]],
         company_id: str = "company",
+        expected_state_updated_at: str | None = None,
     ) -> dict[str, Any]:
         request_hash = _digest(request)
         started_value = started_at.isoformat() if isinstance(started_at, datetime) else str(started_at)
@@ -997,6 +998,19 @@ class SQLiteStore:
                 if operation["result_json"] != result_json:
                     raise StoreConflict("background operation completed with a different result")
                 return _decode(operation["result_json"])
+
+            if expected_state_updated_at is not None:
+                state = connection.execute(
+                    "SELECT updated_at FROM background_provider_state WHERE company_id=? AND provider_id=?",
+                    (company_id, provider_id),
+                ).fetchone()
+                superseded = connection.execute(
+                    "SELECT 1 FROM background_operation_recovery_resolutions "
+                    "WHERE company_id=? AND provider_id=? AND previous_operation_id=?",
+                    (company_id, provider_id, operation_id),
+                ).fetchone()
+                if superseded or state is None or state["updated_at"] != expected_state_updated_at:
+                    raise StoreConflict("CoffeeBench checkpoint owner or base changed before save")
 
             connection.execute(
                 "INSERT INTO background_provider_state(company_id,provider_id,upstream_commit,seed,started_at,cursor,snapshot_json,updated_at) "

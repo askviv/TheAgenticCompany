@@ -220,6 +220,7 @@ class BackgroundWorker:
                 BEFORE DELETE ON coffee_evaluation_captures BEGIN
                 SELECT RAISE(ABORT, 'CoffeeBench evaluation captures are append-only');
             END""")
+        self._coffee_operation_active = False
         self.configured_model_id = configured_model_id
         configure_coffee_model_factory(coffee_model_factory)
 
@@ -375,12 +376,27 @@ class BackgroundWorker:
                 _log_provider_failure("initialization", provider_id, exc)
                 raise BackgroundProviderFailed(type(exc).__name__) from exc
 
+    @contextmanager
+    def _own_coffee_operation(self):
+        # The supplier API runs Coffee mutations on one event loop. Do not
+        # wait behind a running owner or hold a file lock during inference.
+        if self._coffee_operation_active:
+            raise BackgroundProviderFailed("coffee_operation_active")
+        self._coffee_operation_active = True
+        try:
+            yield
+        finally:
+            self._coffee_operation_active = False
+
     async def advance(self, request: BackgroundAdvanceRequest) -> BackgroundResult:
         provider_id = request.provider_id
+        if provider_id == "coffeebench":
+            with self._own_coffee_operation():
+                return await self._advance_claimed(request)
         async with self._locked_provider(provider_id, request.company_id):
-            return await self._advance_locked(request)
+            return await self._advance_claimed(request)
 
-    async def _advance_locked(self, request: BackgroundAdvanceRequest) -> BackgroundResult:
+    async def _advance_claimed(self, request: BackgroundAdvanceRequest) -> BackgroundResult:
         provider_id = request.provider_id
         upstream_commit, _initializer = self._provider(provider_id)
         body = self._request_dict(request)
@@ -446,6 +462,7 @@ class BackgroundWorker:
                 cursor=advanced["snapshot"]["cursor"], snapshot=advanced["snapshot"],
                 result=result.model_dump(mode="json"), intents=result.erp_intents,
                 company_id=request.company_id,
+                expected_state_updated_at=state["updated_at"] if provider_id == "coffeebench" else None,
             )
             return result
         except (IdempotencyConflict, StoreConflict, BackgroundOperationUncertain, StoreNotFound):
@@ -630,7 +647,7 @@ class BackgroundWorker:
                 != {key: value for key, value in recovery_body.items() if key != "operation_id"}
                 or previous.operation_id == recovery.operation_id):
             raise ValueError("CoffeeBench recovery must preserve exact target and binding with a new operation ID")
-        async with self._locked_provider("coffeebench", previous.company_id):
+        with self._own_coffee_operation():
             existing_resolution = self.store.get_background_recovery_resolution(
                 previous.operation_id, previous.company_id,
             )
@@ -670,7 +687,7 @@ class BackgroundWorker:
                     confirmed_cursor=cursor, checkpoint_sha256=digest,
                     company_id=previous.company_id,
                 )
-            return await self._advance_locked(recovery)
+            return await self._advance_claimed(recovery)
 
     async def apply_company_action(self, action: TranslatedAction) -> NativeActionReceipt:
         """Apply a mapped company action in Coffee's native clock and persist its receipt."""
@@ -678,7 +695,7 @@ class BackgroundWorker:
             raise ValueError("CoffeeBench feedback action requires its pinned benchmark and company_time")
         operation_id = f"company-action:{action.action_id}"
         body = {"company_id": "company", "action": action.model_dump(mode="json")}
-        async with self._locked_provider("coffeebench", "company"):
+        with self._own_coffee_operation():
             state = self.store.get_background_provider_state("coffeebench")
             if state is None:
                 raise StoreNotFound("CoffeeBench background provider has not been initialized")
@@ -719,6 +736,7 @@ class BackgroundWorker:
                     result=result.model_dump(mode="json"),
                     intents=result.erp_intents,
                     company_id="company",
+                    expected_state_updated_at=state["updated_at"],
                 )
                 return self._action_receipt(result.model_dump(mode="json"), action.action_id)
             except (IdempotencyConflict, StoreConflict, StoreNotFound):

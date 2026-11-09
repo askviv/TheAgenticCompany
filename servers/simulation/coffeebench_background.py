@@ -626,9 +626,14 @@ async def _advance_environment(environment: Any, target_minute: int) -> None:
             ready.append((ev, day))
         if not ready:
             continue
-        responses = await asyncio.gather(
-            *(environment.agents[ev.target_agent].step_query_async() for ev, _ in ready),
-            return_exceptions=True,
+        # Bound an inference wave in real time. Cancellation discards the
+        # private world for this attempt before it can publish a checkpoint.
+        responses = await asyncio.wait_for(
+            asyncio.gather(
+                *(environment.agents[ev.target_agent].step_query_async() for ev, _ in ready),
+                return_exceptions=True,
+            ),
+            timeout=120 * kernel_virtual_time_rate(),
         )
         for (ev, day), response in zip(ready, responses):
             actor_id = ev.target_agent

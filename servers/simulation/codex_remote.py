@@ -121,8 +121,9 @@ _SAFE_ERRORS = {
 class CodexRemoteModel:
     """Drop-in completion transport; actor policy remains in the caller."""
 
-    def __init__(self, settings: CodexRemoteSettings, *, session=None):
+    def __init__(self, settings: CodexRemoteSettings, *, session=None, request_timeout=None):
         self.settings = settings
+        self.request_timeout = request_timeout
         self.session = session or requests.Session()
         if session is None:
             self.session.trust_env = False
@@ -142,6 +143,7 @@ class CodexRemoteModel:
                 self.settings.url.rstrip("/") + "/v1/infer",
                 json=payload,
                 headers={"Authorization": "Bearer " + self.settings.bearer_token.get_secret_value()},
+                **({"timeout": self.request_timeout()} if self.request_timeout is not None else {}),
             )
         except requests.RequestException as error:
             raise CodexModelError("Codex inference transport ended without a confirmed result") from error

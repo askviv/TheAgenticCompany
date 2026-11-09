@@ -501,8 +501,7 @@ class CompanyBackgroundService:
             with self._lock:
                 due_values = [value for provider, value in self._next_due.items()
                               if provider not in self.errors
-                              and controls[provider]["enabled"]
-                              and not (coffee_blocked and provider == "coffeebench")]
+                              and controls[provider]["enabled"]]
                 due_values.extend(value for value in (self._retry_at, self._finance_retry_at) if value is not None)
             due = min(due_values) if due_values else None
             timeout = None if due is None else max(0.05, (due - now).total_seconds())
