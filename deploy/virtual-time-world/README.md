@@ -20,6 +20,15 @@ sudo install -m 0600 /path/to/deployment-profile.json \
 sudo deploy/virtual-time-world/up.sh
 ```
 
+Set `viv.email` to the deployment's handoff recipient. The name of the
+profile section refers to the simulation's agent role and the email address
+can belong to any configured receiver. The coordinator reads that address
+from its mail actor configuration and submits employee handoffs through
+Mailu using standard SMTP. The deployment profile supplies the exact
+Postfix route for installations that use a private relay, such as the
+local preview bridge. Keep environment addresses in the private profile
+or, for an existing installation, in its runtime config and Mailu maps.
+
 When deliberately replacing the selected world's VM and guest storage, use the
 same profile with `sudo deploy/virtual-time-world/up.sh --fresh`.
 

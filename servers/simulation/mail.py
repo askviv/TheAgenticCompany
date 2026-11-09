@@ -43,7 +43,6 @@ from .clock_rate import kernel_virtual_time_rate
 
 LOG = logging.getLogger(__name__)
 SPECIAL_VIV_ID = "viv"
-SPECIAL_VIV_EMAIL = "agent@agent.example.test"
 
 
 class _ActorRef(BaseModel):
