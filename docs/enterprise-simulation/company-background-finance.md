@@ -34,6 +34,8 @@ The statement line is available for reconciliation as soon as it is imported. Vi
 
 The company import assigns new CoffeeBench invoices and E-CommerceBench Sales Orders to the configured Accounts Manager, David Wong in the default company profile. ERPNext sends one email on David’s behalf asking Viv to invoice the customer and make sure the order gets paid. A CoffeeBench supplier invoice instead asks Viv to take care of the supplier invoice and make sure it gets paid. Settlements appear in ERPNext for Viv to discover as part of that task.
 
+See the [CoffeeBench customer behaviour catalogue](coffeebench-customer-behaviours.md) for credit terms, bankruptcy and proposed operator switches.
+
 ## Private contracts and retry behavior
 
 The worker RPC contract is in [`integration_contracts.py`](../../servers/simulation/integration_contracts.py). It uses versioned initialize/advance requests and responses with provider ID, pinned upstream commit, cursor, status, next due time, events, outcomes, and finance source intents. The provider identity values are `sakanaai-coffeebench-native-economy` and `qwenlm-ecommercebench-calendar`.
