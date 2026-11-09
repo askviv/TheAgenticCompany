@@ -1509,6 +1509,12 @@ async def advance(
             for index, window in enumerate(("friday", "morning")) if customers
         }
         environment.marketplace._erp_payment_window_assignments = assignments
+    customers = sorted(set(environment.business_apps) - set(updated["company_business_ids"]))
+    for behaviour in ("batch_cutoff", "financial_distress"):
+        if behaviour in enabled_windows and behaviour not in assignments and customers:
+            assignments[behaviour] = random.Random(
+                f"{updated['checkpoint']['sha256']}:{behaviour}"
+            ).choice(customers)
     payment_windows = {}
     for window, customer in assignments.items():
         if window in enabled_windows:
@@ -1529,6 +1535,10 @@ async def advance(
     horizon = int(environment.max_days) * 1440
     horizon_finished = virtual_delta >= horizon
     target_minute = min(virtual_delta, horizon - 1)
+    sent_at = getattr(environment.marketplace, "_erp_invoice_first_seen_at", {})
+    for invoice_id in environment.marketplace._erp_sent_invoices:
+        sent_at.setdefault(invoice_id, target_minute)
+    environment.marketplace._erp_invoice_first_seen_at = sent_at
     condition_status_before = {
         condition["event_id"]: condition.get("status")
         for condition in updated.get("external_supply_conditions", [])

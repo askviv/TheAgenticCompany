@@ -460,7 +460,7 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
 
     @app.post("/company/background/coffeebench/payment-windows/{behaviour}")
     def set_coffee_payment_window(
-        behaviour: Literal["friday", "morning", "financing"],
+        behaviour: Literal["friday", "morning", "financing", "batch_cutoff", "financial_distress"],
         model: BackgroundControlRequest,
         principal: Principal = Depends(authenticate),
     ):

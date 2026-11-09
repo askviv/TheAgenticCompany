@@ -10,7 +10,7 @@ For company sales, CoffeeBench waits for ERPNext to submit the invoice and recor
 | Friday processing | Can pay on Fridays on the simulated UTC clock. | Infer the weekly rhythm and send before the next review. | Operator switch |
 | Morning processing | Can pay before 10 a.m. on the simulated UTC clock. | Learn when payments tend to happen and send invoices early. | Operator switch |
 | Requests order financing | Asks for credit to fund a coffee order. | Receives the request with the ERPNext order reference and can create an application in Lending. | Operator switch |
-| Batch cutoff | Pays in a weekly batch. Invoices after the cutoff roll into the next batch. | Infer the cutoff and avoid unnecessary reminders. | Proposed |
+| Batch cutoff | Processes payments on Fridays from 10 a.m. simulated UTC. Invoices first observed at or after the cutoff roll into the next Friday batch. | Infer the cutoff and avoid unnecessary reminders. | Operator switch |
 | Reminder needed | Pays after a relevant reminder on the original thread. | Learn which customers need one follow-up and when. | Proposed |
 | Missing purchase order reference | Holds an invoice until it carries the correct PO reference. | Ask what is blocking payment, correct the reference and resend. | Proposed |
 | Receiving mismatch | Holds payment when delivery quantity or condition differs from the invoice. | Check receiving evidence and resolve the discrepancy or arrange a credit. | Proposed. Native shipment delays, losses and returns provide starting events |
@@ -19,7 +19,7 @@ For company sales, CoffeeBench waits for ERPNext to submit the invoice and recor
 | Temporary cash shortage | Defers payment until cash is available. | Spot the delay, ask for a realistic date and revisit the account. | Native insufficient-cash handling. A scripted recovery pattern is proposed |
 | Requests longer credit terms | Asks for more time to pay on a new order, for example net 60. | Check the account and exposure, then approve, decline or request approval under the company policy. | Native offer terms. A scripted request is proposed |
 | Requests a higher credit limit | Asks to place an order beyond the existing credit limit. | Check total exposure and ask for a deposit, smaller order or approval. | Proposed |
-| Financial distress | Pays progressively later or requests longer terms before a new order. | Combine payment history with a credible risk signal and decide whether to offer further credit. | Proposed |
+| Financial distress | Defers payment until at least seven simulated days after the due date. | Use the late-payment history when deciding whether to offer further credit. | Operator switch |
 | Bankruptcy | Stops trading when the benchmark declares the business bankrupt. Outstanding receivables can become bad debt. | Treat confirmed insolvency as a reason to stop extending new credit and review existing exposure. | Native bankruptcy and write-off. A scripted warning and credit decision are proposed |
 
 CoffeeBench offers already carry `payment_terms_days`. A buyer can ask for net 60 by making an offer with 60 days. Accepting the offer sets that term on the deal. That models trade credit on a specific order. A standalone credit application, shared credit limit and approval workflow would need their own scenario.
@@ -27,7 +27,7 @@ CoffeeBench offers already carry `payment_terms_days`. A buyer can ask for net 6
 ## Customer settings
 
 Open **Experiments → Background simulations → CoffeeBench → Behaviour settings**.
-Switch on Friday payments, payments before 10 a.m. or customer financing requests. CoffeeBench chooses the
+Switch on a behaviour from the settings page. The Friday batch schedule takes precedence if the same customer also has the morning payment window. CoffeeBench chooses the
 counterparties privately and keeps those choices in its checkpoint. The settings
 page and API show only which behaviours are enabled. Changes apply on the next
 advance. A payment

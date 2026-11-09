@@ -1438,11 +1438,20 @@ class BusinessApp:
             if invoice.issuer in getattr(self.marketplace, "_erp_invoice_issuers", ()):
                 windows = getattr(self.marketplace, "_erp_payment_windows", {}).get(self.agent_id, ())
                 minute = self.time_manager.get_virtual_min()
+                weekday = (self.marketplace._erp_start_weekday + minute // 1440) % 7
                 if (
-                    "friday" in windows and (self.marketplace._erp_start_weekday + minute // 1440) % 7 != 4
-                    or "morning" in windows and minute % 1440 >= 600
+                    "friday" in windows and weekday != 4
+                    or "morning" in windows and "batch_cutoff" not in windows and minute % 1440 >= 600
                 ):
                     return {"status": "error", "message": "Payment is outside the buyer's processing window."}
+                if "batch_cutoff" in windows:
+                    seen = self.marketplace._erp_invoice_first_seen_at[invoice.id]
+                    friday = minute // 1440 * 1440
+                    # A receipt at or after Friday 10:00 rolls to the next batch.
+                    if weekday != 4 or seen >= friday + 600 or minute < friday + 600:
+                        return {"status": "error", "message": "Invoice is waiting for the next weekly payment batch."}
+                if "financial_distress" in windows and self._today() < invoice.due_date + 7:
+                    return {"status": "error", "message": "Buyer has deferred payment because cash is tight."}
             amount_due = invoice.net_outstanding
             if amount_due <= 0:
                 invoice.paid = True

@@ -833,11 +833,12 @@ const coffeePaymentWindows = [
   ["friday", "Friday payments"],
   ["morning", "Payments before 10 a.m."],
   ["financing", "Customer financing requests"],
+  ["batch_cutoff", "Weekly batch cutoff"],
+  ["financial_distress", "Financial distress"],
 ] as const
 
 const otherCoffeeBehaviours = [
   ["Prompt payment", "Native behaviour"],
-  ["Weekly batch cutoff", "Planned"],
   ["Payment after a reminder", "Planned"],
   ["Missing purchase order reference", "Planned"],
   ["Receiving mismatch", "Planned"],
@@ -846,7 +847,6 @@ const otherCoffeeBehaviours = [
   ["Temporary cash shortage", "Native behaviour"],
   ["Requests longer credit terms", "Native behaviour"],
   ["Requests a higher credit limit", "Planned"],
-  ["Financial distress", "Planned"],
   ["Bankruptcy", "Native behaviour"],
 ] as const
 
