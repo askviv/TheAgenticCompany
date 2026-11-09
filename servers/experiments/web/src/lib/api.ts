@@ -408,8 +408,16 @@ export async function resendActivityEmail(messageId: string, requestId: string):
   })
 }
 
-export async function getActivity(): Promise<{ activity: ActivityEntry[]; error?: string | null; metrics: ActivityMetrics }> {
-  return requestJson<{ activity: ActivityEntry[]; error?: string | null; metrics: ActivityMetrics }>("/api/activity")
+export async function getActivity(type: string, before?: string, signal?: AbortSignal): Promise<{
+  activity: ActivityEntry[]
+  error?: string | null
+  metrics: ActivityMetrics
+  counts: Record<string, number>
+  next_cursor: string | null
+}> {
+  const params = new URLSearchParams({ type })
+  if (before) params.set("before", before)
+  return requestJson(`/api/activity?${params}`, { signal })
 }
 
 export async function setCompanyRunning(running: boolean): Promise<Company> {

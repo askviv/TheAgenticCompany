@@ -1410,16 +1410,43 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 sum(item['kind']=='workplace' and item['status'] not in {'completed','failed'} for item in tracked_runs)
                 + sum(item['status'] not in {'completed','failed'} for item in company['experiments'])),
         }
+        def category(item):
+            return 'message' if item['type'] == 'chat' else item['type']
+
+        counts = {'all': len(activity)}
+        for item in activity:
+            name = category(item)
+            counts[name] = counts.get(name, 0) + 1
+
         def activity_rank(item):
             try:
                 timestamp = datetime.fromisoformat(item.get('timestamp') or '')
                 if timestamp.tzinfo is None:
                     timestamp = timestamp.replace(tzinfo=timezone.utc)
-                return timestamp.timestamp()
+                date = timestamp.astimezone(timezone.utc).isoformat(timespec='microseconds')
             except ValueError:
-                return float('-inf')
+                date = ''
+            return date, item['type'], item['id'], item.get('direction') or ''
 
-        activity = nlargest(10, activity, key=activity_rank)
+        filter_type = request.args.get('type', 'all')
+        if filter_type not in {'all', 'email', 'message', 'chatter', 'action'}:
+            abort(400)
+        cursor = request.args.get('before')
+        if cursor is not None:
+            try:
+                rank = json.loads(cursor)
+            except ValueError:
+                abort(400)
+            if not isinstance(rank, list) or len(rank) != 4 or not all(isinstance(value, str) for value in rank):
+                abort(400)
+        before = tuple(rank) if cursor is not None else None
+        page = nlargest(11, (
+            item for item in activity
+            if (filter_type == 'all' or category(item) == filter_type)
+            and (before is None or activity_rank(item) < before)
+        ), key=activity_rank)
+        activity = page[:10]
+        next_cursor = json.dumps(activity_rank(activity[-1])) if len(page) > 10 else None
         try:
             participant_names = activity_participant_names()
         except (OSError, ValueError, KeyError, TypeError):
@@ -1430,11 +1457,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 participant = item.get(field)
                 if participant:
                     item[field + '_name'] = participant_names.get(participant.casefold(), participant)
-        filter_type=request.args.get('type')
-        if filter_type in {'email','message','chatter','action'}:
-            activity=[item for item in activity if item['type']==filter_type
-                      or (filter_type=='message' and item['type']=='chat')]
-        response={'activity':activity,'metrics':metrics}
+        response = {'activity': activity, 'metrics': metrics, 'counts': counts, 'next_cursor': next_cursor}
         if company_error: response['error']=company_error
         return jsonify(response)
     @app.get('/experiments/<experiment_id>')

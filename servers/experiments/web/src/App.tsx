@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { CompanyPackImport } from "@/CompanyPackImport"
 import { CompanySwitcher } from "@/CompanySwitcher"
 import { Switch } from "@base-ui/react/switch"
@@ -538,40 +538,84 @@ function ActivityPage() {
   const requestedFilter = activityParams.get("activity")
   const filter = requestedFilter && activityFilters.some(([value]) => value === requestedFilter) ? requestedFilter : "all"
   const companyRequest = useRef<Promise<Awaited<ReturnType<typeof getCompany>> | undefined> | null>(null)
-  const activityRequest = useRef<Promise<Awaited<ReturnType<typeof getActivity>> | undefined> | null>(null)
-
+  const [counts, setCounts] = useState<Record<string, number>>({})
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadedFilter, setLoadedFilter] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [olderError, setOlderError] = useState(false)
+  const activityController = useRef<AbortController | null>(null)
+  const olderRequest = useRef<AbortController | null>(null)
+  const olderButton = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     let active = true
-    const pendingCompany = companyRequest.current?.then(() => active ? getCompany() : undefined, () => active ? getCompany() : undefined) ?? getCompany()
-    const pendingActivity = activityRequest.current?.then(() => active ? getActivity() : undefined, () => active ? getActivity() : undefined) ?? getActivity()
-    companyRequest.current = pendingCompany
-    activityRequest.current = pendingActivity
-    pendingCompany.then((result) => {
+    const pending = companyRequest.current?.then(() => active ? getCompany() : undefined, () => active ? getCompany() : undefined) ?? getCompany()
+    companyRequest.current = pending
+    pending.then((result) => {
       if (!active || !result) return
       setCompany(result)
       setError(null)
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : "Company status could not be loaded.")
     }).finally(() => {
-      if (companyRequest.current === pendingCompany) companyRequest.current = null
-    })
-    pendingActivity.then((result) => {
-      if (!active || !result) return
-      setActivity(result.activity)
-      setMetrics(result.metrics)
-      setActivityWarning(result.error ?? null)
-    }).catch((reason: unknown) => {
-      if (active) setActivityWarning(reason instanceof Error ? reason.message : "Company activity could not be loaded.")
-    }).finally(() => {
-      if (activityRequest.current === pendingActivity) activityRequest.current = null
-      if (active) {
-        setLoading(false)
-        setRefreshing(false)
-      }
+      if (companyRequest.current === pending) companyRequest.current = null
     })
     return () => { active = false }
   }, [refreshKey, manualRefresh])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    activityController.current = controller
+    setLoadingMore(false)
+    setOlderError(false)
+    getActivity(filter, undefined, controller.signal).then((result) => {
+      if (controller.signal.aborted) return
+      setActivity(result.activity)
+      setLoadedFilter(filter)
+      setMetrics(result.metrics)
+      setCounts(result.counts)
+      setNextCursor(result.next_cursor)
+      setActivityWarning(result.error ?? null)
+    }).catch((reason: unknown) => {
+      if (!controller.signal.aborted) setActivityWarning(reason instanceof Error ? reason.message : "Company activity could not be loaded.")
+    }).finally(() => {
+      if (controller.signal.aborted) return
+      setLoading(false)
+      setRefreshing(false)
+    })
+    return () => controller.abort()
+  }, [filter, refreshKey, manualRefresh])
+
+  const loadOlder = useCallback(async () => {
+    const controller = activityController.current
+    if (!nextCursor || loadedFilter !== filter || refreshing || !controller || controller.signal.aborted
+        || olderRequest.current === controller) return
+    olderRequest.current = controller
+    setLoadingMore(true)
+    setOlderError(false)
+    try {
+      const page = await getActivity(filter, nextCursor, controller.signal)
+      if (controller.signal.aborted) return
+      if (page.error) throw new Error(page.error)
+      setActivity((current) => [...current, ...page.activity])
+      setNextCursor(page.next_cursor)
+      setCounts(page.counts)
+    } catch {
+      if (!controller.signal.aborted) setOlderError(true)
+    } finally {
+      if (olderRequest.current === controller) olderRequest.current = null
+      if (!controller.signal.aborted) setLoadingMore(false)
+    }
+  }, [filter, loadedFilter, nextCursor, refreshing])
+
+  useEffect(() => {
+    if (!olderButton.current || olderError || loadingMore || typeof IntersectionObserver === "undefined") return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) void loadOlder()
+    }, { rootMargin: "200px" })
+    observer.observe(olderButton.current)
+    return () => observer.disconnect()
+  }, [loadOlder, loadingMore, olderError])
 
   const refreshCompanyActivity = () => {
     setRefreshing(true)
@@ -596,9 +640,6 @@ function ActivityPage() {
     }
   }
 
-  const matchesFilter = (entry: ActivityEntry, value: string) =>
-    value === "all" || entry.type === value || (value === "message" && entry.type === "chat")
-  const filtered = activity.filter((entry) => matchesFilter(entry, filter))
   const backgroundErrors = company?.background?.errors ?? {}
   const globalBackgroundErrors = ([
     ["company_background", "Background worker"],
@@ -661,15 +702,15 @@ function ActivityPage() {
                 if (value === "all") next.delete("activity")
                 else next.set("activity", value)
                 return next
-              }, { preventScrollReset: true })}>{label} ({activity.filter((entry) => matchesFilter(entry, value)).length})</Button>
+              }, { preventScrollReset: true })}>{label} ({(counts[value] ?? 0).toLocaleString()})</Button>
           ))}
         </div>
       </div>
 
       {activityWarning && <ErrorNotice message={activityWarning} title="Some company activity could not be loaded" />}
-      {loading ? <div className="space-y-3"><Skeleton className="h-24 w-full" /><Skeleton className="h-24 w-full" /></div> : filtered.length ? (
+      {loading || (loadedFilter !== filter && !activityWarning) ? <div className="space-y-3"><Skeleton className="h-24 w-full" /><Skeleton className="h-24 w-full" /></div> : loadedFilter === filter && activity.length ? (
         <div key={filter} className="space-y-3">
-          {filtered.map((entry) => {
+          {activity.map((entry) => {
             const isEmail = entry.type === "email"
             const isCommunication = isEmail || entry.type === "message" || entry.type === "chat" || entry.type === "chatter"
             const title = entry.title.trim()
@@ -743,11 +784,14 @@ function ActivityPage() {
               </div>
             </article>
           })}
+          {nextCursor && <Button ref={olderButton} variant="outline" onClick={() => void loadOlder()} disabled={loadingMore || refreshing}>
+            {loadingMore ? "Loading older activity…" : olderError ? "Retry loading older activity" : "Load older activity"}
+          </Button>}
         </div>
       ) : (
         <div className="rounded-xl border border-dashed px-6 py-14 text-center">
           <MessageCircle className="mx-auto size-8 text-muted-foreground" />
-          <p className="mt-3 font-medium">{activity.length ? "No activity matches this filter" : "Nothing has happened yet"}</p>
+          <p className="mt-3 font-medium">{counts.all ? "No activity matches this filter" : "Nothing has happened yet"}</p>
           <p className="mt-1 text-sm text-muted-foreground">Run an experiment to introduce a problem into the company.</p>
           <Button className="mt-5" render={<Link to="/experiments" />}>Browse experiments <ArrowRight /></Button>
         </div>
