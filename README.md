@@ -133,10 +133,14 @@ npm --prefix servers/experiments/web ci
 npm --prefix servers/experiments/web run build
 ```
 
-From a coordinator development environment with its dependencies installed,
-focused integration checks include:
+Install the coordinator dependencies, including SimPy, in a Python 3.12
+virtual environment before running the integration checks. The coordinator
+deployment uses the same requirements file.
 
 ```sh
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r servers/simulation/requirements.txt Flask==3.1.3 PyYAML==6.0.3 httpx2 pytest
 python -m pytest servers/simulation/tests/test_company_background.py \
   servers/experiments/tests/test_app.py servers/experiments/tests/test_coordinator.py
 ```
