@@ -9,7 +9,7 @@ from typing import Any
 
 import frappe
 
-from finance_handoffs import delegate_finance_task
+from finance_handoffs import delegate_finance_task, finance_task_message_id
 from finance_sources import _company_currency, _conversion_rate, _date
 from native_accounts import ensure_simulated_bank, map_party_to_currency, submit_imported_bank_transaction
 from source_records import (
@@ -835,6 +835,10 @@ def _process_native_outcome(
             "status": "completed", "documents": [_outcome_document(comment)],
             "pending_reasons": [], "created": created,
         }
+
+    message_id = finance_task_message_id("Sales Order", order.name, mapped["source_id"])
+    if frappe.db.exists("Email Queue", {"message_id": message_id}):
+        return _pending_outcome(mapped, "Finance delegated this refund to Viv for manual follow-up")
 
     outcome = _process_refund(mapped, order)
     if outcome["status"] != "completed" and company_binding.get("finance_reviewer"):
