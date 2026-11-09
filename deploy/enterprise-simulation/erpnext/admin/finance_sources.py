@@ -692,7 +692,7 @@ def _requests_payment(content):
     from frappe.utils import strip_html
 
     # Quoted correspondence is not a request from the current sender.
-    authored = re.split(r"<blockquote\b|id=["'](?:divRplyFwdMsg|appendonsend)["']",
+    authored = re.split(r"""<blockquote\b|id=["'](?:divRplyFwdMsg|appendonsend)["']""",
                         content or "", maxsplit=1, flags=re.IGNORECASE)[0]
     authored = re.sub(r"<(?:br\s*/?|/p|/div)>", "\n", authored, flags=re.IGNORECASE)
     authored = re.split(r"(?mi)^\s*(?:>|On .+ wrote:|[- ]*Original Message[- ]*)", strip_html(authored), maxsplit=1)[0]
