@@ -576,32 +576,12 @@ function ActivityPage() {
 
   const matchesFilter = (entry: ActivityEntry, value: string) =>
     value === "all" || entry.type === value || (value === "message" && entry.type === "chat")
+  const activityDate = (entry: ActivityEntry) => {
+    const timestamp = Date.parse(entry.timestamp ?? "")
+    return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY
+  }
   const filtered = activity.filter((entry) => matchesFilter(entry, filter))
-    .sort((first, second) => (second.timestamp ?? "").localeCompare(first.timestamp ?? ""))
-  const emails = new Map(filtered.filter((entry) => entry.type === "email").map((entry) => [entry.id, entry]))
-  const replies = new Map<string, ActivityEntry[]>()
-  for (const entry of filtered) {
-    const parent = entry.related_activity_id
-    if (entry.type !== "email" || !parent || parent === entry.id || !emails.has(parent)) continue
-    const thread = replies.get(parent) ?? []
-    thread.push(entry)
-    replies.set(parent, thread)
-  }
-  const ordered: ActivityEntry[] = []
-  const displayed = new Set<ActivityEntry>()
-  const append = (entry: ActivityEntry) => {
-    if (displayed.has(entry)) return
-    displayed.add(entry)
-    ordered.push(entry)
-    if (emails.get(entry.id) === entry) {
-      for (const reply of replies.get(entry.id) ?? []) append(reply)
-    }
-  }
-  const linkedEmails = new Set(Array.from(replies.values()).flat())
-  for (const entry of filtered) {
-    if (!linkedEmails.has(entry)) append(entry)
-  }
-  for (const entry of filtered) append(entry)
+    .sort((first, second) => activityDate(second) - activityDate(first))
   const backgroundErrors = company?.background?.errors ?? {}
   const globalBackgroundErrors = ([
     ["company_background", "Background worker"],
@@ -672,7 +652,7 @@ function ActivityPage() {
       {activityWarning && <ErrorNotice message={activityWarning} title="Some company activity could not be loaded" />}
       {loading ? <div className="space-y-3"><Skeleton className="h-24 w-full" /><Skeleton className="h-24 w-full" /></div> : filtered.length ? (
         <div key={filter} className="space-y-3">
-          {ordered.map((entry) => {
+          {filtered.map((entry) => {
             const isEmail = entry.type === "email"
             const isCommunication = isEmail || entry.type === "message" || entry.type === "chat" || entry.type === "chatter"
             const title = entry.title.trim()
@@ -732,7 +712,6 @@ function ActivityPage() {
                     {showContent && content && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 text-sm leading-6">{formatActivityText(content)}</p>}
                     {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}
                   </>}
-                  {entry.related_activity_id && filtered.some((item) => item.id === entry.related_activity_id) && <a className="mt-2 inline-block text-sm underline" href={`#activity-${entry.related_activity_id}`}>View original message</a>}
                   {entry.coffee_update && <CoffeeUpdateDetails update={entry.coffee_update} />}
                   {entry.run_id && <Link className="mt-3 inline-flex items-center gap-1 text-sm text-primary hover:underline" to={`/runs/${encodeURIComponent(entry.run_id)}`}>View experiment <ArrowRight className="size-3.5" /></Link>}
                 </div>
