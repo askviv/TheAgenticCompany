@@ -533,28 +533,26 @@ function ActivityPage() {
 
   useEffect(() => {
     let active = true
-    Promise.allSettled([getCompany(), getActivity()])
-      .then(([companyResult, activityResult]) => {
-        if (!active) return
-        const errors: string[] = []
-        if (companyResult.status === "fulfilled") setCompany(companyResult.value)
-        else errors.push(companyResult.reason instanceof Error ? companyResult.reason.message : "Company status could not be loaded.")
-        if (activityResult.status === "fulfilled") {
-          setActivity(activityResult.value.activity)
-          setMetrics(activityResult.value.metrics)
-          setActivityWarning(activityResult.value.error ?? null)
-        } else {
-          setMetrics(null)
-          setActivityWarning(activityResult.reason instanceof Error ? activityResult.reason.message : "Company activity could not be loaded.")
-        }
-        setError(errors.length ? errors.join(" ") : null)
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false)
-          setRefreshing(false)
-        }
-      })
+    getCompany().then((result) => {
+      if (!active) return
+      setCompany(result)
+      setError(null)
+    }).catch((reason: unknown) => {
+      if (active) setError(reason instanceof Error ? reason.message : "Company status could not be loaded.")
+    })
+    getActivity().then((result) => {
+      if (!active) return
+      setActivity(result.activity)
+      setMetrics(result.metrics)
+      setActivityWarning(result.error ?? null)
+    }).catch((reason: unknown) => {
+      if (active) setActivityWarning(reason instanceof Error ? reason.message : "Company activity could not be loaded.")
+    }).finally(() => {
+      if (active) {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    })
     return () => { active = false }
   }, [refreshKey, manualRefresh])
 
@@ -595,7 +593,7 @@ function ActivityPage() {
         </AlertDescription>
       </Alert>}
       {company?.error && <ErrorNotice message={company.error} title="Company needs attention" />}
-      {error && <ErrorNotice message={error} title="Company activity unavailable" />}
+      {error && <ErrorNotice message={error} title="Company status could not be loaded" />}
 
 
 
