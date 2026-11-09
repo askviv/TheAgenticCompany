@@ -12,6 +12,7 @@ import re
 from .background_runtime import BackgroundWorkerClient
 from .actor_client import ActorTurnClient
 from .coffee_feedback import CoffeeFeedbackAdapter
+from .clock_rate import simulation_message_footer
 from .company_feedback import CompanyFeedback, identity
 from .ecommerce_feedback import EcommerceNativeActionCheckpoint
 from .feedback_contracts import CompanyEvidence, RecordMapping, TranslatedAction
@@ -1409,7 +1410,6 @@ class CompanyFeedbackRuntime:
             "occurred_at": plan["occurred_at"],
             "mapping_status": plan["mapping_status"],
         }
-        request_hash = hashlib.sha256(encoded(payload).encode("utf-8")).hexdigest()
         locks = self.store.db_path.parent / "company-native-message-locks"
         locks.mkdir(mode=0o700, parents=True, exist_ok=True)
         lock_path = locks / (hashlib.sha256(plan["source_id"].encode()).hexdigest() + ".lock")
@@ -1422,6 +1422,12 @@ class CompanyFeedbackRuntime:
                     "SELECT * FROM company_native_message_outbox WHERE source_event_id=?",
                     (plan["source_id"],),
                 ).fetchone()
+                if row is None or (row["status"] == "pending" and not row["submission_started"]):
+                    stored = json.loads(row["private_payload_json"]) if row is not None else {}
+                    payload["delivery_body"] = stored.get("delivery_body") or (
+                        payload["body"] + "\n\n" + simulation_message_footer()
+                    )
+                    request_hash = hashlib.sha256(encoded(payload).encode("utf-8")).hexdigest()
                 if row is None:
                     db.execute(
                         "INSERT INTO company_native_message_outbox(source_event_id,mapping_id,message_id,request_hash,private_payload_json,status,updated_at) "
@@ -1461,7 +1467,7 @@ class CompanyFeedbackRuntime:
             if status in {"submitting", "uncertain"}:
                 if native_message_id is None:
                     native_message_id = self._mail_gateway.employee_sent_message_id(
-                        plan["sender"], plan["recipient"], payload["subject"], payload["body"],
+                        plan["sender"], plan["recipient"], payload["subject"], payload.get("delivery_body", payload["body"]),
                         payload["in_reply_to"], row["submission_started_at"],
                         sent_uidvalidity=row["sent_uidvalidity"],
                         sent_uid_next=row["sent_uid_next"],
@@ -1522,7 +1528,7 @@ class CompanyFeedbackRuntime:
                     native_message_id = message_id
                 try:
                     receipt = self._mail_gateway.send(
-                        plan["sender"], plan["recipient"], payload["subject"], payload["body"],
+                        plan["sender"], plan["recipient"], payload["subject"], payload.get("delivery_body", payload["body"]),
                         payload["message_id"], payload["run_id"], payload["generation"],
                         in_reply_to=payload["in_reply_to"],
                         business_time=payload.get("occurred_at"),

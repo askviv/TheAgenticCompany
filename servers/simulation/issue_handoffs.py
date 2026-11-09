@@ -15,6 +15,7 @@ import traceback
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .clock_rate import simulation_message_footer
 from .store import SQLiteStore, StoreConflict
 
 TIMEOUT = timedelta(minutes=5)
@@ -158,9 +159,10 @@ class IssueHandoffStore:
                 return None
             if utc(now) < datetime.fromisoformat(row["deadline_at"]):
                 return None
-            encoded = json.dumps(intent, sort_keys=True)
-            connection.execute("UPDATE company_issue_handoffs SET handoff_json=?,updated_at=? WHERE issue_key=?",
-                               (encoded, utc(now).isoformat(), key))
+            if row["handoff_json"] is None:
+                encoded = json.dumps(intent, sort_keys=True)
+                connection.execute("UPDATE company_issue_handoffs SET handoff_json=?,updated_at=? WHERE issue_key=?",
+                                   (encoded, utc(now).isoformat(), key))
         return self.get(key)
 
     def mark_submitting(
@@ -337,7 +339,8 @@ class IssueHandoffService:
         sender = {key: actor[key] for key in ("actor_id", "email", "kind") if key in actor}
         return {"sender": sender, "subject": "Please handle this: " + record.subject,
                 "body": "Please handle this,\n\n" + record.business_description
-                        + "\n\nRequested outcome: " + record.requested_outcome + "\n\n" + "\n".join(links),
+                        + "\n\nRequested outcome: " + record.requested_outcome + "\n\n" + "\n".join(links)
+                        + "\n\n" + simulation_message_footer(),
                 "message_id": f"<company-issue-{record.issue_key}-handoff@theagentcompany.local>",
                 "run_id": "company-issue:" + record.issue_key, "generation": 0,
                 "in_reply_to": record.message_id}
@@ -384,8 +387,10 @@ class IssueHandoffService:
                 self.scheduler.schedule(key, deadline)
                 return
             intent = self._intent(record, actor)
-            if self.store.prepare(key, intent, now) is None:
+            prepared = self.store.prepare(key, intent, now)
+            if prepared is None:
                 return
+            intent = json.loads(prepared["handoff_json"])
             # Recheck at the submission edge; an observed read is terminal.
             receipt = self.mail.inspect_issue_notification(actor, record.message_id)
             if receipt is None:

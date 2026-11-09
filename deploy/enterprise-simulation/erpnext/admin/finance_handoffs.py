@@ -10,6 +10,20 @@ import frappe
 from frappe.desk.form import assign_to
 
 
+def simulation_message_footer():
+    try:
+        rate = int(Path("/sys/kernel/virtual_time_rate").read_text(encoding="ascii"))
+    except FileNotFoundError:
+        rate = 1
+    if rate < 1:
+        raise ValueError("Simulation clock rate must be positive")
+    simulated_time = datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M UTC")
+    return (
+        f"This is a simulated environment. The clock runs at {rate}× real time. "
+        f"The current simulated time is {simulated_time}."
+    )
+
+
 def delegate_finance_task(doctype, name, employee, recipient, description):
     identity = hashlib.sha256(f"{doctype}:{name}".encode()).hexdigest()
     message_id = f"benchmark-finance-{identity}@theagentcompany.local"
@@ -26,17 +40,7 @@ def delegate_finance_task(doctype, name, employee, recipient, description):
 
     employee_name = frappe.db.get_value("User", employee, "full_name")
     instruction = f"Hi Viv, {description}"
-    try:
-        rate = int(Path("/sys/kernel/virtual_time_rate").read_text(encoding="ascii"))
-    except FileNotFoundError:
-        rate = 1
-    if rate < 1:
-        raise ValueError("Simulation clock rate must be positive")
-    simulated_time = datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M UTC")
-    footer = (
-        f"This is a simulated environment. The clock runs at {rate}× real time. "
-        f"The current simulated time is {simulated_time}."
-    )
+    footer = simulation_message_footer()
     queue = frappe.sendmail(
         recipients=[recipient], subject=f"{employee_name} delegated {doctype} {name}",
         message=f"{escape(instruction)}<br><br>{escape(employee_name)}<br><br><small>{escape(footer)}</small>",
