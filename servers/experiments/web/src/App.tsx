@@ -249,32 +249,49 @@ function AppLayout() {
             <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground"><Beaker className="size-4" /></span>
             <span>The Agentic Company</span>
           </Link>
-          <nav className="flex items-center gap-1" aria-label="Main navigation">
-            <NavLink to="/" end className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-              Activity
-            </NavLink>
-            <NavLink to="/streams" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-              Observe
-            </NavLink>
-          <NavLink to="/experiments" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-              Experiments
-            </NavLink>
-            <NavLink to="/runs" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-              Runs
-            </NavLink>
-            <NavLink to="/help" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-              Help
-            </NavLink>
-          </nav>
           <ModelCallControl />
           <p className="basis-full pb-2 text-center text-xs text-muted-foreground lg:basis-auto lg:pb-0">Company time {companyTime ? formatDate(companyTime) : "—"}</p>
         </div>
       </header>
-      <CompanySwitcher />
-      <main className="w-full px-4 py-8 sm:px-6 sm:py-10">
-        <Outlet context={{ refreshKey } satisfies LayoutContext} />
-      </main>
+      <div className="md:grid md:grid-cols-[14rem_minmax(0,1fr)]">
+        <nav className="border-b p-4 md:min-h-[calc(100svh-3.5rem)] md:border-r md:border-b-0" aria-label="Main navigation">
+          <div className="flex flex-wrap gap-1 md:flex-col">
+            {[
+              ["/", "Activity"],
+              ["/streams", "Observe"],
+              ["/experiments", "Experiments"],
+              ["/runs", "Runs"],
+              ["/help/native-evaluations", "Native evaluations"],
+              ["/help/company-tools", "Company tools"],
+              ["/help", "Help"],
+            ].map(([path, label]) => <SidebarLink key={path} path={path} label={label} />)}
+          </div>
+          <p className="mt-5 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Settings</p>
+          <div className="mt-2 flex flex-wrap gap-1 md:flex-col">
+            {[
+              ["/help/company-environment", "Company environment"],
+              ["/help/context", "Codex connection"],
+              ["/experiments/background", "Background simulations"],
+              ["/experiments/coffeebench/settings", "CoffeeBench behaviours"],
+            ].map(([path, label]) => <SidebarLink key={path} path={path} label={label} />)}
+          </div>
+        </nav>
+        <main className="min-w-0 px-4 py-8 sm:px-6 sm:py-10">
+          <Outlet context={{ refreshKey } satisfies LayoutContext} />
+        </main>
+      </div>
     </div>
+  )
+}
+
+function SidebarLink({ path, label }: { path: string, label: string }) {
+  return (
+    <NavLink to={path} end className={({ isActive }) =>
+      `rounded-md px-3 py-2 text-sm transition-colors ${isActive
+        ? "bg-secondary font-medium text-foreground"
+        : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
+      {label}
+    </NavLink>
   )
 }
 
@@ -759,6 +776,29 @@ function SavedNativeEvaluations() {
 }
 
 function HelpPage() {
+  return (
+    <section className="space-y-5">
+      <h1 className="text-2xl font-semibold tracking-tight">Help</h1>
+      <nav className="flex flex-wrap gap-2" aria-label="Help pages">
+        <Button variant="outline" render={<Link to="/help/company-environment" />}>Company environment</Button>
+        <Button variant="outline" render={<Link to="/help/context" />}>Codex connection</Button>
+        <Button variant="outline" render={<Link to="/help/native-evaluations" />}>Native evaluations</Button>
+        <Button variant="outline" render={<Link to="/help/company-tools" />}>Company tools</Button>
+      </nav>
+    </section>
+  )
+}
+
+function HelpSection({ title, children }: { title: string, children: React.ReactNode }) {
+  return (
+    <section className="space-y-5">
+      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+      {children}
+    </section>
+  )
+}
+
+function CompanyToolsPage() {
   const [companyTools, setCompanyTools] = useState<CompanyToolLink[]>([])
   const [companyToolsError, setCompanyToolsError] = useState<string | null>(null)
 
@@ -775,15 +815,8 @@ function HelpPage() {
   }, [])
 
   return (
-    <section className="space-y-7">
-      <h1 className="text-2xl font-semibold tracking-tight">Help</h1>
-      <CodexConnectionCard />
-      <SavedNativeEvaluations />
+    <HelpSection title="Company tools">
       <Card>
-        <CardHeader>
-          <CardTitle>Company tools</CardTitle>
-          <CardDescription>Open the company’s systems and administration using this deployment’s configured addresses.</CardDescription>
-        </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           {companyToolsError ? <ErrorNotice message={companyToolsError} title="Company tools unavailable" /> : companyTools.map((tool) => (
             <Button key={tool.id} variant="outline" render={<a href={tool.url} target="_blank" rel="noopener noreferrer" />}>
@@ -792,7 +825,7 @@ function HelpPage() {
           ))}
         </CardContent>
       </Card>
-    </section>
+    </HelpSection>
   )
 }
 
@@ -828,15 +861,15 @@ function CoffeeBenchSettingsPage() {
     }
   }
 
-  return <div className="space-y-4">
-    <Link to="/experiments" className="text-sm underline">Back to experiments</Link>
+  return <section className="space-y-5">
+    <h1 className="text-2xl font-semibold tracking-tight">CoffeeBench behaviours</h1>
     <Card>
       <CardHeader>
-        <CardTitle>CoffeeBench settings</CardTitle>
-        <CardDescription>Choose which behaviours can occur. CoffeeBench assigns them privately. Times use the simulated UTC clock.</CardDescription>
+        <CardDescription>Payment windows use simulated UTC.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 overflow-x-auto">
         {error && <ErrorNotice message={error} title="CoffeeBench settings" />}
+        {!settings && !error && <p role="status" className="text-sm text-muted-foreground">Loading behaviours…</p>}
         {settings && <ul className="divide-y">
           {coffeePaymentWindows.map(([behaviour, title]) => <li key={behaviour} className="flex items-center justify-between gap-4 p-3">
             <span>{title}</span>
@@ -849,7 +882,7 @@ function CoffeeBenchSettingsPage() {
         </ul>}
       </CardContent>
     </Card>
-  </div>
+  </section>
 }
 
 function BackgroundSimulations() {
@@ -886,7 +919,7 @@ function BackgroundSimulations() {
     {error && <ErrorNotice message={error} title="Background simulations unavailable" />}
       <Card>
         <CardHeader>
-          <CardTitle>Background simulations</CardTitle>
+          <CardTitle>Benchmark controls</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2">
           {([['coffeebench', 'CoffeeBench'], ['ecommercebench', 'E-CommerceBench']] as const).map(([providerId, label]) => {
@@ -978,7 +1011,6 @@ function LibraryPage() {
       <div className="flex flex-col gap-5 border-b pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1.5">
           <h1 className="text-2xl font-semibold tracking-tight">Experiment library</h1>
-          <p className="text-sm text-muted-foreground">Choose a company problem. Filter by type or benchmark.</p>
         </div>
         <div className="flex w-full items-center gap-2 sm:w-80">
           <div className="relative w-full">
@@ -987,8 +1019,11 @@ function LibraryPage() {
           </div>
         </div>
       </div>
+      <nav className="flex flex-wrap gap-2" aria-label="Simulation settings">
+        <Button variant="outline" render={<Link to="/experiments/background" />}>Background simulations</Button>
+        <Button variant="outline" render={<Link to="/experiments/coffeebench/settings" />}>CoffeeBench behaviours</Button>
+      </nav>
       <CompanyPackImport onImported={() => setImportRevision((value) => value + 1)} />
-      <BackgroundSimulations />
 
       <fieldset className="space-y-3">
         <legend className="text-sm font-medium">Benchmark</legend>
@@ -1630,9 +1665,17 @@ export default function App() {
           <Route index element={<ActivityPage />} />
           <Route path="streams" element={<EmployeeStreamsPage />} />
           <Route path="experiments" element={<LibraryPage />} />
+          <Route path="experiments/background" element={<section className="space-y-5">
+            <h1 className="text-2xl font-semibold tracking-tight">Background simulations</h1>
+            <BackgroundSimulations />
+          </section>} />
           <Route path="experiments/coffeebench/settings" element={<CoffeeBenchSettingsPage />} />
           <Route path="experiments/:experimentId" element={<ExperimentPage />} />
           <Route path="help" element={<HelpPage />} />
+          <Route path="help/company-environment" element={<HelpSection title="Company environment"><CompanySwitcher /></HelpSection>} />
+          <Route path="help/context" element={<HelpSection title="Codex connection"><CodexConnectionCard /></HelpSection>} />
+          <Route path="help/native-evaluations" element={<HelpSection title="Native evaluations"><SavedNativeEvaluations /></HelpSection>} />
+          <Route path="help/company-tools" element={<CompanyToolsPage />} />
           <Route path="runs" element={<RunsPage />} />
           <Route path="runs/:runId" element={<RunPage />} />
           <Route path="*" element={<NotFound />} />

@@ -133,8 +133,8 @@ export function CompanySwitcher() {
     finally { setBusy(false) }
   }
 
-  return <details className="mx-4 mt-4 rounded-lg border bg-card p-4 sm:mx-6">
-    <summary className="cursor-pointer text-sm font-medium">Company environment: {environments?.companies.find((company) => company.active)?.name ?? "Loading…"}{active ? ` · ${job?.stage}` : ""}</summary>
+  return <div className="rounded-lg border bg-card p-4">
+    <p className="text-sm font-medium">Active company: {environments?.companies.find((company) => company.active)?.name ?? "Loading…"}{active ? ` · ${job?.stage}` : ""}</p>
     <div className="mt-4 space-y-4">
       <p className="text-sm text-muted-foreground">Switching or duplicating briefly pauses company services. Inactive companies keep their work and their clocks stay paused.</p>
       <div className="flex flex-wrap items-center gap-2">
@@ -158,5 +158,5 @@ export function CompanySwitcher() {
       {storageError && <Alert><AlertTitle>Operation status cannot be saved in this browser</AlertTitle><AlertDescription>{storageError}</AlertDescription></Alert>}
       <Button variant="ghost" disabled={busy} onClick={() => window.location.reload()}>Reload company list</Button>
     </div>
-  </details>
+  </div>
 }
