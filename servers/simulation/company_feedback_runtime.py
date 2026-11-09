@@ -426,6 +426,7 @@ class CompanyFeedbackRuntime:
         binding = {
             "company_id": "company",
             "erp_company": "The Agent Company",
+            "ecommerce_behaviours": self.store.ecommerce_behaviours(),
             "money_unit": profile["company"]["background"]["ecommerce"]["money_unit"],
             "sales_order_date_semantics": profile["company"]["background"]["ecommerce"][
                 "sales_order_date_semantics"

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -589,6 +589,28 @@ def test_clock_jump_preserves_native_sale_before_unlinked_cancellation(tmp_path)
         advanced["coverage"]["cancellation_shipment_linkage"]
         == "derived_from_native_pending_state_transition"
     )
+
+
+def test_partial_return_after_payout_deducts_net_and_reverses_only_commission():
+    environment = _environment()
+    environment._company_behaviours = {"partial_return", "refund_after_payout"}
+    result = environment.ship_orders(shipment_ids=[7], speed="standard")
+    assert result["success"]
+    batch, = environment.escrow_batches
+    returned, = environment.pending_returns
+    assert 0 < returned["quantity"] < 4
+    assert returned["arrival_date"] == batch["settle_date"] + timedelta(days=2)
+
+    environment.current_time += timedelta(days=environment.settlement_window)
+    assert environment._process_settlements() == pytest.approx(98)
+    assert environment.withdraw()["withdrawn"] == pytest.approx(98)
+    bank_before = environment.bank_balance
+    environment.current_time += timedelta(days=2)
+    result, = environment._process_pending_returns()
+    assert result["refund"] == pytest.approx(25 * returned["quantity"])
+    assert environment.bank_balance == pytest.approx(bank_before - 24.5 * returned["quantity"])
+    assert environment._ledger["commission_reversed"] == pytest.approx(0.5 * returned["quantity"])
+    assert environment.platform_wallet == 0
 
 
 def test_native_refund_outcome_links_back_through_shipment_batch_receipt(tmp_path):

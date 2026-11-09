@@ -453,6 +453,24 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         status_code = 202 if result.get("status") == "uncertain" else 200
         return JSONResponse(result, status_code=status_code, headers={"Cache-Control": "no-store"})
 
+    @app.get("/company/background/ecommercebench/behaviours")
+    def ecommerce_behaviours(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        return {"enabled_behaviours": engine.store.ecommerce_behaviours()}
+
+    @app.post("/company/background/ecommercebench/behaviours/{behaviour}")
+    def set_ecommerce_behaviour(
+        behaviour: Literal[
+            "cancellation_after_picking", "stockout", "parcel_loss", "partial_return",
+            "refund_after_payout", "payout_mismatch",
+        ],
+        model: BackgroundControlRequest,
+        principal: Principal = Depends(authenticate),
+    ):
+        require_role(principal, "controller")
+        engine.store.set_ecommerce_behaviour(behaviour, model.enabled)
+        return {"enabled_behaviours": engine.store.ecommerce_behaviours()}
+
     @app.get("/company/background/coffeebench/payment-windows")
     def coffee_payment_windows(principal: Principal = Depends(authenticate)):
         require_role(principal, "controller")

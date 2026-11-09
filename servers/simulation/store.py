@@ -233,6 +233,9 @@ class SQLiteStore:
                     customer TEXT NOT NULL, behaviour TEXT NOT NULL,
                     PRIMARY KEY(customer, behaviour)
                 );
+                CREATE TABLE IF NOT EXISTS ecommerce_behaviours (
+                    behaviour TEXT PRIMARY KEY
+                );
                 CREATE TABLE IF NOT EXISTS background_provider_controls (
                     company_id TEXT NOT NULL, provider_id TEXT NOT NULL,
                     enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
@@ -692,6 +695,19 @@ class SQLiteStore:
             return [{"experiment_id": row["run_id"], "scenario_id": row["scenario_id"],
                      "generation": row["generation"], "agent_id": row["agent_id"], "status": row["status"],
                      "simulated_time": row["simulated_time"], "paused": bool(row["paused"])} for row in rows]
+
+    def ecommerce_behaviours(self) -> list[str]:
+        with self._connection(None) as db:
+            return [row["behaviour"] for row in db.execute(
+                "SELECT behaviour FROM ecommerce_behaviours ORDER BY behaviour"
+            )]
+
+    def set_ecommerce_behaviour(self, behaviour: str, enabled: bool) -> None:
+        with self.transaction() as db:
+            if enabled:
+                db.execute("INSERT OR IGNORE INTO ecommerce_behaviours VALUES (?)", (behaviour,))
+            else:
+                db.execute("DELETE FROM ecommerce_behaviours WHERE behaviour=?", (behaviour,))
 
     def coffee_payment_windows(self) -> list[str]:
         with self._connection(None) as db:

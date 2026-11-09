@@ -291,6 +291,20 @@ export async function stopCompanyDesktop(employeeId: string): Promise<{ employee
   })
 }
 
+export async function getEcommerceBehaviours(): Promise<string[]> {
+  const result = await requestJson<{ enabled_behaviours: string[] }>("/api/company/background/ecommercebench/behaviours")
+  return result.enabled_behaviours
+}
+
+export async function setEcommerceBehaviour(behaviour: string, enabled: boolean): Promise<string[]> {
+  const session = await getSession()
+  const result = await requestJson<{ enabled_behaviours: string[] }>("/api/company/background/ecommercebench/behaviours", {
+    method: "POST",
+    body: new URLSearchParams({ csrf_token: session.csrf_token, behaviour, enabled: String(enabled) }),
+  })
+  return result.enabled_behaviours
+}
+
 export type CoffeePaymentWindows = string[]
 
 export async function getCoffeePaymentWindows(): Promise<CoffeePaymentWindows> {

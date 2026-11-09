@@ -483,6 +483,7 @@ def _map_native_outcome(
             refund_per_unit = _decimal(facts.get("refund_per_unit"), "native refund unit amount", positive=True)
             escrow_reclaimed = _decimal(facts.get("escrow_reclaimed_native_units"), "native escrow refund", positive=False)
             commission_reversed = _decimal(facts.get("commission_reversed_native_units"), "native commission reversal", positive=False)
+            payout_deduction = _decimal(facts.get("payout_deduction_native_units", 0), "native payout deduction")
             units = _decimal(company_binding.get("money_unit", {}).get("native_units_per_currency_unit"), "native units per GBP", positive=True)
             record_amount = _decimal(record.get("amount"), "refund amount", positive=True)
             record_units = _decimal(record.get("native_units_per_currency_unit"), "source money-unit ratio", positive=True)
@@ -493,7 +494,7 @@ def _map_native_outcome(
                 or record_units != units
                 or record.get("currency") != MONEY_UNIT["currency"]
                 or amount != refund_per_unit * quantity
-                or amount != escrow_reclaimed + commission_reversed
+                or amount != escrow_reclaimed + commission_reversed + payout_deduction
                 or record_amount != amount / units):
             raise ValueError("E-Commerce refund amount or time does not match the approved source facts")
         delivery_note_names = facts.get("source_delivery_note_names")
@@ -811,6 +812,35 @@ def _existing_outcome_return(
     return existing, stock_qty
 
 
+def _ecommerce_handoff(binding, doctype, name, scenario, event_id, message):
+    if scenario in binding.get("ecommerce_behaviours", ()) and binding.get("finance_reviewer"):
+        delegate_finance_task(
+            doctype, name, binding["finance_reviewer"], binding["assistant_email"], message,
+            source_event_id=f"{scenario}:{event_id}",
+        )
+
+
+def _payout_for_order(order, occurred_at):
+    invoices = frappe.get_all("Sales Invoice Item", filters={"sales_order": order.name, "docstatus": 1},
+                              pluck="parent")
+    if not invoices:
+        return None
+    payments = frappe.get_all("Payment Entry Reference", filters={
+        "reference_doctype": "Sales Invoice", "reference_name": ["in", invoices], "docstatus": 1,
+    }, pluck="parent")
+    if not payments:
+        return None
+    for transaction in frappe.get_all("Bank Transaction", filters={
+        "company": order.company, "docstatus": 1, "deposit": [">", 0],
+        "custom_source_system": SOURCE_SYSTEM, "reference_number": ["in", payments],
+    }, fields=["name", "custom_source_snapshot"]):
+        facts = json.loads(transaction.custom_source_snapshot)["native_record"]
+        if (facts["movement_type"] == "marketplace_settlement"
+                and datetime.fromisoformat(facts["occurred_at"]) < occurred_at):
+            return transaction.name
+    return None
+
+
 def _process_native_outcome(
     record: dict[str, Any], company_binding: dict[str, Any]
 ) -> dict[str, Any]:
@@ -820,6 +850,17 @@ def _process_native_outcome(
         return _pending_outcome(mapped, "source-linked Sales Order has not been imported yet")
     facts = mapped["facts"]
     if mapped["event_type"] == "shipment_cancelled":
+        if "cancellation_after_picking" in company_binding.get("ecommerce_behaviours", ()):
+            picks = frappe.get_all("Pick List Item", filters={
+                "sales_order": order.name, "docstatus": 1,
+                "creation": ["<=", mapped["occurred_at"].replace(tzinfo=None)],
+            }, pluck="parent")
+            if picks:
+                _ecommerce_handoff(
+                    company_binding, "Sales Order", order.name, "cancellation_after_picking", mapped["source_id"],
+                    f"the marketplace cancelled order {order.name} after pick list {picks[0]} was submitted. "
+                    "Can you stop dispatch, release the stock and handle any posted invoice?",
+                )
         comment, created = _ensure_source_comment(
             source_id=mapped["source_id"], company_id=mapped["company_id"],
             experiment_id="background", reference_name=order.name,
@@ -836,6 +877,21 @@ def _process_native_outcome(
             "pending_reasons": [], "created": created,
         }
 
+    behaviours = company_binding.get("ecommerce_behaviours", ())
+    if "partial_return" in behaviours and mapped["quantity"] < sum(row.qty for row in order.items):
+        _ecommerce_handoff(
+            company_binding, "Sales Order", order.name, "partial_return", mapped["source_id"],
+            f"the marketplace processed a return of {mapped['quantity']} units on order {order.name}. "
+            "Can you match the returned items to the shipment and make sure the credit covers those units?",
+        )
+    if "refund_after_payout" in behaviours and Decimal(str(facts.get("payout_deduction_native_units", 0))) > 0:
+        payout = _payout_for_order(order, mapped["occurred_at"])
+        if payout:
+            _ecommerce_handoff(
+                company_binding, "Sales Order", order.name, "refund_after_payout", mapped["source_id"],
+                f"the marketplace refunded {record['currency']} {record['amount']} on order {order.name} "
+                f"after payout {payout}. Can you trace the refund, fees and deduction against the payout?",
+            )
     message_id = finance_task_message_id("Sales Order", order.name, mapped["source_id"])
     if frappe.db.exists("Email Queue", {"message_id": message_id}):
         return _pending_outcome(mapped, "Finance delegated this refund to Viv for manual follow-up")
@@ -933,7 +989,7 @@ def _process_refund(mapped: dict[str, Any], order) -> dict[str, Any]:
     }
 
 
-def _ensure_native_bank_transaction(mapped: dict[str, Any]) -> tuple[str, bool]:
+def _ensure_native_bank_transaction(mapped: dict[str, Any], *, payout_mismatch: bool = False) -> tuple[str, bool]:
     company_id, store_type = mapped["company_id"], mapped["store_type"]
     ledger_account, bank_account = _ensure_marketplace_bank(
         mapped["company"], mapped["currency"], store_type
@@ -971,12 +1027,16 @@ def _ensure_native_bank_transaction(mapped: dict[str, Any]) -> tuple[str, bool]:
     description = descriptions.get(mapped["movement_type"])
     if not description:
         raise ValueError("Unsupported E-Commerce native bank movement type")
+    deposit = mapped["amount"] if mapped["direction"] == "deposit" else Decimal(0)
+    if payout_mismatch and deposit >= Decimal("0.02"):
+        shortfall = min(Decimal("5.00"), max(Decimal("0.01"), (deposit / 100).quantize(Decimal("0.01"))))
+        deposit -= shortfall
     values = {
         "date": mapped["occurred_at"].date().isoformat(),
         "bank_account": bank_account,
         "company": mapped["company"],
         "currency": mapped["currency"],
-        "deposit": float(mapped["amount"]) if mapped["direction"] == "deposit" else 0,
+        "deposit": float(deposit),
         "withdrawal": float(mapped["amount"]) if mapped["direction"] == "withdrawal" else 0,
         "description": description,
         "reference_number": mapped["reference"],
@@ -1163,6 +1223,53 @@ def _map_pending_sale(
     }
 
 
+def _review_fulfilment_exceptions(binding):
+    behaviours = set(binding.get("ecommerce_behaviours", ()))
+    if not behaviours & {"stockout", "parcel_loss"} or not binding.get("finance_reviewer"):
+        return
+    orders = frappe.get_all("Sales Order", filters={
+        "company": binding["erp_company"], "docstatus": 1, "custom_source_system": SOURCE_SYSTEM,
+        "custom_company_id": binding["company_id"], "custom_experiment_id": "background",
+        "status": ["not in", ["Closed", "Cancelled"]],
+    }, pluck="name")
+    for name in orders:
+        order = frappe.get_doc("Sales Order", name)
+        if "stockout" in behaviours:
+            shortages = []
+            for line in order.items:
+                remaining = line.qty - (line.delivered_qty or 0)
+                if remaining <= 0 or not line.warehouse:
+                    continue
+                actual = frappe.db.get_value("Bin", {"item_code": line.item_code, "warehouse": line.warehouse},
+                                             "actual_qty") or 0
+                if actual < remaining * (line.conversion_factor or 1):
+                    shortages.append(line.item_code)
+            if shortages:
+                _ecommerce_handoff(
+                    binding, "Sales Order", name, "stockout", name,
+                    f"order {name} has unshipped items without enough stock ({', '.join(shortages)}). "
+                    "Can you decide whether to split the shipment, offer a substitute or cancel the remaining items?",
+                )
+        if "parcel_loss" in behaviours:
+            delivery_names = frappe.get_all("Delivery Note Item", filters={
+                "against_sales_order": name, "docstatus": 1,
+            }, pluck="parent")
+            for delivery in sorted(set(delivery_names)):
+                if frappe.db.get_value("Delivery Note", delivery, "is_return"):
+                    continue
+                _ensure_source_comment(
+                    source_id=f"parcel-loss:{delivery}", company_id=binding["company_id"],
+                    experiment_id="background", reference_name=name,
+                    content=f"Simulated carrier exception. Parcel {delivery} was reported missing.",
+                    snapshot={"source": SOURCE_SYSTEM, "scenario": "parcel_loss", "delivery_note": delivery},
+                )
+                _ecommerce_handoff(
+                    binding, "Sales Order", name, "parcel_loss", delivery,
+                    f"the carrier reported parcel {delivery} missing for order {name}. Can you confirm what "
+                    "was shipped and arrange a replacement or refund for the missing items?",
+                )
+
+
 def reconcile(
     source_records: list[dict[str, Any]],
     company_binding: dict[str, Any],
@@ -1190,7 +1297,20 @@ def reconcile(
         try:
             if record.get("kind") == "bank_transaction":
                 mapped_bank = _map_native_bank_movement(record, company_binding)
-                transaction, created = _ensure_native_bank_transaction(mapped_bank)
+                payout_mismatch = (
+                    mapped_bank["movement_type"] == "marketplace_settlement"
+                    and "payout_mismatch" in company_binding.get("ecommerce_behaviours", ())
+                )
+                transaction, created = _ensure_native_bank_transaction(mapped_bank, payout_mismatch=payout_mismatch)
+                if payout_mismatch:
+                    posted = Decimal(str(frappe.db.get_value("Bank Transaction", transaction, "deposit")))
+                    if posted != mapped_bank["amount"]:
+                        _ecommerce_handoff(
+                            company_binding, "Bank Transaction", transaction, "payout_mismatch", record["id"],
+                            f"the marketplace statement shows {mapped_bank['currency']} {mapped_bank['amount']:.2f}, "
+                            f"but bank transaction {transaction} shows {posted:.2f}. Can you reconcile the payout "
+                            "and investigate the difference?",
+                        )
                 receipts.append({
                     "source_id": str(record["id"]),
                     "doctype": "Bank Transaction",
@@ -1328,6 +1448,7 @@ def reconcile(
                 company_binding["assistant_email"],
                 f"can you invoice the customer for order {order_name} and make sure it gets paid?",
             )
+    _review_fulfilment_exceptions(company_binding)
     return {
         "as_of": _date(as_of), "receipts": receipts,
         "unmapped": unmapped, "pending_outcomes": pending_outcomes,

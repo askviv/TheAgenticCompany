@@ -38,6 +38,8 @@ import {
   getCompany,
   getCompanyClock,
   getCoffeePaymentWindows,
+  getEcommerceBehaviours,
+  setEcommerceBehaviour,
   getCompanyDesktops,
   getCompanyEvaluations,
   getCompanyTools,
@@ -273,6 +275,7 @@ function AppLayout() {
               ["/help/context", "Codex connection"],
               ["/experiments/background", "Background simulations"],
               ["/experiments/coffeebench/settings", "CoffeeBench behaviours"],
+              ["/experiments/ecommercebench/settings", "E-CommerceBench behaviours"],
             ].map(([path, label]) => <SidebarLink key={path} path={path} label={label} />)}
           </div>
         </nav>
@@ -850,25 +853,38 @@ const otherCoffeeBehaviours = [
   ["Bankruptcy", "Native behaviour"],
 ] as const
 
-function CoffeeBenchSettingsPage() {
+const ecommerceBehaviours = [
+  ["cancellation_after_picking", "Cancellation after picking"],
+  ["stockout", "Partial shipment or stockout"],
+  ["parcel_loss", "Lost or damaged parcel"],
+  ["partial_return", "Partial return"],
+  ["refund_after_payout", "Refund after payout"],
+  ["payout_mismatch", "Marketplace payout mismatch"],
+] as const
+
+function BenchmarkSettingsPage({ ecommerce = false }: { ecommerce?: boolean }) {
+  const title = ecommerce ? "E-CommerceBench behaviours" : "CoffeeBench behaviours"
+  const behaviours = ecommerce ? ecommerceBehaviours : coffeePaymentWindows
+  const load = ecommerce ? getEcommerceBehaviours : getCoffeePaymentWindows
+  const save = ecommerce ? setEcommerceBehaviour : setCoffeePaymentWindow
   const [settings, setSettings] = useState<CoffeePaymentWindows | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     let active = true
-    getCoffeePaymentWindows().then(
+    load().then(
       (result) => { if (active) setSettings(result) },
-      () => { if (active) setError("CoffeeBench settings could not be loaded.") },
+      () => { if (active) setError("Behaviour settings could not be loaded.") },
     )
     return () => { active = false }
-  }, [])
+  }, [load])
 
   async function update(behaviour: string, enabled: boolean) {
     setSaving(true)
     setError(null)
     try {
-      setSettings(await setCoffeePaymentWindow(behaviour, enabled))
+      setSettings(await save(behaviour, enabled))
     } catch {
       setError("The change could not be confirmed. Reload to check the saved settings.")
     } finally {
@@ -877,17 +893,17 @@ function CoffeeBenchSettingsPage() {
   }
 
   return <section className="space-y-5">
-    <h1 className="text-2xl font-semibold tracking-tight">CoffeeBench behaviours</h1>
+    <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
     <Card>
       <CardHeader>
         <CardTitle>Behaviour switches</CardTitle>
-        <CardDescription>Payment windows use simulated UTC.</CardDescription>
+        {!ecommerce && <CardDescription>Payment windows use simulated UTC.</CardDescription>}
       </CardHeader>
       <CardContent className="space-y-4 overflow-x-auto">
-        {error && <ErrorNotice message={error} title="CoffeeBench settings" />}
+        {error && <ErrorNotice message={error} title={title} />}
         {!settings && !error && <p role="status" className="text-sm text-muted-foreground">Loading behaviours…</p>}
         {settings && <ul className="divide-y">
-          {coffeePaymentWindows.map(([behaviour, title]) => <li key={behaviour} className="flex items-center justify-between gap-4 p-3">
+          {behaviours.map(([behaviour, title]) => <li key={behaviour} className="flex items-center justify-between gap-4 p-3">
             <span>{title}</span>
             <Switch.Root aria-label={title} checked={settings.includes(behaviour)}
               disabled={saving} onCheckedChange={(checked) => void update(behaviour, checked)}
@@ -898,7 +914,7 @@ function CoffeeBenchSettingsPage() {
         </ul>}
       </CardContent>
     </Card>
-    <Card>
+    {!ecommerce && <Card>
       <CardHeader><CardTitle>Other scenarios</CardTitle></CardHeader>
       <CardContent>
         <ul className="divide-y">
@@ -908,7 +924,7 @@ function CoffeeBenchSettingsPage() {
           </li>)}
         </ul>
       </CardContent>
-    </Card>
+    </Card>}
   </section>
 }
 
@@ -1696,7 +1712,8 @@ export default function App() {
             <h1 className="text-2xl font-semibold tracking-tight">Background simulations</h1>
             <BackgroundSimulations />
           </section>} />
-          <Route path="experiments/coffeebench/settings" element={<CoffeeBenchSettingsPage />} />
+          <Route path="experiments/coffeebench/settings" element={<BenchmarkSettingsPage key="coffee" />} />
+          <Route path="experiments/ecommercebench/settings" element={<BenchmarkSettingsPage key="ecommerce" ecommerce />} />
           <Route path="experiments/:experimentId" element={<ExperimentPage />} />
           <Route path="help" element={<HelpPage />} />
           <Route path="help/company-environment" element={<HelpSection title="Company environment"><CompanySwitcher /></HelpSection>} />

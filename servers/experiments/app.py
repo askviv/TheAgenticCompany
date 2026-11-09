@@ -617,6 +617,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     @app.get('/help/native-evaluations')
     @app.get('/help/company-tools')
     @app.get('/experiments/background')
+    @app.get('/experiments/ecommercebench/settings')
     @app.get('/experiments/coffeebench/settings')
     @app.get('/experiments')
     def index(): return frontend()
@@ -1224,6 +1225,23 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             message=f'Company pause state could not be confirmed ({type(error).__name__}). Refresh to retry.'
             save_company_error(message)
             return jsonify(error=message),502
+    @app.route('/api/company/background/ecommercebench/behaviours', methods=['GET', 'POST'])
+    def ecommerce_behaviours():
+        args = ()
+        if request.method == 'POST':
+            behaviour, enabled = (request.form.get(key) for key in ('behaviour', 'enabled'))
+            if behaviour not in {
+                'cancellation_after_picking', 'stockout', 'parcel_loss', 'partial_return',
+                'refund_after_payout', 'payout_mismatch',
+            } or enabled not in {'true', 'false'}:
+                abort(400)
+            args = (behaviour, enabled == 'true')
+        try:
+            return jsonify(coordinator().ecommerce_behaviours(*args))
+        except CoordinatorError:
+            logging.exception('E-CommerceBench behaviours unavailable')
+            return jsonify(error='E-CommerceBench behaviours could not be confirmed.'), 502
+
     @app.route('/api/company/background/coffeebench/payment-windows', methods=['GET', 'POST'])
     def coffee_payment_windows():
         args = ()
