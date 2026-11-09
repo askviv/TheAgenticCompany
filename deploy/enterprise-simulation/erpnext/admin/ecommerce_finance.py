@@ -1288,12 +1288,6 @@ def reconcile(
                 company_id=company_id,
                 snapshot=snapshot,
             )
-        if created and company_binding.get("finance_reviewer"):
-            delegate_finance_task(
-                "Sales Order", order.name, company_binding["finance_reviewer"],
-                company_binding["assistant_email"],
-                f"can you invoice the customer for order {order.name} and make sure it gets paid?",
-            )
         receipts.append(
             {
                 "source_id": mapped["source_id"],
@@ -1305,6 +1299,17 @@ def reconcile(
                 "native_context": context,
             }
         )
+    if company_binding.get("finance_reviewer"):
+        for order_name in frappe.get_all("Sales Order", filters={
+            "company": company, "docstatus": 0, "custom_source_system": SOURCE_SYSTEM,
+            "custom_company_id": company_id, "custom_experiment_id": "background",
+            "custom_ecommerce_shipment_id": ["is", "set"],
+        }, pluck="name"):
+            delegate_finance_task(
+                "Sales Order", order_name, company_binding["finance_reviewer"],
+                company_binding["assistant_email"],
+                f"can you invoice the customer for order {order_name} and make sure it gets paid?",
+            )
     return {
         "as_of": _date(as_of), "receipts": receipts,
         "unmapped": unmapped, "pending_outcomes": pending_outcomes,

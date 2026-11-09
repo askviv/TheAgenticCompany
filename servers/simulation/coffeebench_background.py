@@ -1347,9 +1347,9 @@ def _source_records(environment: Any, snapshot: dict[str, Any]) -> list[dict[str
                 "total_price": format(total.quantize(Decimal("0.01")), "f"),
                 "payment_terms_days": offer.payment_terms_days,
                 "offer_message": offer.message,
-                "financing_requested": offer.buyer_id == getattr(
+                **({"financing_requested": True} if offer.buyer_id == getattr(
                     environment.marketplace, "_erp_active_financing_customer", None
-                ),
+                ) else {}),
                 "offer_status": offer.status,
                 "offer_posted_at_virtual_minute": offer.posted_at,
                 "listing_quantity": listing.qty,

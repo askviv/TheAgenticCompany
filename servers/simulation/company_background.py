@@ -398,20 +398,30 @@ class CompanyBackgroundService:
             return
         try:
             bindings = self._provider_bindings
+            advance_ids = selected
+            read_errors = {}
             read_sent = getattr(self.finance_adapter, "read_sent_coffee_invoices", None)
             if "coffeebench" in selected and read_sent is not None:
                 company_name = _document_name(self.company_binding.get("documents", {}).get("company"))
-                bindings = {
-                    **bindings,
-                    "coffeebench": {
-                        **bindings["coffeebench"], "sent_sales_invoice_ids": read_sent(company_name),
-                        "payment_windows": self.engine.store.coffee_payment_windows(),
-                    },
-                }
+                try:
+                    sent_ids = read_sent(company_name)
+                except Exception as error:
+                    self._log_failure("CoffeeBench sent invoice read failed", error)
+                    read_errors["coffeebench"] = {"code": "sent_invoice_read_failed", "status_code": None}
+                    advance_ids = tuple(provider for provider in selected if provider != "coffeebench")
+                else:
+                    bindings = {
+                        **bindings,
+                        "coffeebench": {
+                            **bindings["coffeebench"], "sent_sales_invoice_ids": sent_ids,
+                            "payment_windows": self.engine.store.coffee_payment_windows(),
+                        },
+                    }
             result = self.runtime.advance_company(
-                now, bindings=bindings, provider_ids=selected,
+                now, bindings=bindings, provider_ids=advance_ids,
                 coupling_policy=coupling,
-            )
+            ) if advance_ids else {}
+            provider_errors = {**result.get("provider_errors", {}), **read_errors}
             providers = result.get("providers", {})
             self._fanout([event for provider in providers.values() for event in provider.get("events", [])])
             self.engine.store.record_company_finance_source_intents(
@@ -442,7 +452,7 @@ class CompanyBackgroundService:
             with self._lock:
                 self.errors = {key: {"code": value["code"], "status_code": value["status_code"],
                                      **{k: value[k] for k in ("pending_operation_id", "pending_until") if k in value}}
-                               for key, value in result.get("provider_errors", {}).items()}
+                               for key, value in provider_errors.items()}
                 for provider, error in self._initialization_errors.items():
                     if provider not in self._initialized_providers:
                         self.errors.setdefault(provider, {"code": error["code"], "status_code": error["status_code"]})
@@ -455,7 +465,7 @@ class CompanyBackgroundService:
                     else:
                         self._next_due[provider_id] = _aware(next_due)
                 self._retry_at = (now + timedelta(seconds=30)) if (
-                    result.get("provider_errors") or self._initialization_errors
+                    provider_errors or self._initialization_errors
                 ) else None
             self.changed.set()
         finally:

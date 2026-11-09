@@ -208,7 +208,7 @@ def submit_imported_bank_transaction(transaction: Any) -> None:
     if transaction.docstatus == 0:
         transaction.submit()
         transaction.reload()
-    if transaction.docstatus != 1 or transaction.status not in {"Unreconciled", "Reconciled"}:
+    if transaction.docstatus != 1 or transaction.status not in {"Unreconciled", "Reconciled", "Settled"}:
         raise RuntimeError(
             "Existing Bank Transaction is cancelled or has an unsupported native status"
         )

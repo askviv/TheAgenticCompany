@@ -373,6 +373,12 @@ def test_coffee_pending_offer_source_preserves_exact_terms_without_marking_a_dea
     }
     assert snapshot["source_record_ids"] == [record["id"]]
 
+    environment.marketplace._erp_active_financing_customer = offer.buyer_id
+    financing_records = coffee._source_records(environment, {**snapshot, "source_record_ids": []})
+    assert financing_records == [{
+        **record, "native_record": {**record["native_record"], "financing_requested": True},
+    }]
+
     # Replaying the same native offer is idempotent; an offer belonging to a
     # different seller is not imported into this mapped company.
     assert coffee._source_records(environment, snapshot) == []

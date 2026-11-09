@@ -1,7 +1,9 @@
 """Assign benchmark finance work and queue the Viv handoff."""
 
 import hashlib
+import traceback
 from html import escape
+from pathlib import Path
 
 import frappe
 from frappe.desk.form import assign_to
@@ -23,10 +25,21 @@ def delegate_finance_task(doctype, name, employee, recipient, description):
 
     employee_name = frappe.db.get_value("User", employee, "full_name")
     instruction = f"Hi Viv, {description}"
+    try:
+        rate = int(Path("/sys/kernel/virtual_time_rate").read_text(encoding="ascii"))
+    except FileNotFoundError:
+        rate = 1
+    if rate < 1:
+        raise ValueError("Simulation clock rate must be positive")
+    footer = (
+        f"Simulation clock at handoff: {rate}× real time. "
+        f"Divide the time remaining until a simulated deadline by {rate} "
+        "to estimate the real time remaining at this rate."
+    )
     queue = frappe.sendmail(
         recipients=[recipient], subject=f"{employee_name} delegated {doctype} {name}",
-        message=f"{escape(instruction)}<br><br>{escape(employee_name)}",
-        reply_to=employee, reference_doctype=doctype, reference_name=name,
+        message=f"{escape(instruction)}<br><br>{escape(employee_name)}<br><br><small>{escape(footer)}</small>",
+        sender=employee, reply_to=employee, reference_doctype=doctype, reference_name=name,
         message_id=message_id, add_unsubscribe_link=0,
     )
     if not queue:
@@ -37,8 +50,35 @@ def send_pending_finance_handoffs():
     queues = frappe.get_all("Email Queue", filters={
         "message_id": ["like", "benchmark-finance-%@theagentcompany.local"],
         "reference_doctype": ["in", ["Sales Order", "Sales Invoice", "Purchase Invoice", "Loan Application"]],
-        "status": ["in", ["Not Sent", "Partially Sent"]],
+        "status": ["in", ["Not Sent", "Partially Sent", "Error"]],
     }, pluck="name", order_by="creation asc")
+    return send_finance_queues(queues)
+
+
+def send_finance_queues(queues):
+    errors = []
     for name in queues:
-        frappe.get_doc("Email Queue", name).send()
-        frappe.db.commit()
+        try:
+            queue = frappe.get_doc("Email Queue", name)
+            if queue.status != "Error":
+                queue.send()
+                queue.reload()
+            if queue.status != "Sent":
+                raise RuntimeError("Finance email was not sent")
+        except Exception as error:
+            causes = []
+            cause = error.__cause__ or error.__context__
+            while cause is not None:
+                causes.append(type(cause).__name__)
+                cause = cause.__cause__ or cause.__context__
+            errors.append({
+                "issue_key": name,
+                "error_type": type(error).__name__,
+                "causes": causes,
+                "stack": [(frame.filename, frame.lineno, frame.name)
+                          for frame in traceback.extract_tb(error.__traceback__)],
+            })
+        finally:
+            # Preserve Frappe's delivery status and retry counter on failure.
+            frappe.db.commit()
+    return errors

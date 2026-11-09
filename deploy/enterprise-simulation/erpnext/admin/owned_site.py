@@ -555,11 +555,11 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
 
                 from finance_sources import send_pending_sales_invoices
 
-                send_pending_finance_handoffs()
+                send_errors.extend(send_pending_finance_handoffs())
                 profile = json.loads(Path("/opt/company-identities.json").read_text())
-                send_pending_sales_invoices(
+                send_errors.extend(send_pending_sales_invoices(
                     "The Agent Company", profile["company"]["background"]["coffee"]["counterparties"],
-                )
+                ))
                 result = {"notifications": list_owned_notification_receipts(), "errors": send_errors}
         if operation == "reconcile-finance-sources":
             frappe.db.commit()

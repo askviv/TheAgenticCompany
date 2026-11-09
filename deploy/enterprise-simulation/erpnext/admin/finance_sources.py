@@ -12,7 +12,7 @@ from typing import Any
 
 import frappe
 
-from finance_handoffs import delegate_finance_task
+from finance_handoffs import delegate_finance_task, send_finance_queues
 from source_records import ensure_source_fields, get_source_document, insert_source_document
 from native_accounts import ensure_simulated_bank, map_party_to_currency, submit_imported_bank_transaction
 
@@ -523,19 +523,27 @@ def _sales_invoice_mail(company: str, directory: dict[str, Any], *, queue_status
 
 def read_sent_sales_invoices(company: str, directory: dict[str, Any]) -> list[str]:
     """Release only submitted invoices sent to their mapped CoffeeBench buyer."""
-    return sorted({invoice_id for invoice_id, _ in _sales_invoice_mail(
+    released = set()
+    for invoice_id, queue_name in _sales_invoice_mail(
         company, directory, queue_status=["Sent", "Partially Sent"], recipient_status="Sent",
-    )})
+    ):
+        queue = frappe.get_doc("Email Queue", queue_name)
+        if any(
+            attachment.get("print_format_attachment") == 1
+            and attachment.get("doctype") == "Sales Invoice"
+            and attachment.get("name") == queue.reference_name
+            for attachment in queue.attachments_list
+        ):
+            released.add(invoice_id)
+    return sorted(released)
 
 
-def send_pending_sales_invoices(company: str, directory: dict[str, Any]) -> None:
+def send_pending_sales_invoices(company: str, directory: dict[str, Any]) -> list[dict[str, Any]]:
     """Dispatch native invoice emails requested from the ERPNext invoice form."""
     queues = _sales_invoice_mail(
         company, directory, queue_status=["Not Sent", "Partially Sent"], recipient_status="Not Sent",
     )
-    for queue in sorted({name for _, name in queues}):
-        frappe.get_doc("Email Queue", queue).send()
-        frappe.db.commit()
+    return send_finance_queues(sorted({name for _, name in queues}))
 
 
 def read_due_obligations(company: str, as_of: str | datetime) -> list[dict[str, Any]]:
