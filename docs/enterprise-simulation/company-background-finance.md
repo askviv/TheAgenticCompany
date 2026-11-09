@@ -32,7 +32,7 @@ Each nonzero settled CoffeeBench payment involving the company creates a native 
 
 The statement line is available for reconciliation as soon as it is imported. Viv can use it to find the corresponding invoice and reconcile a submitted Payment Entry in ERPNext. CoffeeBench does not post a Payment Entry or allocate the payment to the invoice. Draft orders and invoices still follow the normal ERPNext review and submission flow. Previously imported payments are not backfilled automatically.
 
-The company import assigns new CoffeeBench draft invoices to the configured Accounts Manager, David Wong in the default company profile. New E-CommerceBench Sales Orders go to the same reviewer for invoicing once fulfillment supports it. When a CoffeeBench payment or E-CommerceBench marketplace payout creates an unreconciled Bank Transaction, ERPNext queues a reconciliation request to the company profile's assistant email. The company issue timer delivers the request through the native Email Queue. The request identifies the bank transaction and asks Viv to check for existing entries and follow the company's approval process.
+The company import assigns CoffeeBench invoice reviews and E-CommerceBench invoicing tasks to the configured Accounts Manager, David Wong in the default company profile. Each new assignment queues an email that asks Viv to take the task. Settled CoffeeBench payments and E-CommerceBench marketplace payouts use the same handoff for bank reconciliation. ERPNext sends the email on David’s behalf with replies routed to his mailbox. The task identifies the ERPNext record and asks Viv to follow the company’s approval process.
 
 ## Private contracts and retry behavior
 

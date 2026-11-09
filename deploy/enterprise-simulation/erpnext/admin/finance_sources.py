@@ -12,7 +12,7 @@ from typing import Any
 
 import frappe
 
-from finance_handoffs import assign_finance_review, queue_reconciliation
+from finance_handoffs import delegate_finance_task
 from source_records import ensure_source_fields, get_source_document, insert_source_document
 from native_accounts import ensure_simulated_bank, map_party_to_currency, submit_imported_bank_transaction
 
@@ -425,13 +425,12 @@ def _insert_payment_evidence(record: dict[str, Any], context: dict[str, Any]) ->
             snapshot=_source_values(record),
         )
         submit_imported_bank_transaction(transaction)
-        if context.get("assistant_email"):
-            queue_reconciliation(
-                transaction, context["assistant_email"],
+        if context.get("finance_reviewer") and transaction.status == "Unreconciled":
+            delegate_finance_task(
+                transaction.doctype, transaction.name, context["finance_reviewer"], context["assistant_email"],
                 f"Reconcile CoffeeBench Bank Transaction {transaction.name} against ERPNext "
                 f"invoice source reference {facts['invoice_id']}. Payment evidence is on Issue "
-                f"{doc.name}. David Wong owns invoice review. If the invoice is still a draft, "
-                "coordinate with Finance before posting a payment. Check for an existing Payment "
+                f"{doc.name}. Review the invoice if it is still a draft. Check for an existing Payment "
                 "Entry and follow the company's approval process for any new entry.",
             )
     return doc.name, inserted
@@ -449,6 +448,7 @@ def reconcile(source_records: list[dict[str, Any]], company_binding: dict[str, A
         "counterparty_mail_directory": company_binding.get("counterparty_mail_directory", {}),
         "started_at": company_binding["started_at"],
         "assistant_email": company_binding.get("assistant_email"),
+        "finance_reviewer": company_binding.get("finance_reviewer"),
     }
     if "roaster_A" not in context["company_business_ids"]:
         raise ValueError("CoffeeBench business role mapping must explicitly identify roaster_A")
@@ -473,8 +473,8 @@ def reconcile(source_records: list[dict[str, Any]], company_binding: dict[str, A
             name, created = _insert_invoice(record, context)
             doctype = "Purchase Invoice" if facts.get("payer_id") in context["company_business_ids"] else "Sales Invoice"
             if created and company_binding.get("finance_reviewer"):
-                assign_finance_review(
-                    doctype, name, company_binding["finance_reviewer"],
+                delegate_finance_task(
+                    doctype, name, company_binding["finance_reviewer"], company_binding["assistant_email"],
                     "Review this CoffeeBench invoice against the source order and submit it "
                     "if the records agree and the required approvals are in place.",
                 )

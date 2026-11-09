@@ -545,9 +545,9 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
                                 "stack": [(frame.filename, frame.lineno, frame.name)
                                           for frame in traceback.extract_tb(error.__traceback__)],
                             })
-                from finance_handoffs import send_pending_reconciliation_requests
+                from finance_handoffs import send_pending_finance_handoffs
 
-                send_pending_reconciliation_requests()
+                send_pending_finance_handoffs()
                 result = {"notifications": list_owned_notification_receipts(), "errors": send_errors}
         if operation == "reconcile-finance-sources":
             frappe.db.commit()
