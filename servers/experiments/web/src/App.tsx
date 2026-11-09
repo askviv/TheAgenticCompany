@@ -709,6 +709,13 @@ function ActivityPage() {
                     {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}
                   </>}
                   {entry.related_activity_id && filtered.some((item) => item.id === entry.related_activity_id) && <a className="mt-2 inline-block text-sm underline" href={`#activity-${entry.related_activity_id}`}>View original message</a>}
+                  {isEmail && entry.direction === "received" && filtered
+                    .filter((item) => item.type === "email" && item.direction === "sent" && item.related_activity_id === entry.id)
+                    .map((item) => <div key={item.id} className="mt-2 text-sm">
+                      <a className="underline" href={`#activity-${encodeURIComponent(item.id)}`}>
+                        View handoff to {item.recipient_name || item.recipient || "recipient"}
+                      </a>
+                    </div>)}
                   {entry.coffee_update && <CoffeeUpdateDetails update={entry.coffee_update} />}
                   {entry.run_id && <Link className="mt-3 inline-flex items-center gap-1 text-sm text-primary hover:underline" to={`/runs/${encodeURIComponent(entry.run_id)}`}>View experiment <ArrowRight className="size-3.5" /></Link>}
                 </div>
