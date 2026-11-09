@@ -818,7 +818,6 @@ def _process_native_outcome(
     order = _source_sales_order(mapped)
     if order is None:
         return _pending_outcome(mapped, "source-linked Sales Order has not been imported yet")
-    event_time = mapped["occurred_at"].date().isoformat()
     facts = mapped["facts"]
     if mapped["event_type"] == "shipment_cancelled":
         comment, created = _ensure_source_comment(
@@ -837,6 +836,21 @@ def _process_native_outcome(
             "pending_reasons": [], "created": created,
         }
 
+    outcome = _process_refund(mapped, order)
+    if outcome["status"] != "completed" and company_binding.get("finance_reviewer"):
+        delegate_finance_task(
+            "Sales Order", order.name, company_binding["finance_reviewer"],
+            company_binding["assistant_email"],
+            f"the marketplace processed a refund of {record['currency']} {record['amount']} "
+            f"for order {order.name}. Can you take care of the return and credit note in ERPNext?",
+            source_event_id=mapped["source_id"],
+        )
+    return outcome
+
+
+def _process_refund(mapped: dict[str, Any], order) -> dict[str, Any]:
+    event_time = mapped["occurred_at"].date().isoformat()
+    facts = mapped["facts"]
     delivery_allocations, invoice_allocations, documents, pending_reasons = _allocated_return_rows(mapped, order)
     if pending_reasons:
         return _pending_outcome(mapped, *pending_reasons)

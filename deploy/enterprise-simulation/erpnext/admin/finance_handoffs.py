@@ -24,8 +24,11 @@ def simulation_message_footer():
     )
 
 
-def delegate_finance_task(doctype, name, employee, recipient, description):
-    identity = hashlib.sha256(f"{doctype}:{name}".encode()).hexdigest()
+def delegate_finance_task(doctype, name, employee, recipient, description, *, source_event_id=None):
+    task = f"{doctype}:{name}"
+    if source_event_id is not None:
+        task += f":{source_event_id}"
+    identity = hashlib.sha256(task.encode()).hexdigest()
     message_id = f"benchmark-finance-{identity}@theagentcompany.local"
     if frappe.db.exists("Email Queue", {"message_id": message_id}):
         return
