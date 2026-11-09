@@ -106,10 +106,8 @@ def company_tools_urls(path):
     return mapping
 
 
-def catalog(root, company_tools_urls_file=None):
-    mapping_path = (company_tools_urls_file if company_tools_urls_file is not None
-                    else Path(__file__).with_name('company-tools-urls.example.json'))
-    tools = {key: value.rstrip('/') for key, value in company_tools_urls(mapping_path).items()}
+def catalog(root):
+    tools = dict(COMPANY_TOOLS)
     templates = Environment(autoescape=False, undefined=StrictUndefined, keep_trailing_newline=True)
     result = {}
     briefs = {}
@@ -217,7 +215,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             if name not in company_columns: c.execute(f'ALTER TABLE company_state ADD COLUMN {name} {declaration}')
         c.execute("INSERT OR IGNORE INTO company_state(singleton,status,updated_at) VALUES(1,'not_started',?)",
                   (datetime.now(timezone.utc).isoformat(),))
-    experiments=catalog(app.config['REPO'], app.config['COMPANY_TOOLS_URLS_FILE'])
+    experiments=catalog(app.config['REPO'])
     compatibility=public_compatibility()
     inputs=json.loads(Path(__file__).with_name('inputs.json').read_text())['tasks']
     rocket=client_factory()
@@ -476,9 +474,13 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                         'agent_no_cua_actions': 'The employee agent stopped without using CUA. No chat delivery was confirmed.',
                         'agent_chat_message_not_confirmed': 'The employee agent finished its CUA turn, but the requested chat message was not confirmed.',
                     }.get(sent.get('error_code'), 'Employee browser send is uncertain.')
+                    message_id = sent.get('message_id')
+                    if message_id:
+                        detail += ' Retry checks the recorded Rocket.Chat message without sending again.'
+                    else:
+                        detail += ' No Rocket.Chat message ID was captured, so delivery cannot be confirmed automatically.'
                     update(run_id,status='uncertain',room_id=sent.get('room_id'),
-                           message_id=sent.get('message_id'),
-                           error=detail+' Retry reconciles the same native message without resending.')
+                           message_id=message_id,error=detail)
                     return
                 else:
                     if (sent.get('status')!='sent' or sent.get('employee_id')!=employee_id
@@ -1506,7 +1508,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     @app.post('/runs/<run_id>/retry')
     def retry_run(run_id):
         with db() as c:
-            claimed=c.execute("UPDATE runs SET status='queued',revision=revision+1 WHERE id=? AND status IN ('failed','uncertain')",(run_id,)).rowcount
+            claimed=c.execute("UPDATE runs SET status='queued',error=NULL,revision=revision+1 WHERE id=? AND status IN ('failed','uncertain')",(run_id,)).rowcount
         if claimed: executor.submit(dispatch,run_id);notify()
         return run_response(run_id)
     @app.post('/api/chat-events')

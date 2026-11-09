@@ -108,11 +108,11 @@ hostnames (`domains.owncloud`, `chat`, `plane`, `mail`, `erp`, `midpoint`, and
 host installer supplies that profile; it does not invent domains or
 credentials.
 
-Experiment task instructions and the Company tools links share the JSON file
-selected by `COMPANY_TOOLS_URLS_FILE`. The retained `task.md` instructions use
-Jinja placeholders such as `{{ company_tools.owncloud }}`; the experiment
-catalogue renders them from that mapping. Configure URLs in the mapping rather
-than editing task text. Existing run snapshots and messages are not rewritten.
+Experiment instructions refer to tools by name, such as ERPNext or ownCloud.
+The catalogue renders placeholders such as `{{ company_tools.owncloud }}` as
+tool names. The Company tools links use the addresses in
+`COMPANY_TOOLS_URLS_FILE`. Existing run snapshots and messages retain their
+original text.
 
 The bootstrap creates a guest-local root CA and server certificate with OpenSSL, installs the root into the guest OS trust store, and
 renders Caddy configuration from the repository template. Each certificate
