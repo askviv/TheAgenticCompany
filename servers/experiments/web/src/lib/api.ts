@@ -259,8 +259,14 @@ export async function getCompany(): Promise<Company> {
   return result.company
 }
 
-export async function getBenchmarkStatus(): Promise<NonNullable<Company["background"]>> {
-  const result = await requestJson<{ background: NonNullable<Company["background"]> }>("/api/company/background")
+type CompanyBackground = NonNullable<Company["background"]>
+type BenchmarkProviderStatus = CompanyBackground["providers"][string] & { enabled: boolean; in_flight: boolean }
+export type BenchmarkStatus = Omit<CompanyBackground, "providers"> & {
+  providers: Record<"coffeebench" | "ecommercebench", BenchmarkProviderStatus>
+}
+
+export async function getBenchmarkStatus(): Promise<BenchmarkStatus> {
+  const result = await requestJson<{ background: BenchmarkStatus }>("/api/company/background")
   return result.background
 }
 

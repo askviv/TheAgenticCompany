@@ -33,6 +33,7 @@ import {
 import {
   getActivity,
   getBenchmarkStatus,
+  type BenchmarkStatus,
   getModelControl,
   setModelControl,
   getCatalog,
@@ -998,7 +999,7 @@ function BenchmarkSettingsPage({ ecommerce = false }: { ecommerce?: boolean }) {
 
 function BackgroundSimulations() {
   const refreshKey = useRefreshKey()
-  const [background, setBackground] = useState<Company["background"]>(null)
+  const [background, setBackground] = useState<BenchmarkStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [backgroundControlBusy, setBackgroundControlBusy] = useState<Record<string, boolean>>({})
   const [backgroundControlErrors, setBackgroundControlErrors] = useState<Record<string, string>>({})
@@ -1017,8 +1018,14 @@ function BackgroundSimulations() {
     setBackgroundControlBusy((current) => ({ ...current, [providerId]: true }))
     setBackgroundControlErrors((current) => ({ ...current, [providerId]: "" }))
     try {
-      await setBackgroundProviderEnabled(providerId, enabled)
-      setBackground(await getBenchmarkStatus())
+      const confirmed = await setBackgroundProviderEnabled(providerId, enabled)
+      setBackground((current) => current && ({
+        ...current,
+        providers: {
+          ...current.providers,
+          [providerId]: { ...current.providers[providerId], ...confirmed },
+        },
+      }))
     } catch (reason) {
       setBackgroundControlErrors((current) => ({ ...current, [providerId]: reason instanceof Error ? reason.message : `${providerId} control could not be confirmed. Refresh to reconcile the requested state.` }))
     } finally {

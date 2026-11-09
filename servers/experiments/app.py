@@ -867,6 +867,12 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             background=safe_background(coordinator().company_background())
             if background is None:
                 raise CoordinatorError('company/background','invalid_background_status')
+            if 'configuration' in background['errors']:
+                raise CoordinatorError('company/background',background['errors']['configuration']['code'])
+            providers=background['providers']
+            if (set(providers)!={'coffeebench','ecommercebench'}
+                    or any(not {'enabled','in_flight'} <= provider.keys() for provider in providers.values())):
+                raise CoordinatorError('company/background','incomplete_benchmark_status')
             return jsonify(background=background)
         except Exception:
             logging.exception('Benchmark status retrieval failed')

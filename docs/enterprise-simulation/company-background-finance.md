@@ -67,3 +67,18 @@ The company JSON explicitly enables `background.coupling.ecommerce_to_coffee`. T
 The coupling applies upstream global logistics events (`affected_categories: all`) to the native Coffee market's Item delivery lags, using the upstream worst-active-multiplier rule. Native Marketplace deal creation uses those lags; normal deliveries then affect inventory availability and financial activity. Company-mapped actors receive the source condition at their next native morning wake and make their own native pricing and procurement decisions. Expiry restores original native lags. Existing accepted deal commitments remain intact.
 
 Hardware-specific cost shocks do not describe coffee production costs and have no invented commodity conversion. The configured coupling therefore does not force prices, rewrite existing stock or post automatic payments. These are different native product economies linked by applicable common conditions, rather than identical databases. Snapshot schema v2 migrates the existing unconditioned Coffee checkpoint from its actual native Item fields, preserving its books and cursor.
+
+## Benchmark control API
+
+The dashboard reads benchmark controls from `GET /api/company/background`.
+A successful response includes both `coffeebench` and `ecommercebench` under
+`background.providers`, with boolean `enabled` and `in_flight` fields and a
+`status` of `stopped`, `stopping`, `starting`, `active`, or `error`.
+`enabled` is the saved switch setting. `status` describes the worker lifecycle.
+The read is independent of company activity and external benchmark requests.
+Missing control data or invalid deployment configuration returns HTTP 503 and
+logs the cause for operators.
+
+`POST /api/company/background/<provider_id>/control` returns the confirmed
+`provider_id`, `enabled`, `in_flight`, and `status`. The dashboard uses that
+response to update the switch.
