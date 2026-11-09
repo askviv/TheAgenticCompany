@@ -328,6 +328,14 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         require_role(principal, "controller")
         return company_payload()
 
+    @app.get("/company/background")
+    def get_company_background(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        reader = getattr(engine, "company_background_status", None)
+        if not callable(reader):
+            raise HTTPException(status_code=503, detail="Benchmark status is not configured")
+        return reader()
+
     @app.get("/company/clock")
     async def get_company_clock(principal: Principal = Depends(authenticate)):
         require_role(principal, "controller")

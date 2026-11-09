@@ -132,6 +132,9 @@ class SimulationCoordinatorClient:
     def company(self) -> dict[str, Any]:
         return self._request("GET", "/company")
 
+    def company_background(self) -> dict[str, Any]:
+        return self._request("GET", "/company/background")
+
     def company_desktops(self) -> dict[str, Any]:
         return self._request(
             "GET", "/company/desktops", request_timeout=None,

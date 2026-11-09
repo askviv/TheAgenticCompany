@@ -804,7 +804,7 @@ def build_app(config_path: str | Path):
         company_clock.on_company_time = company_background.wake
     else:
         engine.company_background_status = lambda: {
-            "enabled": config.company_background_enabled, "available": False,
+            "enabled": config.company_background_enabled, "available": False, "initialized": False,
             "errors": {"configuration": background_unavailable or {"code": "not_configured"}},
             "providers": {}, "obligations": [], "obligations_error": None,
         }

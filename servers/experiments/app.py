@@ -302,18 +302,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             c.execute('UPDATE company_state SET error=?,updated_at=? WHERE singleton=1',
                       (message,datetime.now(timezone.utc).isoformat()))
         notify()
-    def safe_company(payload, *, require_activity=False):
-        if not isinstance(payload,dict): raise CoordinatorError('company','invalid_response')
-        allowed_status={'not_started','initializing','running','paused','failed','resetting'}
-        status=payload.get('status','not_started')
-        if (status not in allowed_status or not isinstance(payload.get('company_id'),str)
-                or not isinstance(payload.get('paused'),bool)):
-            raise CoordinatorError('company','invalid_status')
-        if require_activity and (not isinstance(payload.get('experiments'),list)
-                                or not isinstance(payload.get('activity'),list)
-                                or not isinstance(payload.get('paused'),bool)):
-            raise CoordinatorError('company','invalid_response')
-        background=payload.get('background')
+    def safe_background(background):
         if background is not None:
             if not isinstance(background,dict):
                 raise CoordinatorError('company','invalid_background_status')
@@ -353,6 +342,20 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 raise CoordinatorError('company','invalid_background_status')
             background={'initialized':background['initialized'],'providers':safe_providers,
                         'errors':safe_errors}
+        return background
+
+    def safe_company(payload, *, require_activity=False):
+        if not isinstance(payload,dict): raise CoordinatorError('company','invalid_response')
+        allowed_status={'not_started','initializing','running','paused','failed','resetting'}
+        status=payload.get('status','not_started')
+        if (status not in allowed_status or not isinstance(payload.get('company_id'),str)
+                or not isinstance(payload.get('paused'),bool)):
+            raise CoordinatorError('company','invalid_status')
+        if require_activity and (not isinstance(payload.get('experiments'),list)
+                                or not isinstance(payload.get('activity'),list)
+                                or not isinstance(payload.get('paused'),bool)):
+            raise CoordinatorError('company','invalid_response')
+        background=safe_background(payload.get('background'))
         experiment_items=payload.get('experiments',[])
         activity_items=payload.get('activity',[])
         if not isinstance(experiment_items,list) or not isinstance(activity_items,list):
@@ -857,6 +860,17 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         except Exception:
             logging.exception('Company clock retrieval failed')
             return jsonify(error='Company clock could not be retrieved.'),503
+
+    @app.get('/api/company/background')
+    def api_company_background():
+        try:
+            background=safe_background(coordinator().company_background())
+            if background is None:
+                raise CoordinatorError('company/background','invalid_background_status')
+            return jsonify(background=background)
+        except Exception:
+            logging.exception('Benchmark status retrieval failed')
+            return jsonify(error='Benchmark status could not be loaded. Refresh to retry.'),503
 
     @app.get('/api/company')
     def api_company():

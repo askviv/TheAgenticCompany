@@ -32,6 +32,7 @@ import {
 } from "react-router"
 import {
   getActivity,
+  getBenchmarkStatus,
   getModelControl,
   setModelControl,
   getCatalog,
@@ -997,15 +998,15 @@ function BenchmarkSettingsPage({ ecommerce = false }: { ecommerce?: boolean }) {
 
 function BackgroundSimulations() {
   const refreshKey = useRefreshKey()
-  const [company, setCompany] = useState<Company | null>(null)
+  const [background, setBackground] = useState<Company["background"]>(null)
   const [error, setError] = useState<string | null>(null)
   const [backgroundControlBusy, setBackgroundControlBusy] = useState<Record<string, boolean>>({})
   const [backgroundControlErrors, setBackgroundControlErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
     let active = true
-    getCompany().then((value) => {
-      if (active) { setCompany(value); setError(null) }
+    getBenchmarkStatus().then((value) => {
+      if (active) { setBackground(value); setError(null) }
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : "Company status could not be loaded.")
     })
@@ -1017,7 +1018,7 @@ function BackgroundSimulations() {
     setBackgroundControlErrors((current) => ({ ...current, [providerId]: "" }))
     try {
       await setBackgroundProviderEnabled(providerId, enabled)
-      setCompany(await getCompany())
+      setBackground(await getBenchmarkStatus())
     } catch (reason) {
       setBackgroundControlErrors((current) => ({ ...current, [providerId]: reason instanceof Error ? reason.message : `${providerId} control could not be confirmed. Refresh to reconcile the requested state.` }))
     } finally {
@@ -1026,31 +1027,31 @@ function BackgroundSimulations() {
   }
 
   return <div className="space-y-4">
-    {error && <ErrorNotice message={error} title="Background simulations unavailable" />}
+    {error && <ErrorNotice message={error} title="Benchmark status" />}
       <Card>
         <CardHeader>
           <CardTitle>Benchmark controls</CardTitle>
         </CardHeader>
         <CardContent className="divide-y">
           {([['coffeebench', 'CoffeeBench'], ['ecommercebench', 'E-CommerceBench']] as const).map(([providerId, label]) => {
-            const provider = company?.background?.providers[providerId]
+            const provider = background?.providers[providerId]
             const enabled = provider?.enabled
-            const issue = company?.background?.errors[providerId] ?? company?.background?.errors.configuration
+            const issue = background?.errors[providerId] ?? background?.errors.configuration
             return <div key={providerId} className="py-3 first:pt-0 last:pb-0">
               <div className="flex items-center justify-between gap-4">
                 <div className="flex items-center gap-3">
                   <span id={`${providerId}-label`} className="font-medium">{label}</span>
-                  <span className="text-sm text-muted-foreground">{enabled === undefined ? "Unavailable" : enabled ? "On" : "Off"}</span>
+                  <span className="text-sm text-muted-foreground">{enabled === undefined ? (error || issue ? null : "Loading…") : enabled ? "On" : "Off"}</span>
                 </div>
-                <Switch.Root
+                {enabled !== undefined && <Switch.Root
                   aria-labelledby={`${providerId}-label`}
                   checked={enabled === true}
-                  disabled={backgroundControlBusy[providerId] || enabled === undefined || provider?.status === "stopping" || (enabled === false && provider?.in_flight === true)}
+                  disabled={backgroundControlBusy[providerId] || provider?.status === "stopping" || (enabled === false && provider?.in_flight === true)}
                   onCheckedChange={(checked) => void setBackgroundProvider(providerId, checked)}
                   className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background shadow-sm transition-transform data-[checked]:translate-x-5" />
-                </Switch.Root>
+                </Switch.Root>}
               </div>
               {providerId === "coffeebench" && <Link to="/experiments/coffeebench/settings" className="mt-2 inline-block text-sm underline">Behaviour settings</Link>}
               {provider?.status === "starting" && <p className="mt-2 text-sm text-muted-foreground">Starting…</p>}

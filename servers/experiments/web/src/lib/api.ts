@@ -259,6 +259,11 @@ export async function getCompany(): Promise<Company> {
   return result.company
 }
 
+export async function getBenchmarkStatus(): Promise<NonNullable<Company["background"]>> {
+  const result = await requestJson<{ background: NonNullable<Company["background"]> }>("/api/company/background")
+  return result.background
+}
+
 export async function getCompanyDesktops(): Promise<CompanyDesktopEmployee[]> {
   const result = await requestJson<{ employees: CompanyDesktopEmployee[] }>('/api/company/desktops')
   return result.employees
