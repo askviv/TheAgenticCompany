@@ -1,5 +1,6 @@
 """Private experiment library: real requests to Viv, tracked as Rocket.Chat threads."""
 import json
+from heapq import nlargest
 import logging
 import math
 import os
@@ -1400,7 +1401,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 for field, value in item.items():
                     if not record.get(field) and value:
                         record[field] = value
-        activity = sorted(unique_activity.values(), key=lambda item: item.get('timestamp') or '')
+        activity = list(unique_activity.values())
         metrics={
             'emails_sent': None if company_error else sum(item['type']=='email' and item.get('direction')=='sent' for item in activity),
             'emails_received': None if company_error else sum(item['type']=='email' and item.get('direction')=='received' for item in activity),
@@ -1409,6 +1410,16 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 sum(item['kind']=='workplace' and item['status'] not in {'completed','failed'} for item in tracked_runs)
                 + sum(item['status'] not in {'completed','failed'} for item in company['experiments'])),
         }
+        def activity_rank(item):
+            try:
+                timestamp = datetime.fromisoformat(item.get('timestamp') or '')
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=timezone.utc)
+                return timestamp.timestamp()
+            except ValueError:
+                return float('-inf')
+
+        activity = nlargest(10, activity, key=activity_rank)
         try:
             participant_names = activity_participant_names()
         except (OSError, ValueError, KeyError, TypeError):
@@ -1420,8 +1431,9 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 if participant:
                     item[field + '_name'] = participant_names.get(participant.casefold(), participant)
         filter_type=request.args.get('type')
-        if filter_type in {'email','message','action'}:
-            activity=[item for item in activity if item['type']==filter_type]
+        if filter_type in {'email','message','chatter','action'}:
+            activity=[item for item in activity if item['type']==filter_type
+                      or (filter_type=='message' and item['type']=='chat')]
         response={'activity':activity,'metrics':metrics}
         if company_error: response['error']=company_error
         return jsonify(response)

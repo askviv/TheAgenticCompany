@@ -598,12 +598,7 @@ function ActivityPage() {
 
   const matchesFilter = (entry: ActivityEntry, value: string) =>
     value === "all" || entry.type === value || (value === "message" && entry.type === "chat")
-  const activityDate = (entry: ActivityEntry) => {
-    const timestamp = Date.parse(entry.timestamp ?? "")
-    return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY
-  }
   const filtered = activity.filter((entry) => matchesFilter(entry, filter))
-    .sort((first, second) => activityDate(second) - activityDate(first))
   const backgroundErrors = company?.background?.errors ?? {}
   const globalBackgroundErrors = ([
     ["company_background", "Background worker"],
