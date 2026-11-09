@@ -32,6 +32,7 @@ import {
 } from "react-router"
 import {
   getActivity,
+  resendActivityEmail,
   getBenchmarkStatus,
   type BenchmarkStatus,
   getModelControl,
@@ -527,6 +528,9 @@ function ActivityPage() {
   const [metrics, setMetrics] = useState<ActivityMetrics | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [resending, setResending] = useState<string | null>(null)
+  const [resendStatus, setResendStatus] = useState<{ id: string; message: string } | null>(null)
+  const resendRequests = useRef(new Map<string, string>())
   const [activityWarning, setActivityWarning] = useState<string | null>(null)
   const [manualRefresh, setManualRefresh] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
@@ -572,6 +576,24 @@ function ActivityPage() {
   const refreshCompanyActivity = () => {
     setRefreshing(true)
     setManualRefresh((current) => current + 1)
+  }
+
+  const resend = async (entry: ActivityEntry) => {
+    if (resending) return
+    const requestId = resendRequests.current.get(entry.id) ?? crypto.randomUUID()
+    resendRequests.current.set(entry.id, requestId)
+    setResending(entry.id)
+    setResendStatus(null)
+    try {
+      await resendActivityEmail(entry.id, requestId)
+      resendRequests.current.delete(entry.id)
+      setResendStatus({ id: entry.id, message: "Resent to Viv." })
+      refreshCompanyActivity()
+    } catch {
+      setResendStatus({ id: entry.id, message: "Resend could not be confirmed." })
+    } finally {
+      setResending(null)
+    }
   }
 
   const matchesFilter = (entry: ActivityEntry, value: string) =>
@@ -712,6 +734,14 @@ function ActivityPage() {
                     {showContent && content && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 text-sm leading-6">{formatActivityText(content)}</p>}
                     {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}
                   </>}
+                  {entry.can_resend && <div className="mt-3 flex items-center gap-3">
+                    <Button size="sm" variant="outline" disabled={resending !== null} onClick={() => void resend(entry)}>
+                      {resending === entry.id ? "Resending…" : "Resend to Viv"}
+                    </Button>
+                    <span role="status" className="text-sm text-muted-foreground">
+                      {resendStatus?.id === entry.id && resendStatus.message}
+                    </span>
+                  </div>}
                   {entry.coffee_update && <CoffeeUpdateDetails update={entry.coffee_update} />}
                   {entry.run_id && <Link className="mt-3 inline-flex items-center gap-1 text-sm text-primary hover:underline" to={`/runs/${encodeURIComponent(entry.run_id)}`}>View experiment <ArrowRight className="size-3.5" /></Link>}
                 </div>

@@ -189,6 +189,7 @@ export type ActivityEntry = {
   actor_name?: string | null
   recipient_name?: string | null
   related_activity_id?: string | null
+  can_resend?: boolean
   delivery_status?: string | null
   attachments?: string[] | null
   native_document?: { doctype: string; name: string } | null
@@ -397,6 +398,15 @@ export async function startCompanyEvaluation(providerId: CompanyNativeEvaluation
 }
 
 export type ActivityMetrics = { emails_sent: number | null; emails_received: number | null; messages: number; open_experiments: number | null }
+
+export async function resendActivityEmail(messageId: string, requestId: string): Promise<void> {
+  const session = await getSession()
+  await requestJson("/api/activity/resend", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ csrf_token: session.csrf_token, message_id: messageId, request_id: requestId }),
+  })
+}
 
 export async function getActivity(): Promise<{ activity: ActivityEntry[]; error?: string | null; metrics: ActivityMetrics }> {
   return requestJson<{ activity: ActivityEntry[]; error?: string | null; metrics: ActivityMetrics }>("/api/activity")

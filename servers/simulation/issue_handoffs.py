@@ -133,6 +133,21 @@ class IssueHandoffStore:
             return [dict(row) for row in connection.execute(
                 "SELECT * FROM company_issue_handoffs WHERE delivered_at IS NOT NULL ORDER BY delivered_at,issue_key")]
 
+    def reserve_resend(self, key: str, source: dict, intent: dict, now: datetime) -> bool:
+        with self.store.transaction() as connection:
+            result = connection.execute(
+                """INSERT INTO company_issue_handoffs
+                   (issue_key,notification_json,stage,delivered_at,handoff_json,updated_at)
+                   VALUES (?,?,'submitting',?,?,?) ON CONFLICT(issue_key) DO NOTHING""",
+                (key, source["notification_json"], source["delivered_at"],
+                 json.dumps(intent), utc(now).isoformat()),
+            )
+            return result.rowcount == 1
+
+    def discard_unsubmitted_resend(self, key: str) -> None:
+        with self.store.transaction() as connection:
+            connection.execute("DELETE FROM company_issue_handoffs WHERE issue_key=?", (key,))
+
     def observe(self, key: str, receipt: dict, now: datetime, *, kernel_mode: bool = False, immediate: bool = False) -> dict:
         received_at = utc(datetime.fromisoformat(receipt["received_at"]))
         with self.store.transaction() as connection:
@@ -348,9 +363,60 @@ class IssueHandoffService:
                                "title": intent["subject"], "description": "The employee asked Viv to take care of the request.",
                                "summary": record.business_description, "content": intent["body"],
                                "actor": intent["sender"]["actor_id"], "recipient": self.viv["actor_id"],
-                               "related_activity_id": record.message_id,
+                               "related_activity_id": record.message_id, "can_resend": marketplace,
                                **({"attachments": ["Original email (.eml)"]} if intent.get("forward_original") else {})})
         return result
+
+    def resend_marketplace_handoff(self, message_id: str, request_id: str) -> None:
+        for source in self.store.delivered():
+            if source["stage"] != Stage.SENT or "issue_name" in json.loads(source["notification_json"]):
+                continue
+            previous = json.loads(source["handoff_json"])
+            if previous["message_id"] == message_id:
+                break
+        else:
+            raise KeyError("Sent marketplace handoff not found")
+
+        key = "manual-resend:" + request_id
+        company_time = datetime.now(timezone.utc)
+        body = previous["body"].split("\n\nThis is a simulated environment. The clock runs at ")[0]
+        intent = {
+            **previous,
+            "resend_of": message_id,
+            "message_id": f"<handoff-resend-{request_id}@theagentcompany.local>",
+            "run_id": key,
+            "company_time": company_time.isoformat(),
+            "body": body.rstrip() + "\n\n" + simulation_message_footer(),
+        }
+        if not self.store.reserve_resend(key, source, intent, self.now()):
+            existing = self.store.get(key)
+            if (json.loads(existing["handoff_json"]).get("resend_of") == message_id
+                    and existing["stage"] == Stage.SENT):
+                return
+            raise StoreConflict("Resend already in progress or delivery unconfirmed")
+
+        submission_started = False
+
+        def mark_submission_started() -> None:
+            nonlocal submission_started
+            submission_started = True
+
+        try:
+            receipt = self.mail.send(
+                intent["sender"], self.viv, intent["subject"], intent["body"],
+                intent["message_id"], intent["run_id"], intent["generation"],
+                in_reply_to=intent.get("in_reply_to"),
+                forward_original=bool(intent.get("forward_original")),
+                system_handoff=True,
+                on_submission_started=mark_submission_started,
+            )
+            self.store.complete(key, receipt, self.now())
+        except Exception as error:
+            if submission_started:
+                self.store.fail(key, error, self.now())
+            else:
+                self.store.discard_unsubmitted_resend(key)
+            raise
 
     def _intent(self, record: MarketplaceNotification, actor: dict) -> dict:
         company_time = datetime.now(timezone.utc).isoformat()
@@ -388,6 +454,8 @@ class IssueHandoffService:
             actor = self.actors[record.recipient_email.casefold()]
             if row["stage"] in (Stage.SUBMITTING, Stage.UNCERTAIN):
                 intent = json.loads(row["handoff_json"])
+                if intent.get("resend_of"):
+                    return  # An interrupted SMTP resend must not be submitted again.
                 native_message_id = row["native_message_id"]
                 if native_message_id is None:
                     native_message_id = self.mail.employee_sent_message_id(

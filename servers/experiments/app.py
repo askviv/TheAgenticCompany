@@ -378,7 +378,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 item={**item,'description':item.get('summary') or item.get('title') or item.get('content')}
             activity.append({key:item[key] for key in
                 ('id','timestamp','event','description','experiment_id','scenario_id',
-                 'type','title','summary','content','actor','recipient','related_activity_id','delivery_status','attachments','native_document','direction','received_at','created_at','coffee_update') if key in item})
+                 'type','title','summary','content','actor','recipient','related_activity_id','delivery_status','attachments','native_document','direction','received_at','created_at','coffee_update','can_resend') if key in item})
         clock_speed=payload.get('clock_speed')
         if clock_speed is not None and (isinstance(clock_speed,bool) or not isinstance(clock_speed,(int,float))
                                         or not math.isfinite(clock_speed) or clock_speed<=0):
@@ -1341,6 +1341,15 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             names[party['email'].casefold()] = party['display_name']
         return names
 
+    @app.post('/api/activity/resend')
+    def api_resend_activity():
+        data = request.get_json()
+        try:
+            return jsonify(coordinator().resend_company_handoff(
+                data.get('message_id'), data.get('request_id')))
+        except CoordinatorError as error:
+            return company_pack_error(error)
+
     @app.get('/api/activity')
     def api_activity():
         activity=[]
@@ -1373,7 +1382,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                     'recipient':entry.get('recipient'), 'related_activity_id':entry.get('related_activity_id'),
                     'delivery_status':entry.get('delivery_status'), 'attachments':entry.get('attachments'),
                     'native_document':entry.get('native_document'),
-                    'direction':entry.get('direction'),
+                    'direction':entry.get('direction'), 'can_resend':entry.get('can_resend'),
                     'run_id':external_to_local.get(entry.get('experiment_id')),
                     **({'coffee_update':entry['coffee_update']} if 'coffee_update' in entry else {})})
         except Exception:

@@ -132,6 +132,10 @@ class SimulationCoordinatorClient:
     def company(self) -> dict[str, Any]:
         return self._request("GET", "/company")
 
+    def resend_company_handoff(self, message_id: str, request_id: str) -> dict[str, Any]:
+        return self._request("POST", "/company/activity/resend",
+                             json={"message_id": message_id, "request_id": request_id})
+
     def company_background(self) -> dict[str, Any]:
         return self._request("GET", "/company/background")
 

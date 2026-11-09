@@ -84,6 +84,11 @@ class CoffeeBackgroundRecoveryRequest(BaseModel):
     previous_operation_id: str = Field(min_length=1, max_length=240)
 
 
+class HandoffResend(BaseModel):
+    message_id: str = Field(min_length=1, max_length=998)
+    request_id: UUID
+
+
 def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -> FastAPI:
     """Create the API with an explicit configured bearer-token principal map.
 
@@ -327,6 +332,20 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
     def get_company(principal: Principal = Depends(authenticate)):
         require_role(principal, "controller")
         return company_payload()
+
+    @app.post("/company/activity/resend")
+    def resend_company_activity(payload: HandoffResend, principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        resend = getattr(engine, "resend_marketplace_handoff", None)
+        if resend is None:
+            raise HTTPException(status_code=503, detail="Handoff resend is unavailable")
+        try:
+            resend(payload.message_id, str(payload.request_id))
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Sent handoff not found") from error
+        except StoreConflict as error:
+            raise HTTPException(status_code=409, detail="Resend already in progress or delivery unconfirmed") from error
+        return {"accepted": True}
 
     @app.get("/company/background")
     def get_company_background(principal: Principal = Depends(authenticate)):

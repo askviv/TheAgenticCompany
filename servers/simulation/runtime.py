@@ -736,6 +736,7 @@ def build_app(config_path: str | Path):
             engine.company_issue_reconcile = lambda: issue_action(issue_workflow.reconcile)
             engine.company_issue_observe = lambda: issue_action(issue_workflow.observe_mail)
             engine.company_issue_activity = issue_workflow.service.activity
+            engine.resend_marketplace_handoff = issue_workflow.service.resend_marketplace_handoff
     company_packs = None
     if config.company_binding is not None:
         from .application_services import apply_company_applications
