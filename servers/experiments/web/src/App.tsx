@@ -835,6 +835,21 @@ const coffeePaymentWindows = [
   ["financing", "Customer financing requests"],
 ] as const
 
+const otherCoffeeBehaviours = [
+  ["Prompt payment", "Native behaviour"],
+  ["Weekly batch cutoff", "Planned"],
+  ["Payment after a reminder", "Planned"],
+  ["Missing purchase order reference", "Planned"],
+  ["Receiving mismatch", "Planned"],
+  ["Wrong billing recipient", "Planned"],
+  ["Partial payment", "Planned"],
+  ["Temporary cash shortage", "Native behaviour"],
+  ["Requests longer credit terms", "Native behaviour"],
+  ["Requests a higher credit limit", "Planned"],
+  ["Financial distress", "Planned"],
+  ["Bankruptcy", "Native behaviour"],
+] as const
+
 function CoffeeBenchSettingsPage() {
   const [settings, setSettings] = useState<CoffeePaymentWindows | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -865,6 +880,7 @@ function CoffeeBenchSettingsPage() {
     <h1 className="text-2xl font-semibold tracking-tight">CoffeeBench behaviours</h1>
     <Card>
       <CardHeader>
+        <CardTitle>Behaviour switches</CardTitle>
         <CardDescription>Payment windows use simulated UTC.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 overflow-x-auto">
@@ -880,6 +896,17 @@ function CoffeeBenchSettingsPage() {
             </Switch.Root>
           </li>)}
         </ul>}
+      </CardContent>
+    </Card>
+    <Card>
+      <CardHeader><CardTitle>Other scenarios</CardTitle></CardHeader>
+      <CardContent>
+        <ul className="divide-y">
+          {otherCoffeeBehaviours.map(([title, status]) => <li key={title} className="flex flex-wrap items-center justify-between gap-2 p-3">
+            <span>{title}</span>
+            <Badge variant="secondary">{status}</Badge>
+          </li>)}
+        </ul>
       </CardContent>
     </Card>
   </section>
