@@ -1465,6 +1465,7 @@ class CompanyFeedbackRuntime:
                                 (plan["mapping_id"], now, plan["source_id"]),
                             )
             native_message_id = row["native_message_id"] if row is not None else None
+            delivery = None
             if status in {"submitting", "uncertain"}:
                 if native_message_id is None:
                     native_message_id = self._mail_gateway.employee_sent_message_id(
@@ -1489,12 +1490,13 @@ class CompanyFeedbackRuntime:
                             ).fetchone()
                             if persisted is None or persisted["native_message_id"] != native_message_id:
                                 raise RuntimeError("native Message-ID mapping changed during Coffee mail recovery")
-                receipt = self._mail_gateway.find_receipt(
-                    plan["recipient"], native_message_id or plan["message_id"], payload["subject"],
-                    plan["run_id"], plan["generation"],
-                    native_message=native_message_id is not None,
+                # The recipient is a managed company mailbox. A message with
+                # the exact persisted ID proves delivery even if SMTP acceptance
+                # was lost when the sender stopped.
+                delivery = self._mail_gateway.inspect_issue_notification(
+                    plan["recipient"], native_message_id or payload["message_id"],
                 )
-                if receipt is None:
+                if delivery is None:
                     raise MailDeliveryUnconfirmed("native Coffee message submission remains unconfirmed")
             elif status == "pending":
                 def submission_started(sent_uidvalidity: str | None = None,
@@ -1560,9 +1562,10 @@ class CompanyFeedbackRuntime:
                 receipt = json.loads(row["receipt_json"])
             else:
                 raise ValueError("CoffeeBench native email outbox has an invalid state")
-            delivery = self._mail_gateway.inspect_issue_notification(
-                plan["recipient"], native_message_id or payload["message_id"]
-            )
+            if delivery is None:
+                delivery = self._mail_gateway.inspect_issue_notification(
+                    plan["recipient"], native_message_id or payload["message_id"]
+                )
             if delivery is None:
                 raise MailDeliveryUnconfirmed("native Coffee message has no confirmed Mailu recipient receipt")
             document = {

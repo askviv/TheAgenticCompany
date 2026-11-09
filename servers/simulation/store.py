@@ -472,6 +472,8 @@ class SQLiteStore:
             if "result_json" not in pending_columns:
                 connection.execute("ALTER TABLE background_provider_pending ADD COLUMN result_json TEXT")
             receipt_columns = {row["name"] for row in connection.execute("PRAGMA table_info(background_provider_result_receipts)")}
+            if "finance_source_ids_json" not in receipt_columns:
+                connection.execute("ALTER TABLE background_provider_result_receipts ADD COLUMN finance_source_ids_json TEXT")
             if "evidence_origin" not in receipt_columns:
                 connection.execute(
                     "ALTER TABLE background_provider_result_receipts "
@@ -1491,10 +1493,11 @@ class SQLiteStore:
             return
         connection.execute(
             "INSERT INTO background_provider_result_receipts(company_id,provider_id,operation_id,"
-            "upstream_commit,cursor,coverage_until,next_due,result_sha256,source_event_ids_json,evidence_origin,created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "upstream_commit,cursor,coverage_until,next_due,result_sha256,source_event_ids_json,evidence_origin,created_at,"
+            "finance_source_ids_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (company_id, provider_id, operation_id, expected[0], expected[1], expected[1],
-             *expected[2:], "coordinator_result", _now()),
+             *expected[2:], "coordinator_result", _now(),
+             _json(sorted({intent["id"] for intent in result.get("erp_intents", [])}))),
         )
 
     def record_derived_background_provider_result_receipt(
@@ -1580,6 +1583,7 @@ class SQLiteStore:
             "cursor": row["cursor"], "coverage_until": row["coverage_until"], "next_due": row["next_due"],
             "result_sha256": row["result_sha256"],
             "source_event_ids": _decode(row["source_event_ids_json"]),
+            "finance_source_ids": _decode(row["finance_source_ids_json"]) if row["finance_source_ids_json"] is not None else None,
             "evidence_origin": row["evidence_origin"],
             "created_at": row["created_at"], "acknowledged_at": row["acknowledged_at"],
         }
@@ -1622,6 +1626,34 @@ class SQLiteStore:
                 (company_id, provider_id),
             ).fetchone()
         return None if row is None else self._background_provider_result_receipt_dict(row)
+
+    def coffee_activity_message_statuses(self) -> tuple[dict, dict]:
+        """Read only the company-facing projection of the native mail ledger."""
+        with self._connection(None) as connection:
+            tables = {row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE name IN "
+                "('company_native_message_outbox','company_coffee_thread_actions')"
+            )}
+            deliveries = {}
+            replies: dict[str, list[dict]] = {}
+            if "company_native_message_outbox" in tables:
+                for row in connection.execute(
+                    "SELECT source_event_id,status,message_id,"
+                    "json_extract(private_payload_json,'$.erp_doctype') AS doctype,"
+                    "json_extract(private_payload_json,'$.erp_name') AS name,"
+                    "json_extract(private_payload_json,'$.recipient.actor_id') AS recipient "
+                    "FROM company_native_message_outbox"
+                ):
+                    deliveries[row["source_event_id"]] = dict(row)
+            if "company_coffee_thread_actions" in tables:
+                for row in connection.execute(
+                    "SELECT source_event_id,status,"
+                    "json_extract(action_json,'$.arguments.title') AS title,"
+                    "json_extract(action_json,'$.arguments.body') AS body "
+                    "FROM company_coffee_thread_actions ORDER BY updated_at"
+                ):
+                    replies.setdefault(row["source_event_id"], []).append(dict(row))
+        return deliveries, replies
 
     def list_acknowledged_native_background_provider_result_receipts(
         self, company_id: str = "company",

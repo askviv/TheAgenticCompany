@@ -187,6 +187,23 @@ export type ActivityEntry = {
   actor?: string | null
   direction?: "sent" | "received" | null
   run_id?: string | null
+  coffee_update?: {
+    cursor: string
+    messages: {
+      event_id: string
+      timestamp: string
+      title: string
+      body: string
+      sender: string
+      recipient?: string | null
+      delivery_status: string
+      message_id?: string | null
+      doctype?: string | null
+      name?: string | null
+      replies: { status: string; title: string; body: string }[]
+    }[]
+    records: { source_id: string; status: string; doctype?: string; name?: string; created?: boolean }[] | null
+  }
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {

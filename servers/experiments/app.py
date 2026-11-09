@@ -378,7 +378,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 item={**item,'description':item.get('summary') or item.get('title') or item.get('content')}
             activity.append({key:item[key] for key in
                 ('id','timestamp','event','description','experiment_id','scenario_id',
-                 'type','title','summary','content','actor','direction','received_at','created_at') if key in item})
+                 'type','title','summary','content','actor','direction','received_at','created_at','coffee_update') if key in item})
         clock_speed=payload.get('clock_speed')
         if clock_speed is not None and (isinstance(clock_speed,bool) or not isinstance(clock_speed,(int,float))
                                         or not math.isfinite(clock_speed) or clock_speed<=0):
@@ -1349,7 +1349,8 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                     'summary':entry.get('summary') or content[:240],
                     'content':content,'actor':entry.get('actor'),
                     'direction':entry.get('direction'),
-                    'run_id':external_to_local.get(entry.get('experiment_id'))})
+                    'run_id':external_to_local.get(entry.get('experiment_id')),
+                    **({'coffee_update':entry['coffee_update']} if 'coffee_update' in entry else {})})
         except Exception:
             logging.exception('Company activity retrieval failed')
             company_error='Company activity could not be retrieved.'

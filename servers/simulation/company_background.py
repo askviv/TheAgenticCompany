@@ -545,7 +545,10 @@ class CompanyBackgroundService:
     @classmethod
     def activity_for_store(cls, store) -> list[dict[str, Any]]:
         activity = []
-        for event in store.list_company_source_events():
+        sources = {event["event_id"]: event for event in store.list_company_source_events()}
+        deliveries, replies = store.coffee_activity_message_statuses()
+        finance = {receipt["source_id"]: receipt for receipt in store.list_company_finance_receipts()}
+        for event in sources.values():
             payload = {key: value for key, value in event["payload"].items()
                        if key in cls._PUBLIC_EVENT_PAYLOAD_KEYS}
             provider = {
@@ -567,7 +570,7 @@ class CompanyBackgroundService:
                              "source": event["source"], "upstream_commit": event["upstream_commit"],
                              "entity_type": event["entity_type"], "entity_id": event["entity_id"],
                              "payload": payload})
-        for receipt in store.list_company_finance_receipts():
+        for receipt in finance.values():
             activity.append({"id": "finance:" + receipt["source_id"], "timestamp": receipt["as_of"],
                              "event": "FINANCE_SOURCE_RECONCILED", "description": f"{receipt['doctype']} {receipt['name']} linked to background activity.",
                              "native_document": {"doctype": receipt["doctype"], "name": receipt["name"]},
@@ -579,11 +582,39 @@ class CompanyBackgroundService:
             if provider is None:
                 continue
             summary = f"Provider update acknowledged through {receipt['cursor']}"
+            trace = {}
+            if receipt["provider_id"] == "coffeebench":
+                messages = []
+                for event_id in receipt["source_event_ids"]:
+                    event = sources.get(event_id)
+                    if event is None or event["event_type"] != "COFFEE_NATIVE_MESSAGE_RECEIVED":
+                        continue
+                    delivery = deliveries.get(event_id, {})
+                    messages.append({
+                        "event_id": event_id, "timestamp": event["simulated_time"],
+                        "title": event["payload"].get("title"), "body": event["payload"].get("body"),
+                        "sender": event["payload"].get("sender_id"), "recipient": delivery.get("recipient"),
+                        "delivery_status": delivery.get("status", "not_queued"),
+                        "message_id": delivery.get("message_id"),
+                        "doctype": delivery.get("doctype"), "name": delivery.get("name"),
+                        "replies": replies.get(event_id, []),
+                    })
+                messages.sort(key=lambda item: item["timestamp"])
+                source_ids = receipt["finance_source_ids"]
+                records = None if source_ids is None else [
+                    {"source_id": source_id, "status": "linked", **finance[source_id]}
+                    if source_id in finance else {"source_id": source_id, "status": "pending"}
+                    for source_id in source_ids
+                ]
+                summary = f"{len(messages)} marketplace {'message' if len(messages) == 1 else 'messages'} received"
+                if records is not None:
+                    summary += f" · {len(records)} ERP {'action' if len(records) == 1 else 'actions'}"
+                trace = {"coffee_update": {"cursor": receipt["cursor"], "messages": messages, "records": records}}
             activity.append({"id": f"provider-receipt:{receipt['provider_id']}:{receipt['operation_id']}",
                              "timestamp": receipt["acknowledged_at"],
                              "event": "BACKGROUND_PROVIDER_UPDATE_COMPLETED", "type": "action",
                              "title": f"{provider} update completed", "summary": summary,
-                             "description": summary})
+                             "description": summary, **trace})
         for observation in store.list_company_due_obligation_observations():
             activity.append({"id": "obligation:" + observation["observation_id"],
                              "timestamp": observation["observed_at"],

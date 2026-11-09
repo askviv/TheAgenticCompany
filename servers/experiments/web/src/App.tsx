@@ -645,7 +645,7 @@ function ActivityPage() {
             const showContent = Boolean(content && content !== title)
             const showSummary = Boolean(summary && summary !== title && !(showContent && content?.startsWith(summary)))
             const Icon = isEmail ? Mail : entry.type === "message" || entry.type === "chat" ? MessageCircle : Building2
-            return <article key={entry.id} className="rounded-xl border bg-card p-4 sm:p-5">
+            return <article key={entry.id} id={`activity-${entry.id}`} className="scroll-mt-6 rounded-xl border bg-card p-4 sm:p-5">
               <div className="flex items-start gap-3">
                 <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-secondary text-secondary-foreground"><Icon className="size-4" /></span>
                 <div className="min-w-0 flex-1">
@@ -656,6 +656,7 @@ function ActivityPage() {
                   {(entry.actor || entry.direction) && <p className="mt-1 text-xs text-muted-foreground">{[entry.actor, entry.direction === "sent" ? "Sent" : entry.direction === "received" ? "Received" : null].filter(Boolean).join(" · ")}</p>}
                   {showSummary && summary && <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/85">{formatActivityText(summary)}</p>}
                   {showContent && content && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 text-sm leading-6">{formatActivityText(content)}</p>}
+                  {entry.coffee_update && <CoffeeUpdateDetails update={entry.coffee_update} />}
                   {entry.run_id && <Link className="mt-3 inline-flex items-center gap-1 text-sm text-primary hover:underline" to={`/runs/${encodeURIComponent(entry.run_id)}`}>View experiment <ArrowRight className="size-3.5" /></Link>}
                 </div>
               </div>
@@ -672,6 +673,49 @@ function ActivityPage() {
       )}
     </section>
   )
+}
+
+function CoffeeUpdateDetails({ update }: { update: NonNullable<ActivityEntry["coffee_update"]> }) {
+  const [erpUrl, setErpUrl] = useState<string | null>(null)
+  const hasRecords = update.messages.some((message) => message.doctype && message.name)
+    || update.records?.some((record) => record.doctype && record.name)
+  const recordLink = (doctype: string, name: string) => {
+    const label = `${doctype} ${name}`
+    if (!erpUrl) return label
+    const slug = doctype.toLowerCase().replaceAll(" ", "-")
+    return <a className="underline" href={new URL(`/app/${encodeURIComponent(slug)}/${encodeURIComponent(name)}`, erpUrl).href} target="_blank" rel="noreferrer">{label}</a>
+  }
+  return <details className="mt-3 text-sm" onToggle={(event) => {
+    if (event.currentTarget.open && hasRecords && !erpUrl) {
+      void getCompanyTools().then((tools) => setErpUrl(tools.find((tool) => tool.id === "erpnext")?.url ?? null))
+        .catch((error) => console.error("Could not load ERPNext link.", error))
+    }
+  }}>
+    <summary className="cursor-pointer font-medium underline">View update details</summary>
+    <div className="mt-3 space-y-3">
+      <p>Simulation advanced through {formatDate(update.cursor)}.</p>
+      {update.messages.length === 0 && <p>No incoming marketplace messages recorded.</p>}
+      {update.messages.map((message) => <div key={message.event_id} className="border-t pt-3">
+        <p className="font-medium">{message.title}</p>
+        <p className="text-muted-foreground">{message.sender} · {formatDate(message.timestamp)}</p>
+        <p className="my-2 whitespace-pre-wrap break-words">{message.body}</p>
+        <p>{message.delivery_status === "delivered" ? "Email delivery confirmed" : message.delivery_status === "not_queued" ? "Email not queued" : "Email delivery awaiting confirmation"}{message.recipient && ` · ${message.recipient}`}</p>
+        {message.message_id && <p className="break-all text-xs text-muted-foreground">{message.message_id}</p>}
+        {message.doctype && message.name && <p>{recordLink(message.doctype, message.name)}</p>}
+        <a className="underline" href={`#activity-${message.event_id}`}>View source event</a>
+        {message.replies.map((reply, index) => <div key={index} className="mt-2 border-l pl-3">
+          <p className="font-medium">Marketplace reply · {reply.status}</p>
+          <p>{reply.title}</p>
+          <p className="whitespace-pre-wrap break-words">{reply.body}</p>
+        </div>)}
+      </div>)}
+      {update.records === null ? <p>ERP action links were not recorded for this historical update.</p>
+        : update.records.length === 0 ? <p>No ERP actions recorded.</p>
+          : <ul className="list-disc pl-5">{update.records.map((record) => <li key={record.source_id}>
+            {record.doctype && record.name ? recordLink(record.doctype, record.name) : "ERP action pending reconciliation"}
+          </li>)}</ul>}
+    </div>
+  </details>
 }
 
 function CodexConnectionCard() {
