@@ -9,6 +9,7 @@ from typing import Any
 
 import frappe
 
+from finance_handoffs import assign_finance_review, queue_reconciliation
 from finance_sources import _company_currency, _conversion_rate, _date
 from native_accounts import ensure_simulated_bank, map_party_to_currency, submit_imported_bank_transaction
 from source_records import (
@@ -1172,6 +1173,16 @@ def reconcile(
             if record.get("kind") == "bank_transaction":
                 mapped_bank = _map_native_bank_movement(record, company_binding)
                 transaction, created = _ensure_native_bank_transaction(mapped_bank)
+                if (mapped_bank["movement_type"] == "marketplace_settlement"
+                        and company_binding.get("assistant_email")):
+                    queue_reconciliation(
+                        frappe.get_doc("Bank Transaction", transaction),
+                        company_binding["assistant_email"],
+                        f"Reconcile E-CommerceBench marketplace payout {transaction} in ERPNext. "
+                        "Use the bank reference and marketplace records to identify the related "
+                        "accounting entries. Check for existing Payment Entries before preparing "
+                        "any new entries for approval. Flag any amount you cannot allocate.",
+                    )
                 receipts.append({
                     "source_id": str(record["id"]),
                     "doctype": "Bank Transaction",
@@ -1286,6 +1297,12 @@ def reconcile(
                 experiment_id="background",
                 company_id=company_id,
                 snapshot=snapshot,
+            )
+        if created and company_binding.get("finance_reviewer"):
+            assign_finance_review(
+                "Sales Order", order.name, company_binding["finance_reviewer"],
+                "Review the E-CommerceBench order for invoicing. Use the recorded fulfillment "
+                "and the normal approval process to prepare and submit the Sales Invoice when due.",
             )
         receipts.append(
             {

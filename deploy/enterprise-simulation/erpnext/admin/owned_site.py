@@ -428,6 +428,14 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
                 raise ValueError("Finance source operation is not bound to the existing company")
         elif payload.get("erp_company") != "The Agent Company":
             raise ValueError("Due-obligation read must target the existing company")
+        if operation in ("reconcile-finance-sources", "reconcile-ecommerce-finance"):
+            profile = json.loads(Path("/opt/company-identities.json").read_text())
+            company = profile["company"]
+            reviewer = next(employee for employee in profile["employees"]
+                            if employee["id"] == company["providerCaseResponsibleEmployeeId"])
+            if "Accounts Manager" not in reviewer["erpRoles"]:
+                raise ValueError("Benchmark finance reviewer must be an Accounts Manager")
+            binding.update(finance_reviewer=reviewer["email"], assistant_email=company["assistantEmail"])
         with contextlib.redirect_stdout(sys.stderr):
             if operation == "capture-evaluation-evidence":
                 from evaluation_evidence import (
@@ -537,6 +545,9 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
                                 "stack": [(frame.filename, frame.lineno, frame.name)
                                           for frame in traceback.extract_tb(error.__traceback__)],
                             })
+                from finance_handoffs import send_pending_reconciliation_requests
+
+                send_pending_reconciliation_requests()
                 result = {"notifications": list_owned_notification_receipts(), "errors": send_errors}
         if operation == "reconcile-finance-sources":
             frappe.db.commit()

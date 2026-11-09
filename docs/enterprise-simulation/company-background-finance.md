@@ -32,6 +32,8 @@ Each nonzero settled CoffeeBench payment involving the company creates a native 
 
 The statement line is available for reconciliation as soon as it is imported. Viv can use it to find the corresponding invoice and reconcile a submitted Payment Entry in ERPNext. CoffeeBench does not post a Payment Entry or allocate the payment to the invoice. Draft orders and invoices still follow the normal ERPNext review and submission flow. Previously imported payments are not backfilled automatically.
 
+The company import assigns new CoffeeBench draft invoices to the configured Accounts Manager, David Wong in the default company profile. New E-CommerceBench Sales Orders go to the same reviewer for invoicing once fulfillment supports it. When a CoffeeBench payment or E-CommerceBench marketplace payout creates an unreconciled Bank Transaction, ERPNext queues a reconciliation request to the company profile's assistant email. The company issue timer delivers the request through the native Email Queue. The request identifies the bank transaction and asks Viv to check for existing entries and follow the company's approval process.
+
 ## Private contracts and retry behavior
 
 The worker RPC contract is in [`integration_contracts.py`](../../servers/simulation/integration_contracts.py). It uses versioned initialize/advance requests and responses with provider ID, pinned upstream commit, cursor, status, next due time, events, outcomes, and finance source intents. The provider identity values are `sakanaai-coffeebench-native-economy` and `qwenlm-ecommercebench-calendar`.
