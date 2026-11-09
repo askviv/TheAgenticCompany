@@ -838,10 +838,12 @@ class Environment:
             seller = self.business_apps[deal.seller_id]
             buyer = self.business_apps[deal.buyer_id]
 
-            # Catalog is tangible-only. Buyer receives the full advertised
-            # qty (no quality variance in the simplified 2-item world).
-            received_qty = deal.qty
-            quality_low = False
+            windows = getattr(self.marketplace, "_erp_payment_windows", {}).get(deal.buyer_id, ())
+            quality_low = (
+                deal.seller_id in getattr(self.marketplace, "_erp_invoice_issuers", ())
+                and "receiving_mismatch" in windows
+            )
+            received_qty = deal.qty - max(1, deal.qty // 10) if quality_low else deal.qty
             # Total-cost form: buyer adds qty + (qty × deal.unit_price)
             # to inventory_total_cost. WAVG view derives per-unit on
             # demand. inventory_in journal entry below uses the same
@@ -865,6 +867,12 @@ class Environment:
                 due_date=due_day,
                 reference=deal.id,
             )
+            if quality_low:
+                invoice._erp_receiving_discrepancy = {
+                    "expected_quantity": deal.qty,
+                    "received_quantity": received_qty,
+                    "credit_amount": round((deal.qty - received_qty) * deal.unit_price, 2),
+                }
             seller.accounts_receivable.append(invoice)
             buyer.accounts_payable.append(invoice)
             deal.invoice_id = invoice.id

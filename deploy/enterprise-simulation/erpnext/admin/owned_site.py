@@ -559,8 +559,12 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
 
                 send_errors.extend(send_pending_finance_handoffs())
                 profile = json.loads(Path("/opt/company-identities.json").read_text())
+                company_profile = profile["company"]
+                reviewer = next(employee for employee in profile["employees"]
+                                if employee["id"] == company_profile["providerCaseResponsibleEmployeeId"])
                 send_errors.extend(send_pending_sales_invoices(
-                    "The Agent Company", profile["company"]["background"]["coffee"]["counterparties"],
+                    "The Agent Company", company_profile["background"]["coffee"]["counterparties"],
+                    misroute_to=reviewer["email"],
                 ))
                 result = {"notifications": list_owned_notification_receipts(), "errors": send_errors}
         if operation == "reconcile-finance-sources":

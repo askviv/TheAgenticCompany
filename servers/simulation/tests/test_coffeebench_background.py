@@ -664,6 +664,41 @@ def _native_invoice_payment_fixture(tmp_path, *, late_fee):
     return start, binding, snapshot, action
 
 
+def test_short_delivery_records_actual_inventory_and_credit_and_distress_progresses(tmp_path):
+    _, _, snapshot, _ = _native_invoice_payment_fixture(tmp_path, late_fee=0.0)
+    environment = coffee._restore(snapshot["checkpoint"], tmp_path, snapshot["company_business_ids"])
+    market = environment.marketplace
+    market._erp_invoice_issuers = {"roaster_A"}
+    market._erp_payment_windows = {"retailer_A": ["receiving_mismatch", "financial_distress"]}
+    market._erp_sent_invoices = set()
+    market._erp_start_weekday = 4
+    seller, buyer = environment.business_apps["roaster_A"], environment.business_apps["retailer_A"]
+    item = "roasted_coffee_kg"
+    seller.inventory[item] = 50
+    buyer.cash = 10000
+    inventory_before = buyer.inventory.get(item, 0)
+    environment.time_manager.virtual_min = 600
+    listing = market.post_listing("roaster_A", item, 20, 10, 30)
+    offer, result = market.make_offer(listing.id, "retailer_A", 10, 10, 30)
+    assert result == "ok" and offer.payment_terms_days == 37
+    deal, result = market.accept_offer(offer.id, "roaster_A")
+    assert result == "ok"
+    environment.rng = SimpleNamespace(random=lambda: 0.99)
+    environment._process_deliveries(deal.delivery_at // 1440)
+    invoice = buyer.accounts_payable[-1]
+    assert buyer.inventory[item] == inventory_before + 9
+    assert invoice.amount == 100
+    assert invoice._erp_receiving_discrepancy == {
+        "expected_quantity": 10, "received_quantity": 9, "credit_amount": 10,
+    }
+    second, result = market.make_offer(listing.id, "retailer_A", 10, 10, 30)
+    assert result == "ok" and second.payment_terms_days == 44
+    assert "14 extra days" in second.message
+    rows = coffee._source_records(environment, snapshot)
+    assert next(row for row in rows if row["native_record_id"] == invoice.id)["native_record"]["receiving_discrepancy"] == invoice._erp_receiving_discrepancy
+    assert next(row for row in rows if row["native_record_id"] == second.id)["native_record"]["requested_extra_days"] == 14
+
+
 def test_partial_payment_preserves_open_balance_and_distinct_bank_evidence(tmp_path):
     _, _, snapshot, _ = _native_invoice_payment_fixture(tmp_path, late_fee=0.0)
     environment = coffee._restore(snapshot["checkpoint"], tmp_path, snapshot["company_business_ids"])

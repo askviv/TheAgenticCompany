@@ -1347,6 +1347,8 @@ def _source_records(environment: Any, snapshot: dict[str, Any]) -> list[dict[str
                 "total_price": format(total.quantize(Decimal("0.01")), "f"),
                 "payment_terms_days": offer.payment_terms_days,
                 "offer_message": offer.message,
+                **({"requested_extra_days": offer._erp_distress_extension}
+                   if getattr(offer, "_erp_distress_extension", 0) else {}),
                 **({"financing_requested": True} if offer.buyer_id == getattr(
                     environment.marketplace, "_erp_active_financing_customer", None
                 ) else {}),
@@ -1391,6 +1393,8 @@ def _source_records(environment: Any, snapshot: dict[str, Any]) -> list[dict[str
             "bad_debt": invoice.bad_debt,
             "upstream_source": "coffeebench/typings.py:Invoice",
         }
+        if discrepancy := getattr(invoice, "_erp_receiving_discrepancy", None):
+            invoice_fields["receiving_discrepancy"] = discrepancy
         if company_side == invoice.issuer:
             windows = getattr(environment.marketplace, "_erp_payment_windows", {}).get(party, ())
             exceptions = sorted(set(windows) & {"reminder", "missing_po", "receiving_mismatch", "wrong_recipient", "partial_payment"})

@@ -92,6 +92,16 @@ class Marketplace:
             # this, a buyer could offer for a small fraction of a 50 kg lot,
             # farmer accepts, and the deal lands at e.g. 30 kg — bypassing
             # the bulk-breaker moat entirely.
+            distress_days = 0
+            windows = getattr(self, "_erp_payment_windows", {}).get(buyer_id, ())
+            buyer = self.business_apps.get(buyer_id)
+            if (buyer is not None and "financial_distress" in windows
+                    and listing.seller_id in getattr(self, "_erp_invoice_issuers", ())):
+                prior = sum(invoice.issuer == listing.seller_id for invoice in buyer.accounts_payable)
+                distress_days = 7 * min(prior + 1, 4)
+                payment_terms_days = max(0, int(payment_terms_days)) + distress_days
+                explanation = f"Could we have {distress_days} extra days to pay? Cash is tight."
+                message = f"{message}\n\n{explanation}" if message else explanation
             offer = Offer(
                 id="off_" + str(uuid.uuid4())[:8],
                 listing_id=listing_id,
@@ -103,6 +113,8 @@ class Marketplace:
                 posted_at=self.time_manager.get_virtual_min(),
                 message=message,
             )
+            if distress_days:
+                offer._erp_distress_extension = distress_days
             self.offers.append(offer)
             return offer, "ok"
 

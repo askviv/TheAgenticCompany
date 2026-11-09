@@ -11,15 +11,15 @@ For company sales, CoffeeBench waits for ERPNext to submit the invoice and recor
 | Morning processing | Can pay before 10 a.m. on the simulated UTC clock. | Learn when payments tend to happen and send invoices early. | Operator switch |
 | Requests order financing | Asks for credit to fund a coffee order. | Receives the request with the ERPNext order reference and can create an application in Lending. | Operator switch |
 | Batch cutoff | Processes payments on Fridays from 10 a.m. simulated UTC. Invoices first observed at or after the cutoff roll into the next Friday batch. | Infer the cutoff and avoid unnecessary reminders. | Operator switch |
-| Reminder needed | Pays after a delivered reply to the invoice email. | Follow up on the invoice thread. | Operator switch |
+| Reminder needed | Pays after a delivered reply on the invoice thread asks for payment. | Follow up on the invoice thread. | Operator switch |
 | Missing purchase order reference | Holds payment until the requested PO is on a delivered invoice. | Correct the PO and resend after the finance handoff. | Operator switch |
-| Receiving mismatch | Disputes 10% of the net invoice for a simulated quality issue. | Review the finance handoff and submit a linked credit note. | Operator switch |
-| Wrong billing recipient | Rejects invoices delivered to an address other than the configured accounts payable mailbox. | Resend to accounts payable after the finance handoff. | Operator switch |
+| Receiving mismatch | Receives fewer units than ordered and disputes the value of the missing units. | Review the finance handoff and submit a linked credit note. | Operator switch |
+| Wrong billing recipient | The first invoice delivery is routed to the internal finance reviewer instead of the buyer’s accounts payable mailbox. | Resend to the accounts payable address provided in the finance handoff. | Operator switch |
 | Partial payment | Pays half of the balance and disputes the remainder. | Reconcile the separate receipt and resolve the remainder with a linked credit note. | Operator switch |
 | Temporary cash shortage | Defers payment until cash is available. | Spot the delay, ask for a realistic date and revisit the account. | Native insufficient-cash handling. A scripted recovery pattern is proposed |
 | Requests longer credit terms | Asks for more time to pay on a new order, for example net 60. | Check the account and exposure, then approve, decline or request approval under the company policy. | Native offer terms. A scripted request is proposed |
 | Requests a higher credit limit | Asks to exceed the existing ERPNext credit limit. An unconfigured limit starts at half the first qualifying order. | Review the request through Finance and submit the order if approved. | Operator switch |
-| Financial distress | Defers payment until at least seven simulated days after the due date. | Use the late-payment history when deciding whether to offer further credit. | Operator switch |
+| Financial distress | Requests longer terms and increasingly defers payments as prior invoices accumulate, in seven-day steps up to 28 days. | Review the terms request and use the late-payment history when deciding whether to extend credit. | Operator switch |
 | Bankruptcy | Stops trading when the benchmark declares the business bankrupt. Outstanding receivables can become bad debt. | Treat confirmed insolvency as a reason to stop extending new credit and review existing exposure. | Native bankruptcy and write-off. A scripted warning and credit decision are proposed |
 
 CoffeeBench offers already carry `payment_terms_days`. A buyer can ask for net 60 by making an offer with 60 days. Accepting the offer sets that term on the deal. That models trade credit on a specific order. A standalone credit application, shared credit limit and approval workflow would need their own scenario.

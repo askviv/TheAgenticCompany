@@ -598,7 +598,9 @@ class BusinessApp:
             }
 
         # Cumulative-return cap.
-        remaining_returnable = deal.qty - deal.returned_qty
+        discrepancy = getattr(invoice, "_erp_receiving_discrepancy", None)
+        received_qty = discrepancy["received_quantity"] if discrepancy else deal.qty
+        remaining_returnable = received_qty - deal.returned_qty
         if qty > remaining_returnable:
             return {
                 "status": "error",
@@ -1451,8 +1453,14 @@ class BusinessApp:
                     # A receipt at or after Friday 10:00 rolls to the next batch.
                     if weekday != 4 or seen >= friday + 600 or minute < friday + 600:
                         return {"status": "error", "message": "Invoice is waiting for the next weekly payment batch."}
-                if "financial_distress" in windows and self._today() < invoice.due_date + 7:
-                    return {"status": "error", "message": "Buyer has deferred payment because cash is tight."}
+                if "financial_distress" in windows:
+                    prior = sum(
+                        other.issuer == invoice.issuer and other.issue_date < invoice.issue_date
+                        for other in self.accounts_payable
+                    )
+                    delay = 7 * min(prior + 1, 4)
+                    if self._today() < invoice.due_date + delay:
+                        return {"status": "error", "message": "Buyer has deferred payment because cash is tight."}
                 if "partial_payment" in windows and invoice.net_outstanding >= 0.02:
                     if invoice.partial_paid_amount and invoice.credited_amount <= invoice.partial_credit_at_payment:
                         return {"status": "error", "message": "The disputed balance is awaiting a credit."}

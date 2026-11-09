@@ -7,6 +7,9 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone, timedelta
 import json
+import re
+from email import policy
+from email.parser import Parser
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -325,6 +328,13 @@ def _insert_offer(record: dict[str, Any], context: dict[str, Any]) -> tuple[str,
             f"{party['name']} is requesting credit to finance order {doc.name} "
             f"({record['currency']} {record['amount']}). Can you take care of it?",
         )
+    if facts.get("requested_extra_days") and context.get("finance_reviewer"):
+        delegate_finance_task(
+            "Sales Order", doc.name, context["finance_reviewer"], context["assistant_email"],
+            f"{party['name']} says cash is tight and asks for {facts['payment_terms_days']} days "
+            f"to pay for order {doc.name}. Can you review the request before accepting it?",
+            source_event_id=f"payment-terms:{record['id']}",
+        )
     if facts.get("credit_limit_requested") and context.get("finance_reviewer"):
         from erpnext.selling.doctype.customer.customer import get_credit_limit, get_customer_outstanding
 
@@ -634,12 +644,23 @@ def coffee_billing_state(company, directory, enabled, *, handoff=None):
             if credited:
                 state["invoice_credits"][invoice.custom_source_id] = str(credited)
             if deliveries and "receiving_mismatch" in behaviours:
-                expected = (_decimal(facts["amount"], "invoice amount") * Decimal("0.10")).quantize(Decimal("0.01"))
-                if credited < expected:
-                    issues["receiving_mismatch"] = (
-                        f"the customer reports a quality issue on invoice {invoice.name} "
-                        f"and is asking for a USD {expected} credit. Can you handle it?"
-                    )
+                discrepancy = facts.get("receiving_discrepancy")
+                if discrepancy:
+                    expected = _decimal(discrepancy["credit_amount"], "shipment shortage credit")
+                    if credited < expected:
+                        issues["receiving_mismatch"] = (
+                            f"the customer received {discrepancy['received_quantity']} of "
+                            f"{discrepancy['expected_quantity']} units on invoice {invoice.name}. "
+                            f"Can you resolve the shortage and issue the USD {expected:.2f} credit?"
+                        )
+                else:
+                    # Existing checkpoints can contain a dispute created before
+                    # shipment quantities were recorded.
+                    expected = (_decimal(facts["amount"], "invoice amount") * Decimal("0.10")).quantize(Decimal("0.01"))
+                    if credited < expected:
+                        issues["receiving_mismatch"] = (
+                            f"the customer disputes USD {expected} on invoice {invoice.name}. Can you handle it?"
+                        )
 
         if handoff and handoff.get("finance_reviewer"):
             for issue, request in issues.items():
@@ -652,9 +673,10 @@ def coffee_billing_state(company, directory, enabled, *, handoff=None):
             continue
         if "reminder" in behaviours:
             roots = [queue.communication for queue in deliveries]
-            replies = frappe.get_all("Communication", filters={
+            communications = frappe.get_all("Communication", filters={
                 "in_reply_to": ["in", roots], "sent_or_received": "Sent",
-            }, pluck="name")
+            }, fields=["name", "content"])
+            replies = [message.name for message in communications if _requests_payment(message.content)]
             reply_queues = frappe.get_all("Email Queue", filters={"communication": ["in", replies]},
                                           pluck="name") if replies else []
             reminder_sent = reply_queues and frappe.db.exists("Email Queue Recipient", {
@@ -666,13 +688,65 @@ def coffee_billing_state(company, directory, enabled, *, handoff=None):
     return state
 
 
-def send_pending_sales_invoices(company: str, directory: dict[str, Any]) -> list[dict[str, Any]]:
+def _requests_payment(content):
+    from frappe.utils import strip_html
+
+    # Quoted correspondence is not a request from the current sender.
+    authored = re.split(r"<blockquote\b|id=["'](?:divRplyFwdMsg|appendonsend)["']",
+                        content or "", maxsplit=1, flags=re.IGNORECASE)[0]
+    authored = re.sub(r"<(?:br\s*/?|/p|/div)>", "\n", authored, flags=re.IGNORECASE)
+    authored = re.split(r"(?mi)^\s*(?:>|On .+ wrote:|[- ]*Original Message[- ]*)", strip_html(authored), maxsplit=1)[0]
+    return bool(re.search(
+        r"\b(?:payment reminder|(?:remind(?:er|ing)?|follow(?:ing)? up|chase)\b[^.!?]*\b(?:payment|outstanding|invoice)"
+        r"|(?:please|could you|can you|kindly)\b[^.!?]*\b(?:pay|settle|(?:arrange|make|send|process|confirm) (?:the )?payment)"
+        r"|when\b[^.!?]*\b(?:payment|pay|settle))\b",
+        authored, re.IGNORECASE,
+    ))
+
+
+def send_pending_sales_invoices(company: str, directory: dict[str, Any], *, misroute_to: str | None = None) -> list[dict[str, Any]]:
     """Dispatch native invoice emails requested from the ERPNext invoice form."""
     queues = _sales_invoice_mail(
         company, directory, queue_status=["Not Sent", "Partially Sent"], recipient_status="Not Sent",
         include_misaddressed=True,
     )
-    return send_finance_queues(sorted({name for _, name in queues}))
+    queue_names = sorted({name for _, name in queues})
+    if misroute_to:
+        for name in queue_names:
+            _misroute_first_invoice(name, directory, misroute_to)
+    return send_finance_queues(queue_names)
+
+
+def _misroute_first_invoice(queue_name, directory, misroute_to):
+    queue = frappe.get_doc("Email Queue", queue_name, for_update=True)
+    if (queue.status != "Not Sent" or len(queue.recipients) != 1
+            or queue.recipients[0].status != "Not Sent"
+            or not _includes_invoice_print(queue, queue.reference_name)):
+        return
+    snapshot = frappe.db.get_value("Sales Invoice", queue.reference_name, "custom_source_snapshot")
+    facts = json.loads(snapshot)["native_record"]
+    if "wrong_recipient" not in facts.get("billing_exceptions", ()):
+        return
+    address = directory[facts["payer_id"]]["email"].casefold()
+    if queue.recipients[0].recipient.casefold() != address:
+        return
+    earlier = frappe.get_all("Email Queue", filters={
+        "name": ["!=", queue.name], "reference_doctype": "Sales Invoice",
+        "reference_name": queue.reference_name,
+    }, pluck="name")
+    if earlier and (
+        frappe.db.exists("Email Queue Recipient", {"parent": ["in", earlier], "recipient": misroute_to})
+        or frappe.db.exists("Email Queue Recipient", {"parent": ["in", earlier], "status": "Sent"})
+    ):
+        return
+    message = Parser(policy=policy.SMTP).parsestr(queue.message)
+    if "To" in message:
+        message.replace_header("To", misroute_to)
+    else:
+        message["To"] = misroute_to
+    frappe.db.set_value("Email Queue", queue.name, "message", message.as_string())
+    frappe.db.set_value("Email Queue Recipient", queue.recipients[0].name, "recipient", misroute_to)
+    frappe.db.commit()
 
 
 def read_due_obligations(company: str, as_of: str | datetime) -> list[dict[str, Any]]:
