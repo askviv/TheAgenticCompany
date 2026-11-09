@@ -1347,6 +1347,9 @@ def _source_records(environment: Any, snapshot: dict[str, Any]) -> list[dict[str
                 "total_price": format(total.quantize(Decimal("0.01")), "f"),
                 "payment_terms_days": offer.payment_terms_days,
                 "offer_message": offer.message,
+                "financing_requested": offer.buyer_id == getattr(
+                    environment.marketplace, "_erp_active_financing_customer", None
+                ),
                 "offer_status": offer.status,
                 "offer_posted_at_virtual_minute": offer.posted_at,
                 "listing_quantity": listing.qty,
@@ -1511,6 +1514,16 @@ async def advance(
         if window in enabled_windows:
             payment_windows.setdefault(customer, []).append(window)
     environment.marketplace._erp_payment_windows = payment_windows
+    if "financing" in enabled_windows and not hasattr(environment.marketplace, "_erp_financing_customer"):
+        customers = sorted(set(environment.business_apps) - set(updated["company_business_ids"]))
+        if customers:
+            environment.marketplace._erp_financing_customer = random.Random(
+                f"{updated['checkpoint']['sha256']}:financing"
+            ).choice(customers)
+    environment.marketplace._erp_active_financing_customer = (
+        getattr(environment.marketplace, "_erp_financing_customer", None)
+        if "financing" in enabled_windows else None
+    )
     environment.marketplace._erp_start_weekday = _as_datetime(updated["started_at"]).weekday()
     virtual_delta = max(0, int((finish - _as_datetime(updated["started_at"])).total_seconds() // 60))
     horizon = int(environment.max_days) * 1440

@@ -9,6 +9,7 @@ For company sales, CoffeeBench waits for ERPNext to submit the invoice and recor
 | Prompt payer | Pays when the invoice arrives and funds are available. | Reconcile the receipt without sending a reminder. | Possible through the native buyer agent |
 | Friday processing | Can pay on Fridays on the simulated UTC clock. | Infer the weekly rhythm and send before the next review. | Operator switch |
 | Morning processing | Can pay before 10 a.m. on the simulated UTC clock. | Learn when payments tend to happen and send invoices early. | Operator switch |
+| Requests order financing | Asks for credit to fund a coffee order. | Receives the request with the ERPNext order reference and can create an application in Lending. | Operator switch |
 | Batch cutoff | Pays in a weekly batch. Invoices after the cutoff roll into the next batch. | Infer the cutoff and avoid unnecessary reminders. | Proposed |
 | Reminder needed | Pays after a relevant reminder on the original thread. | Learn which customers need one follow-up and when. | Proposed |
 | Missing purchase order reference | Holds an invoice until it carries the correct PO reference. | Ask what is blocking payment, correct the reference and resend. | Proposed |
@@ -26,15 +27,13 @@ CoffeeBench offers already carry `payment_terms_days`. A buyer can ask for net 6
 ## Customer settings
 
 Open **Experiments → Background simulations → CoffeeBench → Behaviour settings**.
-Switch on Friday payments or payments before 10 a.m. CoffeeBench chooses the
+Switch on Friday payments, payments before 10 a.m. or customer financing requests. CoffeeBench chooses the
 counterparties privately and keeps those choices in its checkpoint. The settings
 page and API show only which behaviours are enabled. Changes apply on the next
 advance. A payment
 still requires a submitted invoice sent to the buyer and sufficient buyer cash.
 
-The proposed scenarios in the table need their own simulation rules. For a
-financing scenario, a buyer could request a working-capital loan to fund an
-order. The application would go to Lending for approval. A disbursement could
-fund the sale, and the buyer would repay the lender according to the loan
-product's rate and schedule. The credit decision would need to happen before
-funds are released.
+When a selected customer makes an offer that CoffeeBench imports as a new
+Sales Order draft, the finance handoff asks Viv to handle the customer's credit
+request. It includes the customer, order reference and requested amount.
+Viv can use that request to create an application in Lending.

@@ -319,6 +319,12 @@ def _insert_offer(record: dict[str, Any], context: dict[str, Any]) -> tuple[str,
         task_id=context["company_id"], experiment_id="background",
         company_id=context["company_id"], snapshot=_source_values(record),
     )
+    if facts.get("financing_requested") and context.get("finance_reviewer"):
+        delegate_finance_task(
+            "Sales Order", doc.name, context["finance_reviewer"], context["assistant_email"],
+            f"{party['name']} is requesting credit to finance order {doc.name} "
+            f"({record['currency']} {record['amount']}). Can you take care of it?",
+        )
     return doc.name, inserted
 
 

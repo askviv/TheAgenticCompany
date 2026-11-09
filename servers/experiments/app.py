@@ -1224,7 +1224,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         args = ()
         if request.method == 'POST':
             behaviour, enabled = (request.form.get(key) for key in ('behaviour', 'enabled'))
-            if behaviour not in {'friday', 'morning'} or enabled not in {'true', 'false'}:
+            if behaviour not in {'friday', 'morning', 'financing'} or enabled not in {'true', 'false'}:
                 abort(400)
             args = (behaviour, enabled == 'true')
         try:

@@ -799,6 +799,7 @@ function HelpPage() {
 const coffeePaymentWindows = [
   ["friday", "Friday payments"],
   ["morning", "Payments before 10 a.m."],
+  ["financing", "Customer financing requests"],
 ] as const
 
 function CoffeeBenchSettingsPage() {
