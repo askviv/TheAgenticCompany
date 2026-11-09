@@ -351,19 +351,27 @@ class IssueHandoffService:
                            "event": "ISSUE_NOTIFICATION_DELIVERED", "type": "email", "direction": "sent",
                            "title": record.subject, "description": "ERPNext notified the responsible employee.",
                            "summary": record.business_description, "actor": "ERPNext"})
-            if row["stage"] == Stage.SENT:
+            if row["stage"] in (Stage.SENT, Stage.SUBMITTING, Stage.UNCERTAIN):
                 intent = json.loads(row["handoff_json"])
+                sent = row["stage"] == Stage.SENT
                 company_time = intent.get("company_time")
                 if company_time is None:
                     footer = re.search(r"The current simulated time is (.+ UTC)\.\s*$", intent["body"])
                     if footer:
                         company_time = datetime.strptime(footer[1], "%d %b %Y, %H:%M UTC").replace(tzinfo=timezone.utc).isoformat()
                 result.append({"id": intent["message_id"], "timestamp": company_time,
-                               "event": "COFFEE_REQUEST_HANDED_TO_VIV" if marketplace else "ISSUE_HANDED_TO_VIV", "type": "email", "direction": "sent",
+                               "event": ("COFFEE_REQUEST_HANDED_TO_VIV" if marketplace else "ISSUE_HANDED_TO_VIV")
+                                        if sent else "HANDOFF_SUBMISSION_UNCONFIRMED",
+                               "type": "email", "direction": "sent" if sent else None,
+                               "delivery_status": (
+                                   "Awaiting receipt confirmation" if sent else
+                                   "Sending" if row["stage"] == Stage.SUBMITTING else "Submission unconfirmed"
+                               ),
+                               "native_message_id": row["native_message_id"],
                                "title": intent["subject"], "description": "The employee asked Viv to take care of the request.",
                                "summary": record.business_description, "content": intent["body"],
                                "actor": intent["sender"]["actor_id"], "recipient": self.viv["actor_id"],
-                               "related_activity_id": record.message_id, "can_resend": marketplace,
+                               "related_activity_id": record.message_id, "can_resend": marketplace and sent,
                                **({"attachments": ["Original email (.eml)"]} if intent.get("forward_original") else {})})
         return result
 

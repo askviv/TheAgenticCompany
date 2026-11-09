@@ -724,7 +724,10 @@ function ActivityPage() {
                 <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-secondary text-secondary-foreground"><Icon className="size-4" /></span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                    <h3 className="font-medium">{entry.title}</h3>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-medium">{entry.title}</h3>
+                      {isEmail && entry.delivery_status && <Badge variant="outline">{entry.delivery_status}</Badge>}
+                    </div>
                     <time className="text-xs text-muted-foreground">{entry.timestamp ? formatDate(entry.timestamp) : ""}</time>
                   </div>
                   {isEmail ? <div className="mt-3 space-y-2 text-sm">
@@ -735,7 +738,6 @@ function ActivityPage() {
                     <div className="whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 leading-6">
                       {content || "Message body was not captured."}
                     </div>
-                    {entry.delivery_status && <p className="text-muted-foreground">{entry.delivery_status}</p>}
                     {Boolean(entry.attachments?.length) && <p>Attachments: {entry.attachments?.join(", ")}</p>}
                     {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}
                   </div> : isCommunication ? <div className="mt-3 overflow-x-auto rounded-lg border bg-muted/60">

@@ -553,6 +553,9 @@ class CompanyFeedback:
                         "actor": evidence.actor,
                         "recipient": evidence.recipient_actor_id,
                         "related_activity_id": evidence.in_reply_to,
+                        "authenticated_viv_reply": (
+                            evidence.event == "email_reply" and evidence.authenticated_sender_actor_id == "viv"
+                        ),
                         "direction": direction,
                         "title": subject if isinstance(subject, str) and subject else "Company email",
                         "summary": subject if isinstance(subject, str) and subject else "Company email",
