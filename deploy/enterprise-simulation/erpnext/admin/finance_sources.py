@@ -1,7 +1,7 @@
 """Reconcile CoffeeBench source facts into native, reviewable ERP documents.
 
 This is an import boundary: it creates draft orders/invoices and source-linked
-payment evidence. It never posts a payment or submits a financial document.
+payment evidence and bank statement lines. It never posts a Payment Entry.
 """
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from typing import Any
 import frappe
 
 from source_records import ensure_source_fields, get_source_document, insert_source_document
-from native_accounts import map_party_to_currency
+from native_accounts import ensure_simulated_bank, map_party_to_currency, submit_imported_bank_transaction
 
 
 SOURCE_SYSTEM = "coffeebench"
@@ -37,6 +37,7 @@ def ensure_finance_source_contract() -> None:
         ("Item", "item_name"), ("Customer", "customer_name"), ("Supplier", "supplier_name"),
         ("Sales Order", "terms"), ("Purchase Order", "terms"),
         ("Sales Invoice", "remarks"), ("Purchase Invoice", "remarks"), ("Issue", "subject"),
+        ("Bank Transaction", "description"),
     ):
         ensure_source_fields(doctype, anchor)
     _ensure_offer_fields()
@@ -377,15 +378,14 @@ def _insert_invoice(record: dict[str, Any], context: dict[str, Any]) -> tuple[st
 
 def _insert_payment_evidence(record: dict[str, Any], context: dict[str, Any]) -> tuple[str, bool]:
     facts = record.get("native_record") or {}
-    # No bank account mapping is supplied by CoffeeBench. Keep a native Issue
-    # as payment evidence so an operator can reconcile it; never post cash.
-    company_side = facts.get("cash_to_party_id") in context["company_business_ids"] or facts.get("cash_from_party_id") in context["company_business_ids"]
-    if not company_side:
+    incoming = facts.get("cash_to_party_id") in context["company_business_ids"]
+    outgoing = facts.get("cash_from_party_id") in context["company_business_ids"]
+    if incoming == outgoing:
         return "", False
-    party_id = facts.get("cash_from_party_id") if facts.get("cash_to_party_id") in context["company_business_ids"] else facts.get("cash_to_party_id")
-    side = facts.get("cash_from_party_id") if facts.get("cash_to_party_id") in context["company_business_ids"] else facts.get("cash_to_party_id")
-    _ensure_party(party_id, "Supplier" if side == facts.get("cash_to_party_id") else "Customer",
-                  context, record["currency"])
+    party_type = "Customer" if incoming else "Supplier"
+    party_id = facts["cash_from_party_id"] if incoming else facts["cash_to_party_id"]
+    currency = record["currency"]
+    party = _ensure_party(party_id, party_type, context, currency)
     subject = f"CoffeeBench payment evidence {record['id']}"
     ensure_source_fields("Issue", "subject")
     values = {
@@ -397,6 +397,33 @@ def _insert_payment_evidence(record: dict[str, Any], context: dict[str, Any]) ->
         task_id=context["company_id"], experiment_id="background", company_id=context["company_id"],
         snapshot=_source_values(record),
     )
+    amount = _decimal(record["amount"], "paid amount")
+    if amount:
+        _, bank_account = ensure_simulated_bank(
+            context["company"], currency, f"CoffeeBench Settlement {currency}",
+            "CoffeeBench Simulated Bank",
+        )
+        transaction, _ = insert_source_document(
+            "Bank Transaction",
+            {
+                "date": _date(record["occurred_at"]),
+                "bank_account": bank_account,
+                "company": context["company"],
+                "currency": currency,
+                "deposit": float(amount) if incoming else 0,
+                "withdrawal": float(amount) if outgoing else 0,
+                "party_type": party_type,
+                "party": party["name"],
+                "description": f"CoffeeBench invoice {facts['invoice_id']} · evidence {doc.name}",
+                "reference_number": facts["invoice_id"],
+                "transaction_id": record["id"],
+            },
+            source_system=SOURCE_SYSTEM, source_id=str(record["native_record_id"]),
+            record_type="bank-transaction", task_id=context["company_id"],
+            experiment_id="background", company_id=context["company_id"],
+            snapshot=_source_values(record),
+        )
+        submit_imported_bank_transaction(transaction)
     return doc.name, inserted
 
 

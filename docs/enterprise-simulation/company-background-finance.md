@@ -28,7 +28,9 @@ Company background status and due-obligation observations contain operational su
 
 Coffee source invoices and orders are reconciled as native draft Purchase/Sales Orders and Purchase/Sales Invoices. Their item quantities and source prices/amounts come from the pinned native source facts. Counterparty and item records are linked to source identity; native ERPNext defaults and dated USD exchange rates are used. A missing required native framework default or exchange rate fails reconciliation visibly. Existing documents are reused by company-scoped source identity and are never overwritten on retry, so subsequent agent edits remain intact.
 
-A Coffee payment appears as native payment evidence (an ERPNext Issue with the immutable source snapshot) because the upstream actor ledger does not identify a company bank account or authorize an ERP posting. It does not become a Payment Entry or a posted bank transaction. Draft orders/invoices remain subject to the ordinary ERPNext review, approval, and submission flow. Due/overdue obligations are read from submitted native invoices; E-Commerce does not manufacture them.
+Each nonzero settled CoffeeBench payment involving the company creates a native Bank Transaction in the dedicated simulated company bank account for its currency. Customer receipts become deposits and supplier payments become withdrawals. The statement line uses the simulated settlement date, source invoice reference and stable payment identity. It links to the existing evidence Issue and retains the immutable source snapshot. The account is provisioned on first use without changing the company default.
+
+The statement line is available for reconciliation as soon as it is imported. Viv can use it to find the corresponding invoice and reconcile a submitted Payment Entry in ERPNext. CoffeeBench does not post a Payment Entry or allocate the payment to the invoice. Draft orders and invoices still follow the normal ERPNext review and submission flow. Previously imported payments are not backfilled automatically.
 
 ## Private contracts and retry behavior
 

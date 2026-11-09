@@ -10,7 +10,7 @@ from typing import Any
 import frappe
 
 from finance_sources import _company_currency, _conversion_rate, _date
-from native_accounts import map_party_to_currency
+from native_accounts import ensure_simulated_bank, map_party_to_currency, submit_imported_bank_transaction
 from source_records import (
     ensure_source_fields,
     get_source_document,
@@ -27,68 +27,10 @@ DATE_MEANING = "Dispatch deadline, not arrival promise"
 
 
 def _ensure_marketplace_bank(company: str, currency: str, store_type: str) -> tuple[str, str]:
-    """Provision a source-specific ERP ledger and Bank Account without changing defaults."""
-    parent_name = frappe.db.get_value(
-        "Account",
-        {"company": company, "account_name": "Bank Accounts", "is_group": 1},
-        "name",
+    return ensure_simulated_bank(
+        company, currency, f"E-CommerceBench {store_type} Marketplace Bank",
+        "E-CommerceBench Simulated Marketplace",
     )
-    if not parent_name:
-        raise RuntimeError(f"Native company {company} has no Bank Accounts parent")
-    parent = frappe.get_doc("Account", parent_name)
-    if parent.root_type != "Asset" or parent.account_type != "Bank" or not parent.is_group:
-        raise RuntimeError("Native Bank Accounts parent does not satisfy the ERPNext account contract")
-    account_name = f"E-CommerceBench {store_type} Marketplace Bank"
-    existing_name = frappe.db.get_value(
-        "Account", {"company": company, "account_name": account_name}, "name"
-    )
-    if existing_name:
-        account = frappe.get_doc("Account", existing_name)
-        if (account.parent_account != parent_name or account.root_type != "Asset"
-                or account.account_type != "Bank" or account.is_group
-                or account.disabled or account.account_currency != currency):
-            raise RuntimeError("Existing E-CommerceBench marketplace bank conflicts with its source mapping")
-    else:
-        account = frappe.get_doc({
-            "doctype": "Account", "account_name": account_name, "company": company,
-            "parent_account": parent_name, "root_type": "Asset",
-            "report_type": "Balance Sheet", "account_type": "Bank",
-            "account_currency": currency, "is_group": 0,
-        })
-        account.insert(ignore_permissions=True)
-
-    bank_name = "E-CommerceBench Simulated Marketplace"
-    if frappe.db.exists("Bank", bank_name):
-        bank = frappe.get_doc("Bank", bank_name)
-        if bank.bank_name != bank_name:
-            raise RuntimeError("Existing simulated Bank master conflicts with E-Commerce source identity")
-    else:
-        bank = frappe.get_doc({"doctype": "Bank", "bank_name": bank_name})
-        bank.insert(ignore_permissions=True)
-
-    existing_bank_account_name = frappe.db.get_value(
-        "Bank Account", {"account_name": account_name, "company": company}, "name"
-    )
-    if existing_bank_account_name:
-        bank_account = frappe.get_doc("Bank Account", existing_bank_account_name)
-        if (bank_account.bank != bank.name or bank_account.account != account.name
-                or not bank_account.is_company_account or bank_account.company != company
-                or bank_account.is_default):
-            raise RuntimeError("Existing E-Commerce Bank Account conflicts with the dedicated company bank mapping")
-    else:
-        if frappe.db.exists("Bank Account", account_name):
-            raise RuntimeError("E-Commerce Bank Account name conflicts with another native account")
-        bank_account = frappe.get_doc({
-            "doctype": "Bank Account",
-            "account_name": account_name,
-            "bank": bank.name,
-            "is_company_account": 1,
-            "company": company,
-            "account": account.name,
-            "is_default": 0,
-        })
-        bank_account.insert(ignore_permissions=True)
-    return account.name, bank_account.name
 
 
 def ensure_ecommerce_finance_contract() -> None:
@@ -997,7 +939,7 @@ def _ensure_native_bank_transaction(mapped: dict[str, Any]) -> tuple[str, bool]:
     if existing:
         if json.loads(existing.custom_source_snapshot) != snapshot:
             raise RuntimeError("Existing E-Commerce Bank Transaction conflicts with native receipt facts")
-        _submit_imported_bank_transaction(existing)
+        submit_imported_bank_transaction(existing)
         return existing.name, False
     descriptions = {
         "opening_balance": "E-CommerceBench native opening balance",
@@ -1027,19 +969,8 @@ def _ensure_native_bank_transaction(mapped: dict[str, Any]) -> tuple[str, bool]:
         task_id=company_id, experiment_id="background", company_id=company_id,
         snapshot=snapshot,
     )
-    _submit_imported_bank_transaction(transaction)
+    submit_imported_bank_transaction(transaction)
     return transaction.name, created
-
-
-def _submit_imported_bank_transaction(transaction: Any) -> None:
-    """Match ERPNext's native bank statement import lifecycle without posting GL."""
-    if transaction.docstatus == 0:
-        transaction.submit()
-        transaction.reload()
-    if transaction.docstatus != 1 or transaction.status not in {"Unreconciled", "Reconciled"}:
-        raise RuntimeError(
-            "Existing E-Commerce Bank Transaction is cancelled or has an unsupported native status"
-        )
 
 
 def _ensure_marketplace(
