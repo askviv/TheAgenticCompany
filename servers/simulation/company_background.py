@@ -396,7 +396,10 @@ class CompanyBackgroundService:
                 company_name = _document_name(self.company_binding.get("documents", {}).get("company"))
                 bindings = {
                     **bindings,
-                    "coffeebench": {**bindings["coffeebench"], "sent_sales_invoice_ids": read_sent(company_name)},
+                    "coffeebench": {
+                        **bindings["coffeebench"], "sent_sales_invoice_ids": read_sent(company_name),
+                        "payment_windows": self.engine.store.coffee_payment_windows(),
+                    },
                 }
             result = self.runtime.advance_company(
                 now, bindings=bindings, provider_ids=selected,

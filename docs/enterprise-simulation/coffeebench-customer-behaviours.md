@@ -7,8 +7,8 @@ For company sales, CoffeeBench waits for ERPNext to submit the invoice and recor
 | Behaviour | What the customer does | What Viv can observe or do | Status |
 | --- | --- | --- | --- |
 | Prompt payer | Pays when the invoice arrives and funds are available. | Reconcile the receipt without sending a reminder. | Possible through the native buyer agent |
-| Friday processing | Reviews invoices on Fridays in its local time. | Infer the weekly rhythm and send before the next review. | Proposed |
-| Morning processing | Pays invoices received before 10 a.m. that day and queues later arrivals. | Learn the preferred send time from earlier payments. | Proposed |
+| Friday processing | Can pay on Fridays on the simulated UTC clock. | Infer the weekly rhythm and send before the next review. | Operator switch |
+| Morning processing | Can pay before 10 a.m. on the simulated UTC clock. | Learn when payments tend to happen and send invoices early. | Operator switch |
 | Batch cutoff | Pays in a weekly batch. Invoices after the cutoff roll into the next batch. | Infer the cutoff and avoid unnecessary reminders. | Proposed |
 | Reminder needed | Pays after a relevant reminder on the original thread. | Learn which customers need one follow-up and when. | Proposed |
 | Missing purchase order reference | Holds an invoice until it carries the correct PO reference. | Ask what is blocking payment, correct the reference and resend. | Proposed |
@@ -23,10 +23,17 @@ For company sales, CoffeeBench waits for ERPNext to submit the invoice and recor
 
 CoffeeBench offers already carry `payment_terms_days`. A buyer can ask for net 60 by making an offer with 60 days. Accepting the offer sets that term on the deal. That models trade credit on a specific order. A standalone credit application, shared credit limit and approval workflow would need their own scenario.
 
-## Proposed switches
+## Customer settings
 
-Add an operator-only setting under `company.background.coffee`, keyed by counterparty ID. Each behaviour can have an `enabled` switch and parameters such as the time zone, review day, cutoff or requested credit term. Capture the settings at run start so an experiment can be replayed. Keep the rules private to the simulator. Viv sees normal business evidence such as offers, invoices, messages and payments.
+Open **Experiments → Background simulations → CoffeeBench → Customer settings**.
+Switch on Friday payments or payments before 10 a.m. for any counterparty.
+If both are on, the customer can pay before 10 a.m. on Fridays. Settings are saved
+on the server and applied when CoffeeBench starts its next advance. A payment
+still requires a submitted invoice sent to the buyer and sufficient buyer cash.
 
-Start with timing, a missing PO reference and a distressed buyer requesting net 60. Run several orders per customer and measure whether Viv changes its approach, reduces days to payment and avoids new credit exposure after warning signs appear. For the credit case, send the request and warning before the seller accepts the order so Viv has a decision to make. Actual bankruptcy remains a separate event that can reveal the cost of earlier credit decisions.
-
-These switches describe a proposed configuration. The current benchmark uses native buyer agents and has no operator switches for these scripted behaviours.
+The proposed scenarios in the table need their own simulation rules. For a
+financing scenario, a buyer could request a working-capital loan to fund an
+order. The application would go to Lending for approval. A disbursement could
+fund the sale, and the buyer would repay the lender according to the loan
+product's rate and schedule. The credit decision would need to happen before
+funds are released.

@@ -291,6 +291,22 @@ export async function stopCompanyDesktop(employeeId: string): Promise<{ employee
   })
 }
 
+export type CoffeePaymentWindows = Record<string, string[]>
+
+export async function getCoffeePaymentWindows(): Promise<CoffeePaymentWindows> {
+  const result = await requestJson<{ customers: CoffeePaymentWindows }>("/api/company/background/coffeebench/payment-windows")
+  return result.customers
+}
+
+export async function setCoffeePaymentWindow(customer: string, behaviour: string, enabled: boolean): Promise<CoffeePaymentWindows> {
+  const session = await getSession()
+  const result = await requestJson<{ customers: CoffeePaymentWindows }>("/api/company/background/coffeebench/payment-windows", {
+    method: "POST",
+    body: new URLSearchParams({ csrf_token: session.csrf_token, customer, behaviour, enabled: String(enabled) }),
+  })
+  return result.customers
+}
+
 export async function setBackgroundProviderEnabled(providerId: CompanyNativeEvaluation["provider_id"], enabled: boolean): Promise<{ provider_id: CompanyNativeEvaluation["provider_id"]; enabled: boolean; in_flight: boolean; status: "stopped" | "stopping" | "starting" | "active" | "error" }> {
   const session = await getSession()
   return requestJson(`/api/company/background/${providerId}/control`, {

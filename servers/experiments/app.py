@@ -612,6 +612,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     @app.get('/')
     @app.get('/streams')
     @app.get('/help')
+    @app.get('/experiments/coffeebench/settings')
     @app.get('/experiments')
     def index(): return frontend()
     @app.get('/api/session')
@@ -1218,6 +1219,21 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             message=f'Company pause state could not be confirmed ({type(error).__name__}). Refresh to retry.'
             save_company_error(message)
             return jsonify(error=message),502
+    @app.route('/api/company/background/coffeebench/payment-windows', methods=['GET', 'POST'])
+    def coffee_payment_windows():
+        args = ()
+        if request.method == 'POST':
+            customer, behaviour, enabled = (request.form.get(key) for key in ('customer', 'behaviour', 'enabled'))
+            if (customer not in {'farmer_A', 'farmer_B', 'roaster_B', 'retailer_A', 'retailer_B'}
+                    or behaviour not in {'friday', 'morning'} or enabled not in {'true', 'false'}):
+                abort(400)
+            args = (customer, behaviour, enabled == 'true')
+        try:
+            return jsonify(coordinator().coffee_payment_windows(*args))
+        except CoordinatorError:
+            logging.exception('CoffeeBench payment windows unavailable')
+            return jsonify(error='CoffeeBench payment windows could not be confirmed.'), 502
+
     @app.post('/api/company/background/<provider_id>/control')
     def control_background_provider(provider_id):
         if provider_id not in {'coffeebench','ecommercebench'}: abort(404)

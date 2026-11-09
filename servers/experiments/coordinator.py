@@ -211,6 +211,15 @@ class SimulationCoordinatorClient:
         return self._request("POST", "/company/pause", idempotency_key=idempotency_key,
                              json={"paused": paused})
 
+    def coffee_payment_windows(self, customer=None, behaviour=None, enabled=None):
+        endpoint = "/company/background/coffeebench/payment-windows"
+        if customer is None:
+            return self._request("GET", endpoint)
+        return self._request(
+            "POST", f"{endpoint}/{quote(customer, safe='')}/{quote(behaviour, safe='')}",
+            json={"enabled": enabled},
+        )
+
     def control_background_provider(self, provider_id: str, enabled: bool, *, idempotency_key: str) -> dict[str, Any]:
         if provider_id not in {"coffeebench", "ecommercebench"}:
             raise ValueError("unsupported background provider")

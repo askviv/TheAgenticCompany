@@ -229,6 +229,10 @@ class SQLiteStore:
                     erp_binding_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS coffee_payment_windows (
+                    customer TEXT NOT NULL, behaviour TEXT NOT NULL,
+                    PRIMARY KEY(customer, behaviour)
+                );
                 CREATE TABLE IF NOT EXISTS background_provider_controls (
                     company_id TEXT NOT NULL, provider_id TEXT NOT NULL,
                     enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
@@ -688,6 +692,21 @@ class SQLiteStore:
             return [{"experiment_id": row["run_id"], "scenario_id": row["scenario_id"],
                      "generation": row["generation"], "agent_id": row["agent_id"], "status": row["status"],
                      "simulated_time": row["simulated_time"], "paused": bool(row["paused"])} for row in rows]
+
+    def coffee_payment_windows(self) -> dict[str, list[str]]:
+        with self._connection(None) as db:
+            rows = db.execute("SELECT customer, behaviour FROM coffee_payment_windows ORDER BY customer, behaviour")
+            settings: dict[str, list[str]] = {}
+            for row in rows:
+                settings.setdefault(row["customer"], []).append(row["behaviour"])
+        return settings
+
+    def set_coffee_payment_window(self, customer: str, behaviour: str, enabled: bool) -> None:
+        with self.transaction() as db:
+            if enabled:
+                db.execute("INSERT OR IGNORE INTO coffee_payment_windows VALUES (?, ?)", (customer, behaviour))
+            else:
+                db.execute("DELETE FROM coffee_payment_windows WHERE customer=? AND behaviour=?", (customer, behaviour))
 
     def background_provider_control(self, provider_id: str, company_id: str = "company") -> dict[str, Any]:
         with self._connection(None) as db:

@@ -37,6 +37,7 @@ import {
   getCatalog,
   getCompany,
   getCompanyClock,
+  getCoffeePaymentWindows,
   getCompanyDesktops,
   getCompanyEvaluations,
   getCompanyTools,
@@ -54,9 +55,11 @@ import {
   startEvaluation,
   startCompanyEvaluation,
   setBackgroundProviderEnabled,
+  setCoffeePaymentWindow,
   startCodexDeviceAuthorization,
   type ActivityEntry,
   type ActivityMetrics,
+  type CoffeePaymentWindows,
   type Company,
   type CompanyDesktopEmployee,
   type CompanyNativeEvaluation,
@@ -793,6 +796,71 @@ function HelpPage() {
   )
 }
 
+const coffeeCustomers = [
+  ["retailer_A", "Retailer A"], ["retailer_B", "Retailer B"], ["roaster_B", "Roaster B"],
+  ["farmer_A", "Farmer A"], ["farmer_B", "Farmer B"],
+] as const
+
+const coffeePaymentWindows = [
+  ["friday", "Friday payments"],
+  ["morning", "Payments before 10 a.m."],
+] as const
+
+function CoffeeBenchSettingsPage() {
+  const [settings, setSettings] = useState<CoffeePaymentWindows | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    getCoffeePaymentWindows().then(
+      (result) => { if (active) setSettings(result) },
+      () => { if (active) setError("CoffeeBench settings could not be loaded.") },
+    )
+    return () => { active = false }
+  }, [])
+
+  async function update(customer: string, behaviour: string, enabled: boolean) {
+    setSaving(true)
+    setError(null)
+    try {
+      setSettings(await setCoffeePaymentWindow(customer, behaviour, enabled))
+    } catch {
+      setError("The change could not be confirmed. Reload to check the saved settings.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <div className="space-y-4">
+    <Link to="/experiments" className="text-sm underline">Back to experiments</Link>
+    <Card>
+      <CardHeader>
+        <CardTitle>CoffeeBench settings</CardTitle>
+        <CardDescription>Choose when each customer can pay. Times use the simulated UTC clock. If both switches are on, the customer can pay before 10 a.m. on Fridays.</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 overflow-x-auto">
+        {error && <ErrorNotice message={error} title="CoffeeBench settings" />}
+        {settings && <table className="w-full text-left text-sm">
+          <thead><tr><th scope="col" className="p-3">Customer</th>
+            {coffeePaymentWindows.map(([id, label]) => <th key={id} scope="col" className="p-3">{label}</th>)}
+          </tr></thead>
+          <tbody>{coffeeCustomers.map(([customer, label]) => <tr key={customer} className="border-t">
+            <th scope="row" className="p-3">{label}</th>
+            {coffeePaymentWindows.map(([behaviour, title]) => <td key={behaviour} className="p-3">
+              <Switch.Root aria-label={`${label}: ${title}`} checked={settings[customer]?.includes(behaviour) ?? false}
+                disabled={saving} onCheckedChange={(checked) => void update(customer, behaviour, checked)}
+                className="relative inline-flex h-6 w-11 rounded-full bg-input data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+                <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background transition-transform data-[checked]:translate-x-5" />
+              </Switch.Root>
+            </td>)}
+          </tr>)}</tbody>
+        </table>}
+      </CardContent>
+    </Card>
+  </div>
+}
+
 function BackgroundSimulations() {
   const refreshKey = useRefreshKey()
   const [company, setCompany] = useState<Company | null>(null)
@@ -847,6 +915,7 @@ function BackgroundSimulations() {
                   <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background shadow-sm transition-transform data-[checked]:translate-x-5" />
                 </Switch.Root>
               </div>
+              {providerId === "coffeebench" && <Link to="/experiments/coffeebench/settings" className="mt-2 inline-block text-sm underline">Customer settings</Link>}
               {provider?.status === "starting" && <p className="mt-2 text-sm text-muted-foreground">Starting…</p>}
               {(provider?.status === "stopping" || (enabled === false && provider?.in_flight)) && <p className="mt-2 text-sm text-muted-foreground">Finishing current work…</p>}
               {issue && <p className="mt-2 text-sm text-destructive">Needs attention ({issue.code}).</p>}
@@ -1570,6 +1639,7 @@ export default function App() {
           <Route index element={<ActivityPage />} />
           <Route path="streams" element={<EmployeeStreamsPage />} />
           <Route path="experiments" element={<LibraryPage />} />
+          <Route path="experiments/coffeebench/settings" element={<CoffeeBenchSettingsPage />} />
           <Route path="experiments/:experimentId" element={<ExperimentPage />} />
           <Route path="help" element={<HelpPage />} />
           <Route path="runs" element={<RunsPage />} />

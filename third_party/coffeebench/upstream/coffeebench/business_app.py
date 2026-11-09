@@ -1435,6 +1435,14 @@ class BusinessApp:
                     "status": "error",
                     "message": f"Open AP invoice '{invoice_id}' not found.",
                 }
+            if invoice.issuer in getattr(self.marketplace, "_erp_invoice_issuers", ()):
+                windows = getattr(self.marketplace, "_erp_payment_windows", {}).get(self.agent_id, ())
+                minute = self.time_manager.get_virtual_min()
+                if (
+                    "friday" in windows and (self.marketplace._erp_start_weekday + minute // 1440) % 7 != 4
+                    or "morning" in windows and minute % 1440 >= 600
+                ):
+                    return {"status": "error", "message": "Payment is outside the buyer's processing window."}
             amount_due = invoice.net_outstanding
             if amount_due <= 0:
                 invoice.paid = True

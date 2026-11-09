@@ -453,6 +453,22 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         status_code = 202 if result.get("status") == "uncertain" else 200
         return JSONResponse(result, status_code=status_code, headers={"Cache-Control": "no-store"})
 
+    @app.get("/company/background/coffeebench/payment-windows")
+    def coffee_payment_windows(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        return {"customers": engine.store.coffee_payment_windows()}
+
+    @app.post("/company/background/coffeebench/payment-windows/{customer}/{behaviour}")
+    def set_coffee_payment_window(
+        customer: Literal["farmer_A", "farmer_B", "roaster_B", "retailer_A", "retailer_B"],
+        behaviour: Literal["friday", "morning"],
+        model: BackgroundControlRequest,
+        principal: Principal = Depends(authenticate),
+    ):
+        require_role(principal, "controller")
+        engine.store.set_coffee_payment_window(customer, behaviour, model.enabled)
+        return {"customers": engine.store.coffee_payment_windows()}
+
     @app.post("/company/background/{provider_id}/control", status_code=202)
     def control_company_background(
         provider_id: Literal["coffeebench", "ecommercebench"],
