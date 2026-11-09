@@ -20,9 +20,11 @@ class NativeFinanceSourceAdapter:
         self,
         reconcile_operation: Callable[[list[dict[str, Any]], dict[str, Any], str | datetime], dict[str, Any]],
         due_obligations_operation: Callable[[str, str | datetime], list[dict[str, Any]]],
+        read_sent_coffee_invoices: Callable[[str], list[str]] | None = None,
     ) -> None:
         self._reconcile_operation = reconcile_operation
         self._due_obligations_operation = due_obligations_operation
+        self.read_sent_coffee_invoices = read_sent_coffee_invoices
 
     def reconcile(
         self,

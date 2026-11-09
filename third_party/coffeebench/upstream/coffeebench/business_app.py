@@ -1375,7 +1375,7 @@ class BusinessApp:
                 still reports the FULL counts/totals regardless of limit.
         """
         return self._ap_ar_view(
-            self.accounts_payable,
+            [invoice for invoice in self.accounts_payable if self._invoice_available_to_buyer(invoice)],
             only_overdue,
             counterparty,
             limit,
@@ -1406,6 +1406,12 @@ class BusinessApp:
             limit,
         )
 
+    def _invoice_available_to_buyer(self, invoice: Invoice) -> bool:
+        return (
+            invoice.issuer not in getattr(self.marketplace, "_erp_invoice_issuers", ())
+            or invoice.id in self.marketplace._erp_sent_invoices
+        )
+
     def pay_invoice(self, invoice_id: str) -> dict:
         """Pay one of your AP invoices in full from cash. Cash is wired to the issuer.
 
@@ -1420,6 +1426,7 @@ class BusinessApp:
                     i
                     for i in self.accounts_payable
                     if i.id == invoice_id and not i.paid and not i.returned
+                    and self._invoice_available_to_buyer(i)
                 ),
                 None,
             )

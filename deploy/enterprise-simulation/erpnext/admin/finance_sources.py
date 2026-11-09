@@ -483,6 +483,49 @@ def reconcile(source_records: list[dict[str, Any]], company_binding: dict[str, A
     return {"as_of": _date(as_of), "receipts": receipts}
 
 
+def _sales_invoice_mail(company: str, directory: dict[str, Any], *, queue_status, recipient_status):
+    """Find submitted CoffeeBench invoice emails addressed to the mapped buyer."""
+    if not frappe.get_meta("Sales Invoice").has_field("custom_source_system"):
+        return
+    invoices = frappe.get_all(
+        "Sales Invoice",
+        filters={"company": company, "docstatus": 1, "custom_source_system": SOURCE_SYSTEM,
+                 "custom_company_id": "company", "custom_experiment_id": "background"},
+        fields=["name", "custom_source_id", "custom_source_snapshot"],
+    )
+    for invoice in invoices:
+        payer_id = json.loads(invoice.custom_source_snapshot)["native_record"]["payer_id"]
+        address = directory[payer_id]["email"]
+        queues = frappe.get_all(
+            "Email Queue",
+            filters={"reference_doctype": "Sales Invoice", "reference_name": invoice.name,
+                     "status": ["in", queue_status], "communication": ["is", "set"]},
+            pluck="name",
+        )
+        if queues:
+            for queue in frappe.get_all("Email Queue Recipient", filters={
+                "parent": ["in", queues], "recipient": address, "status": recipient_status,
+            }, pluck="parent"):
+                yield invoice.custom_source_id, queue
+
+
+def read_sent_sales_invoices(company: str, directory: dict[str, Any]) -> list[str]:
+    """Release only submitted invoices sent to their mapped CoffeeBench buyer."""
+    return sorted({invoice_id for invoice_id, _ in _sales_invoice_mail(
+        company, directory, queue_status=["Sent", "Partially Sent"], recipient_status="Sent",
+    )})
+
+
+def send_pending_sales_invoices(company: str, directory: dict[str, Any]) -> None:
+    """Dispatch native invoice emails requested from the ERPNext invoice form."""
+    queues = _sales_invoice_mail(
+        company, directory, queue_status=["Not Sent", "Partially Sent"], recipient_status="Not Sent",
+    )
+    for queue in sorted({name for _, name in queues}):
+        frappe.get_doc("Email Queue", queue).send()
+        frappe.db.commit()
+
+
 def read_due_obligations(company: str, as_of: str | datetime) -> list[dict[str, Any]]:
     """Read due/overdue native submitted invoices for finance operations."""
     boundary = _date(as_of)

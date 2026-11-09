@@ -398,7 +398,7 @@ def _observe_tau_retail(experiment_id: str, task_id: str) -> dict[str, object]:
 def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str, object]:
     if str(uuid.UUID(operation_id)) != operation_id.lower():
         raise ValueError("finance operation_id must be a canonical UUID")
-    if operation not in ("reconcile-finance-sources", "read-due-obligations",
+    if operation not in ("reconcile-finance-sources", "read-due-obligations", "read-sent-coffee-invoices",
                          "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance",
                          "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"):
         raise ValueError("unsupported native finance source operation")
@@ -498,6 +498,12 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
             elif operation == "reconcile-finance-sources":
                 from finance_sources import reconcile
                 result = reconcile(payload["source_records"], payload["company_binding"], payload["as_of"])
+            elif operation == "read-sent-coffee-invoices":
+                from finance_sources import read_sent_sales_invoices
+                profile = json.loads(Path("/opt/company-identities.json").read_text())
+                result = read_sent_sales_invoices(
+                    payload["erp_company"], profile["company"]["background"]["coffee"]["counterparties"],
+                )
             elif operation == "read-due-obligations":
                 from finance_sources import read_due_obligations
                 result = read_due_obligations(payload["erp_company"], payload["as_of"])
@@ -547,7 +553,13 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
                             })
                 from finance_handoffs import send_pending_finance_handoffs
 
+                from finance_sources import send_pending_sales_invoices
+
                 send_pending_finance_handoffs()
+                profile = json.loads(Path("/opt/company-identities.json").read_text())
+                send_pending_sales_invoices(
+                    "The Agent Company", profile["company"]["background"]["coffee"]["counterparties"],
+                )
                 result = {"notifications": list_owned_notification_receipts(), "errors": send_errors}
         if operation == "reconcile-finance-sources":
             frappe.db.commit()
@@ -629,7 +641,7 @@ def _refresh_seed(site: str) -> dict[str, object]:
 def main() -> None:
     Path("/home/frappe/logs").mkdir(mode=0o700, parents=True, exist_ok=True)
     parser = argparse.ArgumentParser(description="Manage coordinator-owned ERPNext sites and native task imports")
-    parser.add_argument("operation", choices=("create", "company-only", "install-business-apps", "reset", "probe", "refresh-seed", "ensure-erp-contract", "seed-tau-retail", "observe-tau-retail", "reconcile-finance-sources", "read-due-obligations", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"))
+    parser.add_argument("operation", choices=("create", "company-only", "install-business-apps", "reset", "probe", "refresh-seed", "ensure-erp-contract", "seed-tau-retail", "observe-tau-retail", "reconcile-finance-sources", "read-due-obligations", "read-sent-coffee-invoices", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"))
     parser.add_argument("run_id", help="run UUID or τ experiment UUID")
     parser.add_argument("task_id", nargs="?", help="τ retail task id for seed-tau-retail")
     args = parser.parse_args()
@@ -640,7 +652,7 @@ def main() -> None:
                   else _observe_tau_retail(args.run_id, args.task_id))
         print(json.dumps(result, sort_keys=True))
         return
-    if args.operation in ("reconcile-finance-sources", "read-due-obligations", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"):
+    if args.operation in ("reconcile-finance-sources", "read-due-obligations", "read-sent-coffee-invoices", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"):
         result = _run_finance_source_operation(args.run_id, args.operation)
         print(json.dumps(result, sort_keys=True))
         return

@@ -1200,7 +1200,7 @@ class Environment:
                 if inv.id in seen:
                     continue
                 seen.add(inv.id)
-                if inv.paid or inv.returned:
+                if inv.paid or inv.returned or not ba._invoice_available_to_buyer(inv):
                     continue
                 if inv.due_date >= day:
                     continue
@@ -1349,10 +1349,11 @@ class Environment:
     def _format_observation(self, agent_id: str, day: int, nudge: str | None) -> str:
         ba = self.business_apps[agent_id]
         ar_total = ba._ar_outstanding()
-        ap_total = ba._ap_outstanding()
+        ap_open = [inv for inv in ba.accounts_payable
+                   if inv.net_outstanding > 0 and ba._invoice_available_to_buyer(inv)]
+        ap_total = sum(inv.net_outstanding for inv in ap_open)
         # AP / AR delinquency breakdown: count of open + overdue invoices
         # and the late-fee dollar pool currently accruing on each side.
-        ap_open = [inv for inv in ba.accounts_payable if inv.net_outstanding > 0]
         ap_overdue = [inv for inv in ap_open if inv.due_date < day]
         ap_late_fees = sum(inv.late_fees_accrued for inv in ap_overdue)
         ar_open = [inv for inv in ba.accounts_receivable if inv.net_outstanding > 0]

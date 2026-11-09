@@ -390,8 +390,16 @@ class CompanyBackgroundService:
         if not selected:
             return
         try:
+            bindings = self._provider_bindings
+            read_sent = getattr(self.finance_adapter, "read_sent_coffee_invoices", None)
+            if "coffeebench" in selected and read_sent is not None:
+                company_name = _document_name(self.company_binding.get("documents", {}).get("company"))
+                bindings = {
+                    **bindings,
+                    "coffeebench": {**bindings["coffeebench"], "sent_sales_invoice_ids": read_sent(company_name)},
+                }
             result = self.runtime.advance_company(
-                now, bindings=self._provider_bindings, provider_ids=selected,
+                now, bindings=bindings, provider_ids=selected,
                 coupling_policy=coupling,
             )
             providers = result.get("providers", {})

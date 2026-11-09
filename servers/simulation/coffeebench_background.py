@@ -1489,6 +1489,9 @@ async def advance(
         updated["checkpoint"], _checkpoint_directory(binding),
         updated["company_business_ids"],
     )
+    # Company sales are payable only after the ERP invoice was submitted and sent.
+    environment.marketplace._erp_invoice_issuers = set(updated["company_business_ids"])
+    environment.marketplace._erp_sent_invoices = set(binding.get("sent_sales_invoice_ids", []))
     virtual_delta = max(0, int((finish - _as_datetime(updated["started_at"])).total_seconds() // 60))
     horizon = int(environment.max_days) * 1440
     horizon_finished = virtual_delta >= horizon
