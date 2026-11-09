@@ -227,17 +227,19 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         feedback_activity = getattr(engine, "company_feedback_activity", None)
         if callable(feedback_activity):
             activity.extend(feedback_activity())
-        viv_replies = {
-            item.get("related_activity_id") for item in activity
-            if item.pop("authenticated_viv_reply", False) and item.get("related_activity_id")
-        }
-        for item in activity:
-            native_message_id = item.pop("native_message_id", None)
-            if item.get("type") == "email" and item.get("recipient") == "viv":
-                if item["id"] in viv_replies or native_message_id in viv_replies:
-                    item["delivery_status"] = "Received by Viv"
-                elif item.get("direction") == "sent":
-                    item.setdefault("delivery_status", "Awaiting receipt confirmation")
+        viv_mail = [item for item in activity if item.get("type") == "email"
+                    and item.get("recipient") == "viv"]
+        receipt_reader = getattr(engine, "viv_smtp_receipts", None)
+        received = receipt_reader({
+            item.get("native_message_id") or item["id"]: item["title"]
+            for item in viv_mail if item.get("title")
+        }) if callable(receipt_reader) else set()
+        for item in viv_mail:
+            message_id = item.pop("native_message_id", None) or item["id"]
+            if message_id in received:
+                item["delivery_status"] = "Received"
+            elif item.get("direction") == "sent":
+                item["delivery_status"] = "Sent"
         activity.sort(key=lambda item: (str(item.get("timestamp", "")), str(item["id"])))
         result = {"company_id": "company", "background": background_status, "status": company["status"],
                   "simulated_time": company["simulated_time"], "paused": company["paused"],

@@ -364,7 +364,7 @@ class IssueHandoffService:
                                         if sent else "HANDOFF_SUBMISSION_UNCONFIRMED",
                                "type": "email", "direction": "sent" if sent else None,
                                "delivery_status": (
-                                   "Awaiting receipt confirmation" if sent else
+                                   "Sent" if sent else
                                    "Sending" if row["stage"] == Stage.SUBMITTING else "Submission unconfirmed"
                                ),
                                "native_message_id": row["native_message_id"],

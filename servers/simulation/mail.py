@@ -13,6 +13,7 @@ import imaplib
 import email.policy
 from email.header import decode_header, make_header
 import json
+import logging
 from pathlib import Path
 import re
 import smtplib
@@ -25,6 +26,7 @@ from email.utils import getaddresses
 from typing import Any, Callable
 from urllib.parse import quote, urljoin
 
+import requests
 from authres import AuthenticationResultsHeader, AuthResError
 from imapclient import IMAPClient
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -36,6 +38,10 @@ from servers.company.scenarios import (
 )
 
 
+from .clock_rate import kernel_virtual_time_rate
+
+
+LOG = logging.getLogger(__name__)
 SPECIAL_VIV_ID = "viv"
 SPECIAL_VIV_EMAIL = "agent@agent.example.test"
 
@@ -255,6 +261,50 @@ class MailuGateway:
         self._activity_clients: set[IMAPClient] = set()
         self._activity_clients_lock = threading.Lock()
         self._activity_waits_stopped = threading.Event()
+        self._viv_receipt_lock = threading.Lock()
+        self._viv_received: set[str] = set()
+        self._viv_receipt_refresh_at = 0.0
+
+    def viv_smtp_receipts(self, messages: dict[str, str]) -> set[str]:
+        """Find exact RFC Message-IDs in the receiving SMTP mailbox."""
+        if not messages or not self._viv_receipt_lock.acquire(blocking=False):
+            return set(messages).intersection(self._viv_received)
+        try:
+            rate = kernel_virtual_time_rate()
+            now = time.monotonic()
+            if now < self._viv_receipt_refresh_at:
+                return set(messages).intersection(self._viv_received)
+            self._viv_receipt_refresh_at = now + 15 * rate
+            deadline = now + 2 * rate
+            base = self.config.smtp4dev_api_base_url.rstrip("/") + "/"
+
+            def read(path: str, **params: Any) -> dict:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise requests.Timeout("SMTP receipt refresh budget exhausted")
+                response = requests.get(urljoin(base, path), params=params, timeout=remaining / 2)
+                response.raise_for_status()
+                return response.json()
+
+            subjects = {subject for mid, subject in messages.items() if mid not in self._viv_received}
+            try:
+                for subject in sorted(subjects):
+                    page = read("api/Messages", mailboxName=self.config.smtp4dev_mailbox_name,
+                                page=1, pageSize=50, searchTerms=subject)
+                    for candidate in page["results"]:
+                        if candidate.get("subject") != subject:
+                            continue
+                        detail = read("api/Messages/" + quote(candidate["id"], safe=""))
+                        for header in detail["headers"]:
+                            if header["name"].casefold() == "message-id":
+                                message_id = header["value"].strip()
+                                if messages.get(message_id) == subject:
+                                    self._viv_received.add(message_id)
+            except (requests.RequestException, KeyError, TypeError, ValueError) as error:
+                LOG.warning("Viv SMTP receipt refresh failed: %s", type(error).__name__)
+            return set(messages).intersection(self._viv_received)
+        finally:
+            self._viv_receipt_lock.release()
 
     def set_employee_desktops(self, manager: Any | None) -> None:
         """Attach the coordinator-owned employee browser runtime after engine setup."""
