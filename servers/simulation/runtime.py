@@ -36,7 +36,7 @@ from .erpnext import ERPNextAdapter, ERPNextSiteAdmin
 from .erpnext import ERPNextRetailAdmin
 from .mail import MailuGateway
 from .problem_adapters import TauRetailProblemAdapter
-from .store import SQLiteStore
+from .store import SQLiteStore, StoreConflict
 
 LOG = logging.getLogger(__name__)
 
@@ -301,8 +301,8 @@ class MailWorkers:
                 self.errors.pop(component, None)
                 if changed:
                     self.changed.set()
-                    if actor.get("kind") == "employee":
-                        self._enqueue_employee_inbox(actor)
+                if actor.get("kind") != "counterparty":
+                    self._enqueue_employee_inbox(actor)
             except (OSError, imaplib.IMAP4.error) as error:
                 if self.stopped.is_set():
                     return
@@ -340,6 +340,50 @@ class MailWorkers:
                     self.employee_inbox_coalesced_events.get(actor_id, 0) + 1
                 )
 
+    def _process_employee_inbox(self, actor: dict[str, Any]) -> None:
+        store = self.engine.store
+        actor_id = actor["actor_id"]
+        with store.transaction(write=False) as db:
+            cursor = db.execute(
+                "SELECT uidvalidity, last_uid FROM employee_inbox_turn_cursor WHERE actor_id=?",
+                (actor_id,),
+            ).fetchone()
+        snapshot = self.engine.mail.employee_inbox_snapshot(actor, cursor["last_uid"] if cursor else None)
+        if snapshot is None:
+            return
+        validity, baseline, uids = snapshot
+        if cursor is not None and cursor["uidvalidity"] != validity:
+            snapshot = self.engine.mail.employee_inbox_snapshot(actor, None)
+            if snapshot is None:
+                return
+            validity, baseline, uids = snapshot
+        if cursor is None or cursor["uidvalidity"] != validity:
+            with store.transaction() as db:
+                db.execute(
+                    "INSERT INTO employee_inbox_turn_cursor VALUES (?,?,?) "
+                    "ON CONFLICT(actor_id) DO UPDATE SET uidvalidity=excluded.uidvalidity, last_uid=excluded.last_uid "
+                    "WHERE employee_inbox_turn_cursor.uidvalidity != excluded.uidvalidity",
+                    (actor_id, validity, baseline),
+                )
+        for uid in uids:
+            if self.stopped.is_set():
+                return
+
+            def claim():
+                with store.transaction() as db:
+                    updated = db.execute(
+                        "UPDATE employee_inbox_turn_cursor SET last_uid=? "
+                        "WHERE actor_id=? AND uidvalidity=? AND last_uid<?",
+                        (uid, actor_id, validity, uid),
+                    ).rowcount
+                    if updated != 1:
+                        raise StoreConflict("Employee inbox message already claimed")
+
+                LOG.info("Employee inbox turn claimed actor=%s uidvalidity=%s uid=%s", actor_id, validity, uid)
+
+            self.engine.mail.process_employee_inbox_message(actor, uid, validity, claim)
+            LOG.info("Employee inbox turn completed actor=%s uidvalidity=%s uid=%s", actor_id, validity, uid)
+
     def _refresh_employee_inboxes(
         self, actor_id: str, event_queue: queue.Queue[dict[str, Any] | None]
     ) -> None:
@@ -350,11 +394,8 @@ class MailWorkers:
                 return
             component = "employee_inbox:" + actor_id
             try:
-                refreshed = self.engine.mail.refresh_employee_inbox_if_running(actor)
-                if refreshed:
-                    self.errors.pop(component, None)
-                else:
-                    self.errors.pop(component, None)
+                self._process_employee_inbox(actor)
+                self.errors.pop(component, None)
             except Exception as error:
                 self._failure(component, error)
             finally:
@@ -412,6 +453,9 @@ class MailWorkers:
         return components
 
     def start(self) -> None:
+        with self.engine.store.transaction() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS employee_inbox_turn_cursor "
+                       "(actor_id TEXT PRIMARY KEY, uidvalidity TEXT NOT NULL, last_uid INTEGER NOT NULL)")
         self.threads = [threading.Thread(target=self._process, name="simulation-mail-processor", daemon=True)]
         self.threads += [threading.Thread(target=self._watch, args=(actor,),
                                         name="simulation-mail-" + actor["actor_id"], daemon=True)
@@ -419,6 +463,9 @@ class MailWorkers:
         startup_threads = tuple(self.threads)
         for thread in startup_threads:
             thread.start()
+        for actor in self.actors:
+            if actor.get("kind") != "counterparty":
+                self._enqueue_employee_inbox(actor)
         self.changed.set()
 
     def stop(self) -> None:

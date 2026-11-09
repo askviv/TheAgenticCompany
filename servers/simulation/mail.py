@@ -449,6 +449,51 @@ class MailuGateway:
         )
         return True
 
+    def employee_inbox_snapshot(self, actor: dict[str, Any], after_uid: int | None):
+        """Read inbox identities without opening messages or changing flags."""
+        mailbox = self._actor(actor, "mailbox")
+        if self.employee_desktops is None or self._employee_id(mailbox) is None:
+            return None
+        credentials = self._credentials_for(mailbox)
+        with IMAPClient(
+            self.config.mailu_imap_host, port=self.config.mailu_imap_port, ssl=True,
+            ssl_context=_ssl_context(self.config.tls_ca_file), timeout=self.config.smtp_timeout_seconds,
+        ) as client:
+            client.login(credentials.username, credentials.password)
+            selected = client.select_folder("INBOX", readonly=True)
+            validity = self._uidvalidity(selected)
+            if after_uid is None:
+                uidnext = selected.get(b"UIDNEXT")
+                if not isinstance(uidnext, int) or uidnext < 1:
+                    raise MailReceiptMismatch("Mailu inbox has no valid UIDNEXT")
+                return validity, uidnext - 1, []
+            uids = client.search(["UID", f"{after_uid + 1}:*"])
+            return validity, after_uid, sorted(int(uid) for uid in uids if int(uid) > after_uid)
+
+    def process_employee_inbox_message(self, actor: dict[str, Any], uid: int, uidvalidity: str,
+                                       claim: Callable[[], None]) -> None:
+        mailbox = self._actor(actor, "mailbox")
+        employee_id = self._employee_id(mailbox)
+        if employee_id is None:
+            raise EmployeeBrowserUnavailable("Inbox does not map to a company employee")
+        credentials = self._credentials_for(mailbox)
+        self._employee_webmail().handle_incoming_message(
+            employee_id, mailbox.email, credentials.username, credentials.password,
+            _roundcube_message_url(self.config.webmail_url, str(uid)), claim,
+            lambda: self._verify_inbox_uid(mailbox, uid, uidvalidity),
+        )
+
+    def _verify_inbox_uid(self, mailbox: _ActorRecord, uid: int, uidvalidity: str) -> None:
+        credentials = self._credentials_for(mailbox)
+        with IMAPClient(
+            self.config.mailu_imap_host, port=self.config.mailu_imap_port, ssl=True,
+            ssl_context=_ssl_context(self.config.tls_ca_file), timeout=self.config.smtp_timeout_seconds,
+        ) as client:
+            client.login(credentials.username, credentials.password)
+            selected = client.select_folder("INBOX", readonly=True)
+            if self._uidvalidity(selected) != uidvalidity or uid not in client.search(["UID", str(uid)]):
+                raise MailReceiptMismatch("Employee inbox message changed before the agent turn")
+
     def _reply_source(self, actor: _ActorRecord, message_id: str, *, include_original: bool = False) -> dict[str, Any]:
         """Resolve one exact employee INBOX message without changing its flags."""
         if self._is_viv(actor):
