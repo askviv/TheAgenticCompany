@@ -1104,6 +1104,7 @@ class MailuGateway:
         *,
         expected_uidvalidity: str | None = None,
         require_authenticated_submission: bool = False,
+        include_automated: bool = False,
     ) -> list[dict[str, Any]]:
         """Read only delivered replies to registered message roots in one Mailu INBOX.
 
@@ -1137,6 +1138,7 @@ class MailuGateway:
             ssl_context=_ssl_context(self.config.tls_ca_file),
             timeout=self.config.smtp_timeout_seconds,
         ) as client:
+            client.normalise_times = False
             client.login(credentials.username, credentials.password)
             selected = client.select_folder("INBOX", readonly=True)
             uidvalidity = self._uidvalidity(selected)
@@ -1194,7 +1196,7 @@ class MailuGateway:
                 if require_authenticated_submission and authenticated_actor != sender.actor_id:
                     continue
                 auto_submitted = str(parsed.get("Auto-Submitted", "no")).strip().casefold()
-                if auto_submitted not in {"", "no"}:
+                if not include_automated and auto_submitted not in {"", "no"}:
                     continue
                 fetched = client.fetch([uid], [b"BODY.PEEK[]", b"INTERNALDATE"])
                 full_record = fetched.get(uid)

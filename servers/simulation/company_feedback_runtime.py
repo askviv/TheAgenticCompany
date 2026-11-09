@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import hashlib
 import hmac
 import json
+import imaplib
 import logging
 import traceback
 import fcntl
@@ -2126,6 +2127,70 @@ class CompanyFeedbackRuntime:
             else:
                 db.execute("DELETE FROM company_feedback_runtime_reports WHERE provider=?", (component,))
 
+    def _capture_marketplace_handoff_replies(self, gateway, actors, tracked):
+        roots_by_mailbox = {}
+        for row in tracked:
+            notification = json.loads(row["notification_json"])
+            if "issue_name" in notification or row["stage"] != "sent" or not row["handoff_json"]:
+                continue
+            intent = json.loads(row["handoff_json"])
+            roots = roots_by_mailbox.setdefault(notification["recipient_email"].casefold(), {})
+            roots[row["native_message_id"] or intent["message_id"]] = intent["message_id"]
+
+        if not roots_by_mailbox:
+            return
+        with self.store.transaction(write=False) as db:
+            recorded = [json.loads(row["payload_json"]) for row in db.execute(
+                "SELECT payload_json FROM company_evidence WHERE doctype='Communication'"
+            )]
+        children = {}
+        for entry in recorded:
+            if entry.get("in_reply_to") and entry.get("message_id"):
+                children.setdefault(entry["in_reply_to"], []).append(entry)
+
+        for address, roots in roots_by_mailbox.items():
+            mailbox = actors[address]
+            participants = {mailbox["actor_id"], "viv"}
+            pending = list(roots.values())
+            while pending:
+                for entry in children.get(pending.pop(), ()):
+                    message_id = entry["message_id"]
+                    if message_id not in roots and {entry["actor"], entry["recipient_actor_id"]} == participants:
+                        roots[message_id] = message_id
+                        pending.append(message_id)
+            try:
+                replies = gateway.poll_registered_replies(
+                    mailbox, set(roots), 0, {"viv"}, include_automated=True,
+                )
+            except (OSError, imaplib.IMAP4.error) as error:
+                LOG.warning("Marketplace handoff mailbox temporarily unavailable actor=%s error=%s",
+                            mailbox["actor_id"], type(error).__name__)
+                continue
+            for reply in replies:
+                message_id = reply["message_id"]
+                if self._mail_evidence_exists(message_id):
+                    continue
+                candidates = re.findall(r"<[^<>\s]+>", reply["references"])
+                parent = next((roots[value] for value in [reply["in_reply_to"], *reversed(candidates)]
+                               if value in roots), None)
+                if parent is None:
+                    continue
+                # Record inbox delivery for Activity without interpreting the
+                # reply as authority to perform a simulation action.
+                self.pipeline.capture(CompanyEvidence(
+                    evidence_id=identity("mail", message_id),
+                    erp_doctype="Communication",
+                    erp_name=message_id,
+                    event="email_reply",
+                    actor=reply["sender_actor_id"],
+                    recipient_actor_id=mailbox["actor_id"],
+                    occurred_at=reply["received_at"],
+                    document=reply,
+                    evidence_refs=[reply["webmail_url"]],
+                    message_id=message_id,
+                    in_reply_to=parent,
+                ))
+
     def _observe_issue_mail(self):
         from email.utils import parseaddr
 
@@ -2151,6 +2216,7 @@ class CompanyFeedbackRuntime:
         actors = {
             actor["email"].casefold(): actor for actor in self.config.mail["actors"]
         }
+        self._capture_marketplace_handoff_replies(gateway, actors, tracked)
         for row in tracked:
             notification = json.loads(row["notification_json"])
             if "issue_name" not in notification:
