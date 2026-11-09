@@ -216,12 +216,19 @@ class CompanyBackgroundService:
         intents = [intent for provider in providers.values() for intent in provider.get("erp_intents", [])]
         self.engine.store.record_company_finance_source_intents(intents)
         pending = self.engine.store.list_unreceipted_company_finance_source_intents()
-        if not pending:
+        review_financing = (
+            self.engine.store.background_provider_control("coffeebench")["enabled"]
+            and "financing" in self.engine.store.coffee_payment_windows()
+        )
+        if not pending and not review_financing:
             issue_reconcile = getattr(self.engine, "company_issue_reconcile", None)
             if issue_reconcile is not None:
                 issue_reconcile()
             return
-        result = self.finance_adapter.reconcile(pending, self._finance_binding(), as_of)
+        binding = self._finance_binding()
+        if review_financing:
+            binding["review_coffee_financing"] = True
+        result = self.finance_adapter.reconcile(pending, binding, as_of)
         receipts = result.get("receipts")
         if not isinstance(receipts, list):
             raise ValueError("native finance reconciler did not return source receipts")

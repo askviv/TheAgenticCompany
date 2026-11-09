@@ -446,6 +446,10 @@ def _insert_payment_evidence(record: dict[str, Any], context: dict[str, Any]) ->
 def reconcile(source_records: list[dict[str, Any]], company_binding: dict[str, Any], as_of: str | datetime) -> dict[str, Any]:
     """Create/reuse native draft docs for CoffeeBench facts, preserving identity."""
     ensure_finance_source_contract()
+    if company_binding.get("review_coffee_financing"):
+        from coffee_lending import decide_applications, ensure_products
+
+        ensure_products(company_binding["erp_company"])
     context = {
         "company": company_binding["erp_company"],
         "company_id": company_binding["company_id"],
@@ -486,6 +490,8 @@ def reconcile(source_records: list[dict[str, Any]], company_binding: dict[str, A
             continue
         if name:
             receipts.append({"source_id": record["id"], "doctype": doctype, "name": name, "created": created})
+    if company_binding.get("review_coffee_financing"):
+        decide_applications(context)
     return {"as_of": _date(as_of), "receipts": receipts}
 
 

@@ -36,7 +36,7 @@ def delegate_finance_task(doctype, name, employee, recipient, description):
 def send_pending_finance_handoffs():
     queues = frappe.get_all("Email Queue", filters={
         "message_id": ["like", "benchmark-finance-%@theagentcompany.local"],
-        "reference_doctype": ["in", ["Sales Order", "Sales Invoice", "Purchase Invoice"]],
+        "reference_doctype": ["in", ["Sales Order", "Sales Invoice", "Purchase Invoice", "Loan Application"]],
         "status": ["in", ["Not Sent", "Partially Sent"]],
     }, pluck="name", order_by="creation asc")
     for name in queues:

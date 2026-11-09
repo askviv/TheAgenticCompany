@@ -37,3 +37,17 @@ When a selected customer makes an offer that CoffeeBench imports as a new
 Sales Order draft, the finance handoff asks Viv to handle the customer's credit
 request. It includes the customer, order reference and requested amount.
 Viv can use that request to create an application in Lending.
+
+The company uses three simulated Lending products with 12 monthly payments.
+Amounts are in the Lending company's base currency (GBP on the Mini).
+
+| Product | Maximum | Annual interest | Payment history |
+| --- | ---: | ---: | --- |
+| Prime | £10,000 | 8% | At least one recorded payment and no late payments |
+| Near prime | £5,000 | 14% | No recorded payments, or qualifies for prime |
+| Subprime | £2,500 | 22% | Available for all three payment histories, including a recorded late payment |
+
+Viv creates and submits the Loan Application with the **Coffee Sales Order**
+link. On the next finance reconciliation, CoffeeBench checks the linked
+request, product, amount and term, records the decision in Lending, and queues
+an email back to Viv. An approval hands the order back to Viv to continue.
