@@ -583,6 +583,7 @@ class CompanyBackgroundService:
                 continue
             summary = f"Provider update acknowledged through {receipt['cursor']}"
             trace = {}
+            title = f"{provider} update completed"
             if receipt["provider_id"] == "coffeebench":
                 messages = []
                 for event_id in receipt["source_event_ids"]:
@@ -609,11 +610,14 @@ class CompanyBackgroundService:
                 summary = f"{len(messages)} marketplace {'message' if len(messages) == 1 else 'messages'} received"
                 if records is not None:
                     summary += f" · {len(records)} ERP {'action' if len(records) == 1 else 'actions'}"
+                if not messages and records == []:
+                    title = "CoffeeBench simulation advanced"
+                    summary = "No new marketplace messages or ERP actions"
                 trace = {"coffee_update": {"cursor": receipt["cursor"], "messages": messages, "records": records}}
             activity.append({"id": f"provider-receipt:{receipt['provider_id']}:{receipt['operation_id']}",
                              "timestamp": receipt["acknowledged_at"],
                              "event": "BACKGROUND_PROVIDER_UPDATE_COMPLETED", "type": "action",
-                             "title": f"{provider} update completed", "summary": summary,
+                             "title": title, "summary": summary,
                              "description": summary, **trace})
         for observation in store.list_company_due_obligation_observations():
             activity.append({"id": "obligation:" + observation["observation_id"],

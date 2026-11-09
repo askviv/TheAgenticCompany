@@ -185,6 +185,14 @@ export type ActivityEntry = {
   summary?: string
   content?: string
   actor?: string | null
+  recipient?: string | null
+  actor_name?: string | null
+  recipient_name?: string | null
+  routing_note?: string
+  related_activity_id?: string | null
+  delivery_status?: string | null
+  attachments?: string[] | null
+  native_document?: { doctype: string; name: string } | null
   direction?: "sent" | "received" | null
   run_id?: string | null
   coffee_update?: {

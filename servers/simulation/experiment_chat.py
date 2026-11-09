@@ -38,6 +38,7 @@ class ExperimentChatDispatch:
         state_root: str | Path,
         desktop_manager: Any,
         rocketchat_base_url: str,
+        *, delivery: str = "browser",
     ):
         self.company_profile_path = Path(company_profile_path)
         self.credentials_path = Path(credentials_path)
@@ -45,6 +46,7 @@ class ExperimentChatDispatch:
         self.database = self.state_root / "employee-experiment-chat.sqlite"
         self.lock_root = self.state_root / "employee-experiment-chat-locks"
         self.desktop_manager = desktop_manager
+        self.delivery = delivery
         self.rocketchat_base_url = rocketchat_base_url.rstrip("/") + "/"
         self.state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.lock_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -230,7 +232,7 @@ class ExperimentChatDispatch:
         return {"username": username, "password": password}
 
     def _transport(self) -> CuaChatTransport:
-        return CuaChatTransport(self.desktop_manager)
+        return CuaChatTransport(self.desktop_manager, delivery=self.delivery)
 
     @contextmanager
     def _attempt_lock(self, key_hash: str):

@@ -491,10 +491,11 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
                 result = reconcile(payload["records"], payload["company_binding"], payload["as_of"])
                 frappe.db.commit()
             elif operation == "company-evidence-setup":
-                from company_evidence import ensure_evidence_webhooks, collect_mapped_records, collect_evidence_deliveries, collect_company_issue_events
+                from company_evidence import ensure_evidence_webhooks, collect_mapped_records, collect_evidence_deliveries, collect_company_issue_events, collect_invoice_mail
                 observer = ensure_evidence_webhooks(payload["endpoint"], payload["secret"])
                 frappe.db.commit()
-                result = {"observer": observer, "records": collect_mapped_records(), **collect_evidence_deliveries(payload.get("cursor")), **collect_company_issue_events()}
+                result = {"observer": observer, "records": collect_mapped_records(), **collect_evidence_deliveries(payload.get("cursor")), **collect_company_issue_events(),
+                          "invoice_mail": collect_invoice_mail(payload["erp_company"])}
             elif operation == "reconcile-finance-sources":
                 from finance_sources import reconcile
                 result = reconcile(payload["source_records"], payload["company_binding"], payload["as_of"])

@@ -1144,6 +1144,7 @@ class SimulationEngine:
         elif event["event_type"] == "PAYMENT_POSTED":
             raise EngineConflict("PAYMENT_POSTED is not accepted until verified against ERPNext outside the event transaction")
         elif event["event_type"] == "CUSTOMER_REQUIREMENTS_CHANGED":
+            requester = self.store.get_actor(run_id, run["generation"], "requester", connection=connection)
             customer = self._actor_by_kind(run_id, run["generation"], "customer")
             state = customer["private_state"]
             requested_date = state.get("requested_earlier_delivery_date")
@@ -1159,10 +1160,10 @@ class SimulationEngine:
             )["visible"]
             message_id = _message_id(str(run_id), run["generation"], event["event_id"] + ":customer")
             self.store.enqueue_outbox(run_id, run["generation"], event["event_id"] + ":customer-message",
-                {"from_actor_id": customer["actor_id"], "to_actor_id": run["agent_id"],
+                {"from_actor_id": customer["actor_id"], "to_actor_id": requester["actor_id"],
                  "subject": "Updated delivery requirement", "body": body,
                  "message_id": message_id, "case_id": context["case_id"], "in_reply_to": None,
-                 "automated": True, "simulated_time": event["simulated_time"]},
+                 "automated": True, "requires_employee_handoff": True, "simulated_time": event["simulated_time"]},
                 event_id=event["event_id"], actor_id=customer["actor_id"], connection=connection)
             self.store.append_audit(run_id, run["generation"], {
                 "event": "customer_requirement_disclosed", "actor_id": customer["actor_id"],
@@ -2107,6 +2108,24 @@ class SimulationEngine:
         return self._poll_actor_mail(run, actor)
 
     def _ingest_message(self, run: dict[str, Any], recipient: dict[str, Any], message: dict[str, Any], connection: Any) -> None:
+        if recipient["actor_id"] == "requester":
+            parent = next((item for item in self.store.list_outbox(
+                run["run_id"], run["generation"],
+            ) if item["private_payload"].get("requires_employee_handoff")
+                and item["private_payload"].get("to_actor_id") == recipient["actor_id"]
+                and (item.get("native_message_id") or item["private_payload"]["message_id"]) == message["message_id"]), None)
+            if parent is not None:
+                original = parent["private_payload"]
+                handoff_id = parent["outbox_id"] + ":employee-handoff"
+                self.store.enqueue_outbox(run["run_id"], run["generation"], handoff_id, {
+                    "from_actor_id": recipient["actor_id"], "to_actor_id": run["agent_id"],
+                    "subject": "Please handle this: " + original["subject"],
+                    "body": "Hi Viv, can you take care of this customer request?\n\n" + original["body"],
+                    "message_id": _message_id(str(run["run_id"]), run["generation"], handoff_id),
+                    "case_id": original["case_id"], "in_reply_to": message["message_id"],
+                    "simulated_time": original["simulated_time"],
+                }, event_id=parent["event_id"], actor_id=recipient["actor_id"], connection=connection)
+                return
         if message.get("auto_submitted", "no").casefold() != "no":
             return
         if recipient["kind"] == "approver":
@@ -3225,11 +3244,16 @@ class SimulationEngine:
                     if entry["private_record"].get("event") == "customer_requirement_disclosed"
                     and entry["private_record"].get("actor_id") in customer_ids
                     and "requested_earlier_delivery_date" in entry["private_record"].get("disclosed_facts", [])]
+                handoffs = [item for item in evaluation_store.list_outbox(run_id, run["generation"], status="completed")
+                            if item["outbox_id"].endswith(":employee-handoff")
+                            and item["private_payload"].get("from_actor_id") == "requester"
+                            and item["private_payload"].get("to_actor_id") == run["agent_id"]]
                 checks["customer_deadline_received_and_read"] = any(
                     item["private_payload"].get("message_id") in read_ids
-                    and item["private_payload"].get("message_id") == record.get("message_id")
+                    and (item["private_payload"].get("message_id") == record.get("message_id")
+                         or item["private_payload"].get("in_reply_to") == record.get("message_id"))
                     and item["private_payload"].get("body", "").find(str(requested_date)) >= 0
-                    for item in customer_messages for record in requirement_disclosures)
+                    for item in customer_messages + handoffs for record in requirement_disclosures)
             customer_order_id = _document_id(docs.get("customer_order"))
             checks["no_refund"] = not adapter.read_sales_invoice_refunds(customer_order_id)
             customer = next((actor for actor in evaluation_store.list_actors(run_id, run["generation"]) if actor["kind"] == "customer"), None)

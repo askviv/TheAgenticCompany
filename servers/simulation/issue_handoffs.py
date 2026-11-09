@@ -1,4 +1,4 @@
-"""Durable, issue-only employee mail handoffs; independent of company time."""
+"""Durable employee mail handoffs; independent of company time."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -40,16 +40,19 @@ class OrderReference(BaseModel):
     name: str = Field(min_length=1)
 
 
-class IssueNotification(BaseModel):
+class MarketplaceNotification(BaseModel):
     model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
     issue_key: str = Field(pattern=r"^[0-9a-f]{64}$")
-    issue_name: str = Field(min_length=1)
-    email_queue: str = Field(min_length=1)
     message_id: str = Field(min_length=3)
     subject: str = Field(min_length=1)
     recipient_email: str = Field(min_length=3)
-    status: str
     business_description: str = Field(min_length=1)
+
+
+class IssueNotification(MarketplaceNotification):
+    issue_name: str = Field(min_length=1)
+    email_queue: str = Field(min_length=1)
+    status: str
     requested_outcome: str = Field(min_length=1)
     affected_orders: list[OrderReference] = Field(min_length=1)
 
@@ -92,14 +95,16 @@ class IssueHandoffStore:
                 "ON company_issue_handoffs(native_message_id) WHERE native_message_id IS NOT NULL"
             )
 
-    def register(self, notification: IssueNotification, now: datetime) -> dict:
+    def register(self, notification: MarketplaceNotification, now: datetime) -> dict:
         payload = notification.model_dump(mode="json")
         with self.store.transaction() as connection:
             row = connection.execute("SELECT * FROM company_issue_handoffs WHERE issue_key=?",
                                      (notification.issue_key,)).fetchone()
             if row:
                 prior = json.loads(row["notification_json"])
-                immutable = ("issue_key", "issue_name", "email_queue", "message_id", "recipient_email")
+                immutable = ("issue_key", "message_id", "recipient_email")
+                if isinstance(notification, IssueNotification):
+                    immutable += ("issue_name", "email_queue")
                 if any(prior[key] != payload[key] for key in immutable):
                     raise StoreConflict("Issue notification identity changed")
                 # Current native issue details may gain more affected orders.
@@ -128,7 +133,7 @@ class IssueHandoffStore:
             return [dict(row) for row in connection.execute(
                 "SELECT * FROM company_issue_handoffs WHERE delivered_at IS NOT NULL ORDER BY delivered_at,issue_key")]
 
-    def observe(self, key: str, receipt: dict, now: datetime, *, kernel_mode: bool = False) -> dict:
+    def observe(self, key: str, receipt: dict, now: datetime, *, kernel_mode: bool = False, immediate: bool = False) -> dict:
         received_at = utc(datetime.fromisoformat(receipt["received_at"]))
         with self.store.transaction() as connection:
             row = connection.execute("SELECT * FROM company_issue_handoffs WHERE issue_key=?", (key,)).fetchone()
@@ -140,11 +145,11 @@ class IssueHandoffStore:
             anchor = row["observed_unread_real_at"]
             if kernel_mode and not receipt["seen"] and anchor is None:
                 anchor = utc(now).isoformat()
-            deadline = row["deadline_at"] or (
+            deadline = row["deadline_at"] or (utc(now).isoformat() if immediate else None) or (
                 (datetime.fromisoformat(anchor) + TIMEOUT).isoformat() if anchor else
                 (received_at + TIMEOUT).isoformat())
             basis = row["timing_basis"] or ("first_unread_observation" if kernel_mode and anchor else None)
-            stage = Stage.READ if receipt["seen"] and row["handoff_eligible_at"] is None else Stage.WAITING
+            stage = Stage.READ if not immediate and receipt["seen"] and row["handoff_eligible_at"] is None else Stage.WAITING
             connection.execute("""UPDATE company_issue_handoffs SET stage=?, delivered_at=?,
                 deadline_at=?,observed_unread_real_at=?,timing_basis=?,read_at=?,receipt_json=?,
                 last_error=NULL,updated_at=? WHERE issue_key=?""",
@@ -284,13 +289,14 @@ class SystemdIssueScheduler:
 
 class IssueHandoffService:
     def __init__(self, store: IssueHandoffStore, mail, scheduler, *, actors: list[dict],
-                 erp_public_url: str, kernel_mode: bool = False,
+                 erp_public_url: str, kernel_mode: bool = False, coffee_handoff_delivery: str = "browser",
                  now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
         self.store, self.mail, self.scheduler = store, mail, scheduler
         self.actors = {actor["email"].casefold(): actor for actor in actors}
         self.viv = next(actor for actor in actors if actor["actor_id"] == "viv")
         self.erp_public_url = erp_public_url.rstrip("/")
         self.kernel_mode = kernel_mode
+        self.coffee_handoff_delivery = coffee_handoff_delivery
         self.now = now
 
     def register(self, records: list[dict]) -> None:
@@ -317,21 +323,35 @@ class IssueHandoffService:
     def activity(self) -> list[dict]:
         result = []
         for row in self.store.delivered():
-            record = IssueNotification.model_validate_json(row["notification_json"])
-            result.append({"id": record.message_id, "timestamp": row["delivered_at"],
+            payload = json.loads(row["notification_json"])
+            marketplace = "issue_name" not in payload
+            record = (MarketplaceNotification if marketplace else IssueNotification).model_validate(payload)
+            if not marketplace:
+                result.append({"id": record.message_id, "timestamp": row["delivered_at"],
                            "event": "ISSUE_NOTIFICATION_DELIVERED", "type": "email", "direction": "sent",
                            "title": record.subject, "description": "ERPNext notified the responsible employee.",
                            "summary": record.business_description, "actor": "ERPNext"})
             if row["stage"] == Stage.SENT:
                 intent = json.loads(row["handoff_json"])
                 result.append({"id": intent["message_id"], "timestamp": row["updated_at"],
-                               "event": "ISSUE_HANDED_TO_VIV", "type": "email", "direction": "sent",
-                               "title": intent["subject"], "description": "The employee asked Viv to handle the issue.",
+                               "event": "COFFEE_REQUEST_HANDED_TO_VIV" if marketplace else "ISSUE_HANDED_TO_VIV", "type": "email", "direction": "sent",
+                               "title": intent["subject"], "description": "The employee asked Viv to take care of the request.",
                                "summary": record.business_description, "content": intent["body"],
-                               "actor": intent["sender"]["actor_id"]})
+                               "actor": intent["sender"]["actor_id"], "recipient": self.viv["actor_id"],
+                               "related_activity_id": record.message_id,
+                               **({"attachments": ["Original email (.eml)"]} if intent.get("forward_original") else {})})
         return result
 
-    def _intent(self, record: IssueNotification, actor: dict) -> dict:
+    def _intent(self, record: MarketplaceNotification, actor: dict) -> dict:
+        if not isinstance(record, IssueNotification):
+            return {"sender": actor, "subject": "Fwd: " + record.subject,
+                    "forward_original": True,
+                    "body": "Hi Viv, can you take care of this request?\n\n"
+                            + simulation_message_footer(),
+                    "message_id": f"<coffee-{record.issue_key}-handoff@theagentcompany.local>",
+                    "run_id": "coffee-handoff:" + record.issue_key, "generation": 0,
+                    "in_reply_to": record.message_id}
+
         def link(doctype: str, name: str) -> str:
             return f"{self.erp_public_url}/app/{doctype.lower().replace(' ', '-')}/{quote(name, safe='')}"
         links = ["Company issue: " + link("Issue", record.issue_name)]
@@ -351,7 +371,9 @@ class IssueHandoffService:
         if row["stage"] in (Stage.READ, Stage.SENT):
             return
         try:
-            record = IssueNotification.model_validate_json(row["notification_json"])
+            payload = json.loads(row["notification_json"])
+            marketplace = "issue_name" not in payload
+            record = (MarketplaceNotification if marketplace else IssueNotification).model_validate(payload)
             actor = self.actors[record.recipient_email.casefold()]
             if row["stage"] in (Stage.SUBMITTING, Stage.UNCERTAIN):
                 intent = json.loads(row["handoff_json"])
@@ -362,6 +384,7 @@ class IssueHandoffService:
                         intent.get("in_reply_to"), row.get("submission_started_at"),
                         sent_uidvalidity=row.get("sent_uidvalidity"),
                         sent_uid_next=row.get("sent_uid_next"),
+                        **({"forward_original": True} if intent.get("forward_original") else {}),
                     )
                     if native_message_id is not None:
                         self.store.record_native_message_id(key, native_message_id)
@@ -379,7 +402,7 @@ class IssueHandoffService:
                 if row["delivered_at"]:
                     raise RuntimeError("Previously delivered issue notification is no longer locatable")
                 return
-            row = self.store.observe(key, receipt, now, kernel_mode=self.kernel_mode)
+            row = self.store.observe(key, receipt, now, kernel_mode=self.kernel_mode, immediate=marketplace)
             if row["stage"] == Stage.READ:
                 return
             deadline = datetime.fromisoformat(row["deadline_at"])
@@ -395,7 +418,7 @@ class IssueHandoffService:
             receipt = self.mail.inspect_issue_notification(actor, record.message_id)
             if receipt is None:
                 return
-            if self.store.observe(key, receipt, now, kernel_mode=self.kernel_mode)["stage"] == Stage.READ:
+            if self.store.observe(key, receipt, now, kernel_mode=self.kernel_mode, immediate=marketplace)["stage"] == Stage.READ:
                 return
             self.store.mark_eligible(key, intent, now)
 
@@ -412,7 +435,7 @@ class IssueHandoffService:
                 latest = self.mail.inspect_issue_notification(actor, record.message_id)
                 if latest is None:
                     raise RuntimeError("Issue notification receipt disappeared before submission")
-                if self.store.observe(key, latest, self.now(), kernel_mode=self.kernel_mode)["stage"] == Stage.READ:
+                if self.store.observe(key, latest, self.now(), kernel_mode=self.kernel_mode, immediate=marketplace)["stage"] == Stage.READ:
                     raise ReadBeforeHandoff()
                 mark_submitting()
 
@@ -423,11 +446,14 @@ class IssueHandoffService:
 
             def native_id_captured(message_id: str) -> None:
                 self.store.record_native_message_id(key, message_id)
+            transport = {"system_handoff": True} if marketplace and self.coffee_handoff_delivery == "api" else {}
+            if intent.get("forward_original"):
+                transport["forward_original"] = True
             result = self.mail.send(actor, self.viv, intent["subject"], intent["body"], intent["message_id"],
                                     intent["run_id"], intent["generation"], in_reply_to=record.message_id,
                                     on_submission_started=submission_started,
                                     on_submission_snapshot=submission_snapshot,
-                                    on_native_message_id=native_id_captured)
+                                    on_native_message_id=native_id_captured, **transport)
             self.store.complete(key, result, self.now())
         except ReadBeforeHandoff:
             return

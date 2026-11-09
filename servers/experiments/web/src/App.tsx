@@ -518,6 +518,8 @@ function EmployeeStreamsPage() {
   )
 }
 
+const activityFilters = [["all", "All activity"], ["email", "Emails"], ["message", "Messages"], ["chatter", "Chatter"], ["action", "Company actions"]] as const
+
 function ActivityPage() {
   const refreshKey = useRefreshKey()
   const [company, setCompany] = useState<Company | null>(null)
@@ -528,7 +530,9 @@ function ActivityPage() {
   const [activityWarning, setActivityWarning] = useState<string | null>(null)
   const [manualRefresh, setManualRefresh] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
-  const [filter, setFilter] = useState("all")
+  const [activityParams, setActivityParams] = useSearchParams()
+  const requestedFilter = activityParams.get("activity")
+  const filter = requestedFilter && activityFilters.some(([value]) => value === requestedFilter) ? requestedFilter : "all"
   const companyRequest = useRef<ReturnType<typeof getCompany> | null>(null)
   const activityRequest = useRef<ReturnType<typeof getActivity> | null>(null)
 
@@ -570,9 +574,10 @@ function ActivityPage() {
     setManualRefresh((current) => current + 1)
   }
 
-  const filtered = [...activity]
-    .filter((entry) => filter === "all" || entry.type === filter || (filter === "message" && entry.type === "chat") || (filter === "chatter" && (entry.type === "chatter" || (entry.type === "message" && entry.direction === "sent" && Boolean(entry.actor)))))
-    .sort((first, second) => second.timestamp.localeCompare(first.timestamp))
+  const matchesFilter = (entry: ActivityEntry, value: string) =>
+    value === "all" || entry.type === value || (value === "message" && entry.type === "chat")
+  const filtered = activity.filter((entry) => matchesFilter(entry, filter))
+    .sort((first, second) => (second.timestamp ?? "").localeCompare(first.timestamp ?? ""))
   const backgroundErrors = company?.background?.errors ?? {}
   const globalBackgroundErrors = ([
     ["company_background", "Background worker"],
@@ -628,24 +633,31 @@ function ActivityPage() {
           </Button>
         </div>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Filter activity">
-          {[ ["all", "All activity"], ["email", "Emails"], ["message", "Messages"], ["chatter", "Chatter"], ["action", "Company actions"] ].map(([value, label]) => (
-            <Button key={value} size="sm" variant={filter === value ? "default" : "outline"} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</Button>
+          {activityFilters.map(([value, label]) => (
+            <Button key={value} type="button" size="sm" variant={filter === value ? "default" : "outline"}
+              aria-pressed={filter === value} onClick={() => setActivityParams((current) => {
+                const next = new URLSearchParams(current)
+                if (value === "all") next.delete("activity")
+                else next.set("activity", value)
+                return next
+              }, { preventScrollReset: true })}>{label} ({activity.filter((entry) => matchesFilter(entry, value)).length})</Button>
           ))}
         </div>
       </div>
 
       {activityWarning && <ErrorNotice message={activityWarning} title="Some company activity could not be loaded" />}
       {loading ? <div className="space-y-3"><Skeleton className="h-24 w-full" /><Skeleton className="h-24 w-full" /></div> : filtered.length ? (
-        <div className="space-y-3">
+        <div key={filter} className="space-y-3">
           {filtered.map((entry) => {
             const isEmail = entry.type === "email"
+            const isCommunication = isEmail || entry.type === "message" || entry.type === "chat" || entry.type === "chatter"
             const title = entry.title.trim()
             const content = entry.content?.trim()
             const summary = entry.summary?.trim()
-            const showContent = Boolean(content && content !== title)
+            const showContent = Boolean(content && (isEmail || content !== title))
             const showSummary = Boolean(summary && summary !== title && !(showContent && content?.startsWith(summary)))
             const Icon = isEmail ? Mail : entry.type === "message" || entry.type === "chat" ? MessageCircle : Building2
-            return <article key={entry.id} id={`activity-${entry.id}`} className="scroll-mt-6 rounded-xl border bg-card p-4 sm:p-5">
+            return <article key={JSON.stringify([entry.type, entry.id, entry.direction])} id={`activity-${entry.id}`} className="scroll-mt-6 rounded-xl border bg-card p-4 sm:p-5">
               <div className="flex items-start gap-3">
                 <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-secondary text-secondary-foreground"><Icon className="size-4" /></span>
                 <div className="min-w-0 flex-1">
@@ -653,9 +665,51 @@ function ActivityPage() {
                     <h3 className="font-medium">{entry.title}</h3>
                     <time className="text-xs text-muted-foreground">{formatDate(entry.timestamp)}</time>
                   </div>
-                  {(entry.actor || entry.direction) && <p className="mt-1 text-xs text-muted-foreground">{[entry.actor, entry.direction === "sent" ? "Sent" : entry.direction === "received" ? "Received" : null].filter(Boolean).join(" · ")}</p>}
-                  {showSummary && summary && <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/85">{formatActivityText(summary)}</p>}
-                  {showContent && content && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 text-sm leading-6">{formatActivityText(content)}</p>}
+                  {isEmail ? <div className="mt-3 space-y-2 text-sm">
+                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 break-words">
+                      <span className="font-medium">From</span><span>{entry.actor_name || entry.actor || "Unknown sender"}</span>
+                      <span className="font-medium">To</span><span>{entry.recipient_name || entry.recipient || "Unknown recipient"}</span>
+                    </div>
+                    <div className="whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 leading-6">
+                      {content || "Message body was not captured."}
+                    </div>
+                    {entry.delivery_status && <p className="text-muted-foreground">{entry.delivery_status}</p>}
+                    {Boolean(entry.attachments?.length) && <p>Attachments: {entry.attachments?.join(", ")}</p>}
+                    {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}
+                  </div> : isCommunication ? <div className="mt-3 overflow-x-auto rounded-lg border bg-muted/60">
+                    <table className="w-full text-left text-sm">
+                      <thead className="border-b">
+                        <tr>
+                          <th scope="col" className="p-3 font-medium">Direction</th>
+                          <th scope="col" className="p-3 font-medium">From / To</th>
+                          <th scope="col" className="p-3 font-medium">Message</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="align-top">
+                          <td className="p-3 font-medium">{entry.direction === "received" ? "Received" : entry.direction === "sent" ? "Sent" : entry.delivery_status || "Recorded"}
+                            {entry.direction && entry.delivery_status && <p className="mt-1 text-xs font-normal text-muted-foreground">{entry.delivery_status}</p>}
+                          </td>
+                          <td className="break-words p-3">
+                            <p><span className="font-medium">From</span> {entry.actor_name || entry.actor || "Unknown sender"}</p>
+                            {entry.recipient && <p className="mt-1"><span className="font-medium">To</span> {entry.recipient_name || entry.recipient}</p>}
+                          </td>
+                          <td className="w-full min-w-48 break-words p-3">
+                            <p className="whitespace-pre-wrap leading-6">{content ? formatActivityText(content) : "Message body was not captured."}</p>
+                            {Boolean(entry.attachments?.length) && <p className="mt-2">Attachments: {entry.attachments?.join(", ")}</p>}
+                            {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div> : <>
+                    {entry.actor && <p className="mt-1 text-xs text-muted-foreground">{entry.actor}</p>}
+                    {showSummary && summary && <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/85">{formatActivityText(summary)}</p>}
+                    {showContent && content && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 text-sm leading-6">{formatActivityText(content)}</p>}
+                    {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}
+                  </>}
+                  {entry.routing_note && <p className="mt-2 text-sm text-muted-foreground">{entry.routing_note}</p>}
+                  {entry.related_activity_id && filtered.some((item) => item.id === entry.related_activity_id) && <a className="mt-2 inline-block text-sm underline" href={`#activity-${entry.related_activity_id}`}>View original message</a>}
                   {entry.coffee_update && <CoffeeUpdateDetails update={entry.coffee_update} />}
                   {entry.run_id && <Link className="mt-3 inline-flex items-center gap-1 text-sm text-primary hover:underline" to={`/runs/${encodeURIComponent(entry.run_id)}`}>View experiment <ArrowRight className="size-3.5" /></Link>}
                 </div>
@@ -673,6 +727,25 @@ function ActivityPage() {
       )}
     </section>
   )
+}
+
+function ActivityDocumentLink({ document }: { document: NonNullable<ActivityEntry["native_document"]> }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
+  const label = `${document.doctype} ${document.name}`
+  return <details className="mt-2 text-sm" onToggle={(event) => {
+    if (!event.currentTarget.open || url) return
+    void getCompanyTools().then((tools) => {
+      const base = tools.find((tool) => tool.id === "erpnext")?.url
+      if (!base) { setUnavailable(true); return }
+      const slug = document.doctype.toLowerCase().replaceAll(" ", "-")
+      setUrl(new URL(`/app/${encodeURIComponent(slug)}/${encodeURIComponent(document.name)}`, base).href)
+    }).catch(() => setUnavailable(true))
+  }}>
+    <summary className="cursor-pointer">{label}</summary>
+    {url ? <a href={url} target="_blank" rel="noreferrer" className="underline">Open in ERPNext</a>
+      : <p>{unavailable ? "ERPNext link unavailable" : "Loading ERPNext link…"}</p>}
+  </details>
 }
 
 function CoffeeUpdateDetails({ update }: { update: NonNullable<ActivityEntry["coffee_update"]> }) {

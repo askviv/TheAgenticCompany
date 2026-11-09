@@ -378,7 +378,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 item={**item,'description':item.get('summary') or item.get('title') or item.get('content')}
             activity.append({key:item[key] for key in
                 ('id','timestamp','event','description','experiment_id','scenario_id',
-                 'type','title','summary','content','actor','direction','received_at','created_at','coffee_update') if key in item})
+                 'type','title','summary','content','actor','recipient','related_activity_id','delivery_status','attachments','native_document','direction','received_at','created_at','coffee_update') if key in item})
         clock_speed=payload.get('clock_speed')
         if clock_speed is not None and (isinstance(clock_speed,bool) or not isinstance(clock_speed,(int,float))
                                         or not math.isfinite(clock_speed) or clock_speed<=0):
@@ -1319,6 +1319,28 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         except Exception as error:
             logging.exception('Company clock speed update failed')
             return jsonify(error=f'Company clock speed could not be confirmed ({type(error).__name__}). Refresh to retry.'),502
+    def activity_participant_names():
+        profile = json.loads(Path(app.config['COMPANY_PROFILE_FILE']).read_text(encoding='utf-8'))
+        company = profile['company']
+        names = {'viv': 'Viv', 'customer': 'Cornerstone Customer'}
+        for employee in profile['employees']:
+            name = employee['displayName']
+            employee_id = employee['id']
+            names[employee_id] = names['employee-' + employee_id] = name
+            names[employee['email'].casefold()] = name
+            username = employee.get('accounts', {}).get('rocketchat', {}).get('username')
+            if username:
+                names[username.casefold()] = name
+        support_name = names.get(company.get('supportEmployeeId'))
+        if support_name:
+            names[company.get('supportActorId', 'requester')] = support_name
+        if company.get('assistantEmail'):
+            names[company['assistantEmail'].casefold()] = 'Viv'
+        for party in company.get('background', {}).get('coffee', {}).get('counterparties', {}).values():
+            names[party['actor_id'].casefold()] = party['display_name']
+            names[party['email'].casefold()] = party['display_name']
+        return names
+
     @app.get('/api/activity')
     def api_activity():
         activity=[]
@@ -1341,20 +1363,35 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             company=company_state()
             for entry in company['activity']:
                 title=entry.get('title') or entry.get('event','Company update')
-                content=entry.get('content') or entry.get('description','')
+                content=entry.get('content') if entry.get('type') == 'email' else (entry.get('content') or entry.get('description',''))
                 event_type=entry.get('type')
-                if event_type not in {'email','message','action'}: event_type='action'
+                if event_type not in {'email','message','chat','chatter','action'}: event_type='action'
                 activity.append({'id':entry['id'],'type':event_type,
                     'timestamp':entry['timestamp'],'title':title,
-                    'summary':entry.get('summary') or content[:240],
+                    'summary':entry.get('summary') or (content or '')[:240],
                     'content':content,'actor':entry.get('actor'),
+                    'recipient':entry.get('recipient'), 'related_activity_id':entry.get('related_activity_id'),
+                    'delivery_status':entry.get('delivery_status'), 'attachments':entry.get('attachments'),
+                    'native_document':entry.get('native_document'),
                     'direction':entry.get('direction'),
                     'run_id':external_to_local.get(entry.get('experiment_id')),
                     **({'coffee_update':entry['coffee_update']} if 'coffee_update' in entry else {})})
         except Exception:
             logging.exception('Company activity retrieval failed')
             company_error='Company activity could not be retrieved.'
-        activity.sort(key=lambda item:item.get('timestamp') or '')
+        # A run's outbox and the evidence collector can record the same email.
+        # Keep separate send and receipt observations, and combine duplicate metadata.
+        unique_activity = {}
+        for item in activity:
+            identity = (item['type'], item['id'], item.get('direction'))
+            if identity not in unique_activity:
+                unique_activity[identity] = item
+            else:
+                record = unique_activity[identity]
+                for field, value in item.items():
+                    if not record.get(field) and value:
+                        record[field] = value
+        activity = sorted(unique_activity.values(), key=lambda item: item.get('timestamp') or '')
         metrics={
             'emails_sent': None if company_error else sum(item['type']=='email' and item.get('direction')=='sent' for item in activity),
             'emails_received': None if company_error else sum(item['type']=='email' and item.get('direction')=='received' for item in activity),
@@ -1363,6 +1400,19 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 sum(item['kind']=='workplace' and item['status'] not in {'completed','failed'} for item in tracked_runs)
                 + sum(item['status'] not in {'completed','failed'} for item in company['experiments'])),
         }
+        try:
+            participant_names = activity_participant_names()
+        except (OSError, ValueError, KeyError, TypeError):
+            logging.exception('Activity participant names could not be loaded')
+            participant_names = {'viv': 'Viv'}
+        for item in activity:
+            for field in ('actor', 'recipient'):
+                participant = item.get(field)
+                if participant:
+                    item[field + '_name'] = participant_names.get(participant.casefold(), participant)
+            if (item['type'] == 'email' and item['title'] == 'Updated delivery requirement'
+                    and item.get('actor') == 'customer' and item.get('recipient') == 'viv'):
+                item['routing_note'] = 'Older simulation email sent directly to Viv because of a routing bug.'
         filter_type=request.args.get('type')
         if filter_type in {'email','message','action'}:
             activity=[item for item in activity if item['type']==filter_type]

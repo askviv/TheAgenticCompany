@@ -34,13 +34,18 @@ class EmployeeWebmailSender:
              reply_to: str | None, automated: bool,
              on_submission_started: Callable[[], None],
              require_reply_to: str | None = None,
-             on_submission_completed: Callable[[], None] | None = None) -> None:
+             on_submission_completed: Callable[[], None] | None = None,
+             forward_original: bool = False) -> None:
         # Routing, idempotency and evidence stay with the existing mail gateway.
         del message_id, run_id, generation, automated, in_reply_to
         if reply_message_url:
             self._validate_same_origin(reply_message_url)
         instruction = self._identity(sender_email, sender_username)
-        if reply_message_url:
+        if forward_original and reply_message_url:
+            instruction += (f"Open this exact source message: {reply_message_url}. "
+                            "Use Roundcube’s Forward as attachment action to preserve the original email. "
+                            "Keep the attached original intact. ")
+        elif reply_message_url:
             instruction += (f"Open this exact source message: {reply_message_url}. "
                             "Read it and use Roundcube's native Reply action to preserve its thread. ")
         else:

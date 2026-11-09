@@ -68,9 +68,12 @@ def _ensure_offer_fields() -> None:
     }
     for doctype, entries in fields.items():
         meta = frappe.get_meta(doctype)
+        installed_in_batch = set()
         for field in entries:
-            if not meta.has_field(field["insert_after"]):
-                raise RuntimeError(f"Native {doctype} lacks the offer-source field anchor")
+            anchor = field["insert_after"]
+            if not meta.has_field(anchor) and anchor not in installed_in_batch:
+                raise RuntimeError(f"Native {doctype} lacks the offer-source field anchor: {anchor}")
+            installed_in_batch.add(field["fieldname"])
     create_custom_fields(fields, update=True)
     for doctype, entries in fields.items():
         meta = frappe.get_meta(doctype)

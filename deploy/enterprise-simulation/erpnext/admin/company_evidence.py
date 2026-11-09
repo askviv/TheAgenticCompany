@@ -736,3 +736,54 @@ def collect_evidence_deliveries(cursor: dict[str, str] | None = None) -> dict[st
         else cursor
     )
     return {"events": events, "cursor": next_cursor}
+
+
+def collect_invoice_mail(company: str) -> list[dict[str, Any]]:
+    """Read native invoice mail and the queue status of each actual recipient."""
+    from email import policy
+    from email.parser import Parser
+
+    from frappe.utils import strip_html
+
+    rows = frappe.db.sql(
+        """
+        SELECT q.name, q.reference_doctype, q.reference_name, q.modified, q.message
+        FROM `tabEmail Queue` q
+        LEFT JOIN `tabSales Invoice` sales
+          ON q.reference_doctype = 'Sales Invoice' AND sales.name = q.reference_name
+        LEFT JOIN `tabPurchase Invoice` purchase
+          ON q.reference_doctype = 'Purchase Invoice' AND purchase.name = q.reference_name
+        WHERE sales.company = %s OR purchase.company = %s
+        ORDER BY q.modified, q.name
+        """,
+        (company, company), as_dict=True,
+    )
+    messages = []
+    for row in rows:
+        mime = Parser(policy=policy.default).parsestr(row.message or "")
+        plain = mime.get_body(preferencelist=("plain",))
+        html = mime.get_body(preferencelist=("html",))
+        queue = frappe.get_doc("Email Queue", row.name)
+        print_attachments = [
+            f"{item['doctype']} {item['name']} (PDF)"
+            for item in queue.attachments_list
+            if item.get("print_format_attachment") and item.get("doctype") and item.get("name")
+        ]
+        for recipient in queue.recipients:
+            messages.append({
+                "id": f"erp-invoice-mail:{recipient.name}",
+                "timestamp": str(row.modified),
+                "message_id": str(mime.get("Message-ID") or ""),
+                "in_reply_to": str(mime.get("In-Reply-To") or ""),
+                "title": str(mime.get("Subject") or "Invoice email"),
+                "content": plain.get_content() if plain else strip_html(html.get_content()) if html else "",
+                "actor": str(mime.get("From") or "ERPNext"),
+                "recipient": recipient.recipient,
+                "delivery_status": recipient.status,
+                "attachments": list(dict.fromkeys([
+                    *print_attachments,
+                    *(part.get_filename() for part in mime.iter_attachments() if part.get_filename()),
+                ])),
+                "native_document": {"doctype": row.reference_doctype, "name": row.reference_name},
+            })
+    return messages

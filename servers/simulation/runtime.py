@@ -15,7 +15,7 @@ import threading
 import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -55,6 +55,8 @@ class RuntimeConfig(BaseModel):
     company_profile_file: Path = Path(__file__).resolve().parents[2] / "deploy/single-host/company-identities.json"
     company_application_services_file: Path = Path("/etc/company-workplace/application-services.json")
     company_pack_credentials_file: Path = Path("/etc/company-workplace/secrets/midpoint-connector-secrets.json")
+    coffee_handoff_delivery: Literal["browser", "api"] = "browser"
+    experiment_chat_delivery: Literal["browser", "api"] = "browser"
     employee_chat_credentials_file: Path | None = None
     rocketchat_base_url: str = "https://chat.company.example.test"
     background_model_id: str = "gpt-6-luna"
@@ -669,7 +671,7 @@ def build_app(config_path: str | Path):
         LOG.error("Employee desktop configuration is invalid exception_type=%s", type(error).__name__)
         engine.employee_desktops = None
     gateway.set_employee_desktops(engine.employee_desktops)
-    if engine.employee_desktops is not None:
+    if engine.employee_desktops is not None or config.experiment_chat_delivery == "api":
         from .experiment_chat import ExperimentChatDispatch
         employee_chat_credentials = config.employee_chat_credentials_file or config.mail_credentials_file.with_name(
             "employee-chat-credentials.json")
@@ -679,6 +681,7 @@ def build_app(config_path: str | Path):
             config.state_root,
             engine.employee_desktops,
             config.rocketchat_base_url,
+            delivery=config.experiment_chat_delivery,
         )
     else:
         engine.experiment_chat_dispatch = None
@@ -860,11 +863,11 @@ def build_app(config_path: str | Path):
         try:
             feedback_workflow = CompanyFeedbackRuntime(
                 config, store, private_json(config.principals_file), worker=background_worker,
-                provider_mail_observer=provider_mail_observer,
+                provider_mail_observer=provider_mail_observer, wake_handoffs=workers.changed.set,
             )
             engine.company_feedback = feedback_workflow
             engine.company_native_message_bridge = feedback_workflow.deliver_native_messages
-            engine.company_feedback_activity = feedback_workflow.pipeline.activity
+            engine.company_feedback_activity = feedback_workflow.activity
             engine.company_feedback_summary = lambda experiment_id: feedback_workflow.pipeline.report(experiment_id,evaluate_native=False)
             def feedback_observe():
                 try:

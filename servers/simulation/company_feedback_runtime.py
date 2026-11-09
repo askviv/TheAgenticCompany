@@ -103,9 +103,10 @@ def _coffee_company_mail_actor_ids(profile: dict, mail_config: dict) -> list[str
 class CompanyFeedbackRuntime:
     def __init__(
         self, config, store, principals, *, native=None, retail_admin=None, worker=None,
-        provider_mail_observer=None,
+        provider_mail_observer=None, wake_handoffs=None,
     ):
         self.config, self.store = config, store
+        self.wake_handoffs = wake_handoffs
         self.secret = signing_secret(principals)
         self.native = native or ERPNextSiteAdmin(
             config.erp_compose, config.erp_credentials_root.parent
@@ -397,6 +398,8 @@ class CompanyFeedbackRuntime:
             )
             self.pipeline.map_record(mapping, record["document"])
         self._register_tau_retail_mappings(result["records"], existing, now)
+        if "invoice_mail" in result:
+            self._record_invoice_mail(result["invoice_mail"])
         from .feedback_contracts import NativeDocumentEvent
 
         for event in [*result.get("events", []), *result.get("issue_events", [])]:
@@ -406,6 +409,70 @@ class CompanyFeedbackRuntime:
                 "INSERT INTO company_feedback_runtime_reports VALUES(?,?) ON CONFLICT(provider) DO UPDATE SET result_json=excluded.result_json",
                 ("native_evidence_cursor", json.dumps(result["cursor"])),
             )
+
+    def _record_invoice_mail(self, messages):
+        with self.store.transaction() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS company_invoice_mail_activity "
+                       "(id TEXT PRIMARY KEY, confirmed INTEGER NOT NULL, payload_json TEXT NOT NULL)")
+        with self.store.transaction(write=False) as db:
+            confirmed = {row["id"] for row in db.execute(
+                "SELECT id FROM company_invoice_mail_activity WHERE confirmed=1"
+            )}
+        entries = []
+        errors = []
+        actors = {actor["email"].casefold(): actor for actor in self.config.mail["actors"]}
+        gateway = self._get_mail_gateway()
+        for message in messages:
+            entry_id = message["id"]
+            if entry_id in confirmed:
+                continue
+            status = message["delivery_status"]
+            recipient = actors.get(message["recipient"].casefold())
+            receipt = None
+            if (status == "Sent" and recipient and recipient["actor_id"] != "viv"
+                    and message["message_id"]):
+                try:
+                    receipt = gateway.inspect_issue_notification(
+                        recipient, message["message_id"], include_content=True,
+                    )
+                except Exception as error:
+                    errors.append(error)
+            if receipt:
+                message = {**message, "timestamp": receipt["received_at"],
+                           "attachments": receipt["attachments"],
+                           "content": receipt["content"] if receipt["content"] is not None else message["content"]}
+            timestamp = datetime.fromisoformat(message["timestamp"])
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            entry = {
+                **message, "timestamp": timestamp.isoformat(), "event": "ERP_INVOICE_EMAIL",
+                "type": "email", "direction": "sent" if status == "Sent" else None,
+                "description": "ERPNext invoice email",
+                "related_activity_id": message["in_reply_to"] or None,
+                "delivery_status": (
+                    "Received by recipient mailbox" if receipt else
+                    "Accepted for delivery" if status == "Sent" else
+                    "Queued" if status == "Not Sent" else status
+                ),
+            }
+            entries.append((entry_id, int(receipt is not None), json.dumps(entry)))
+        with self.store.transaction() as db:
+            db.executemany(
+                "INSERT INTO company_invoice_mail_activity VALUES(?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET confirmed=excluded.confirmed,payload_json=excluded.payload_json "
+                "WHERE company_invoice_mail_activity.confirmed=0",
+                entries,
+            )
+        if errors:
+            raise ExceptionGroup("Invoice mailbox confirmation failed", errors)
+
+    def activity(self):
+        with self.store.transaction(write=False) as db:
+            exists = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='company_invoice_mail_activity'"
+            ).fetchone()
+            rows = db.execute("SELECT payload_json FROM company_invoice_mail_activity").fetchall() if exists else []
+        return self.pipeline.activity() + [json.loads(row["payload_json"]) for row in rows]
 
     def _advance_ecommerce_lifecycle(self, company_time):
         provider = self.store.get_background_initialization_request("ecommercebench")
@@ -987,6 +1054,8 @@ class CompanyFeedbackRuntime:
         mappings = self.pipeline.mappings()
         for row in rows:
             notification = json.loads(row["notification_json"])
+            if "issue_name" not in notification:
+                continue
             documents = {
                 (order["doctype"], order["name"])
                 for order in notification["affected_orders"]
@@ -1379,6 +1448,19 @@ class CompanyFeedbackRuntime:
                 matches.append(thread_root)
         return matches[0] if len(set(matches)) == 1 else None
 
+    def register_coffee_marketplace_handoff(self, plan: dict, message_id: str) -> None:
+        from .issue_handoffs import IssueHandoffStore, MarketplaceNotification
+
+        IssueHandoffStore(self.store).register(MarketplaceNotification(
+            issue_key=identity("coffee-marketplace-handoff", plan["source_id"]),
+            message_id=message_id,
+            recipient_email=plan["recipient"]["email"],
+            subject=plan["native_message"]["title"],
+            business_description=plan["native_message"]["body"],
+        ), datetime.now(timezone.utc))
+        if self.wake_handoffs is not None:
+            self.wake_handoffs()
+
     def _deliver_coffee_native_message(self, event: CompanySourceEvent | None, plan: dict) -> None:
         from .mail import MailDeliveryUnconfirmed, MailuGateway
         from .runtime import employee_desktop_manager, private_json
@@ -1598,6 +1680,8 @@ class CompanyFeedbackRuntime:
                 )
                 self.pipeline.capture(evidence)
                 self.pipeline.link_message(plan["mapping_id"], native_message_id or payload["message_id"])
+            if status != "delivered":
+                self.register_coffee_marketplace_handoff(plan, native_message_id or payload["message_id"])
             with self.store.transaction() as db:
                 db.execute(
                     "UPDATE company_native_message_outbox SET status='delivered',error_type=NULL,receipt_json=?,updated_at=? "
@@ -2068,6 +2152,8 @@ class CompanyFeedbackRuntime:
         }
         for row in tracked:
             notification = json.loads(row["notification_json"])
+            if "issue_name" not in notification:
+                continue
             actor = actors[notification["recipient_email"].casefold()]
             known_ids = {notification["message_id"]}
             if row["handoff_json"]:

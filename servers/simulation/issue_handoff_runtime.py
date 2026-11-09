@@ -56,6 +56,7 @@ class CompanyIssueWorkflow:
         self.service = IssueHandoffService(IssueHandoffStore(self.store), mail, scheduler,
                                           actors=config.mail["actors"], erp_public_url=config.erp_public_url,
                                           kernel_mode=config.kernel_company_clock_enabled,
+                                          coffee_handoff_delivery=config.coffee_handoff_delivery,
                                           now=kernel_clock.real_now if kernel_clock else lambda: datetime.now(timezone.utc))
         self.error: str | None = None
 
