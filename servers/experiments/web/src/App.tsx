@@ -897,17 +897,17 @@ function CompanyToolsPage() {
 }
 
 const coffeePaymentWindows = [
-  ["friday", "Friday payments"],
-  ["morning", "Payments before 10 a.m."],
-  ["financing", "Customer financing requests"],
-  ["batch_cutoff", "Weekly batch cutoff"],
-  ["financial_distress", "Financial distress"],
-  ["higher_credit_limit", "Requests a higher credit limit"],
-  ["partial_payment", "Partial payment"],
-  ["wrong_recipient", "Wrong billing recipient"],
-  ["receiving_mismatch", "Receiving mismatch"],
-  ["missing_po", "Missing purchase order reference"],
-  ["reminder", "Payment after a reminder"],
+  ["friday", "Friday payments", "The customer processes payments only on Fridays."],
+  ["morning", "Payments before 10 a.m.", "The customer processes payments only before 10 a.m."],
+  ["financing", "Customer financing requests", "The customer asks for financing on a coffee order. Finance hands off the request so a Lending application can be submitted."],
+  ["batch_cutoff", "Weekly batch cutoff", "The customer pays in a Friday batch starting at 10 a.m. Invoices received at or after the cutoff wait until the following Friday."],
+  ["financial_distress", "Financial distress", "The customer asks for longer terms and delays payment by 7 to 28 days after the due date as earlier invoices accumulate."],
+  ["higher_credit_limit", "Requests a higher credit limit", "The customer asks for a higher credit limit when a new order exceeds their existing limit."],
+  ["partial_payment", "Partial payment", "The customer pays half the outstanding invoice and disputes the rest until a linked credit note is submitted."],
+  ["wrong_recipient", "Wrong billing recipient", "The first invoice goes to internal Finance. The customer waits for it to be resent to Accounts Payable."],
+  ["receiving_mismatch", "Receiving mismatch", "The customer receives fewer units than ordered and disputes the missing amount until a linked credit note is submitted."],
+  ["missing_po", "Missing purchase order reference", "The customer holds payment until they receive an invoice with the requested purchase order reference."],
+  ["reminder", "Payment after a reminder", "The customer waits for a payment reminder delivered as a reply on the invoice email thread."],
 ] as const
 
 const otherCoffeeBehaviours = [
@@ -967,11 +967,14 @@ function BenchmarkSettingsPage({ ecommerce = false }: { ecommerce?: boolean }) {
         {error && <ErrorNotice message={error} title={title} />}
         {!settings && !error && <p role="status" className="text-sm text-muted-foreground">Loading behaviours…</p>}
         {settings && <ul className="divide-y">
-          {behaviours.map(([behaviour, title]) => <li key={behaviour} className="flex items-center justify-between gap-4 p-3">
-            <span>{title}</span>
-            <Switch.Root aria-label={title} checked={settings.includes(behaviour)}
+          {behaviours.map(([behaviour, title, description]) => <li key={behaviour} className="flex items-center justify-between gap-4 p-3">
+            <div>
+              <div>{title}</div>
+              {description && <p id={`behaviour-${behaviour}`} className="text-sm text-muted-foreground">{description}</p>}
+            </div>
+            <Switch.Root aria-label={title} aria-describedby={description ? `behaviour-${behaviour}` : undefined} checked={settings.includes(behaviour)}
               disabled={saving} onCheckedChange={(checked) => void update(behaviour, checked)}
-              className="relative inline-flex h-6 w-11 rounded-full bg-input data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+              className="relative inline-flex h-6 w-11 shrink-0 rounded-full bg-input data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
               <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background transition-transform data-[checked]:translate-x-5" />
             </Switch.Root>
           </li>)}
@@ -1028,14 +1031,17 @@ function BackgroundSimulations() {
         <CardHeader>
           <CardTitle>Benchmark controls</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
+        <CardContent className="divide-y">
           {([['coffeebench', 'CoffeeBench'], ['ecommercebench', 'E-CommerceBench']] as const).map(([providerId, label]) => {
             const provider = company?.background?.providers[providerId]
             const enabled = provider?.enabled
             const issue = company?.background?.errors[providerId] ?? company?.background?.errors.configuration
-            return <div key={providerId} className="rounded-lg border p-4">
+            return <div key={providerId} className="py-3 first:pt-0 last:pb-0">
               <div className="flex items-center justify-between gap-4">
-                <span id={`${providerId}-label`} className="font-medium">{label}</span>
+                <div className="flex items-center gap-3">
+                  <span id={`${providerId}-label`} className="font-medium">{label}</span>
+                  <span className="text-sm text-muted-foreground">{enabled === undefined ? "Unavailable" : enabled ? "On" : "Off"}</span>
+                </div>
                 <Switch.Root
                   aria-labelledby={`${providerId}-label`}
                   checked={enabled === true}
