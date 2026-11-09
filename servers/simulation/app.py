@@ -456,18 +456,17 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
     @app.get("/company/background/coffeebench/payment-windows")
     def coffee_payment_windows(principal: Principal = Depends(authenticate)):
         require_role(principal, "controller")
-        return {"customers": engine.store.coffee_payment_windows()}
+        return {"enabled_behaviours": engine.store.coffee_payment_windows()}
 
-    @app.post("/company/background/coffeebench/payment-windows/{customer}/{behaviour}")
+    @app.post("/company/background/coffeebench/payment-windows/{behaviour}")
     def set_coffee_payment_window(
-        customer: Literal["farmer_A", "farmer_B", "roaster_B", "retailer_A", "retailer_B"],
         behaviour: Literal["friday", "morning"],
         model: BackgroundControlRequest,
         principal: Principal = Depends(authenticate),
     ):
         require_role(principal, "controller")
-        engine.store.set_coffee_payment_window(customer, behaviour, model.enabled)
-        return {"customers": engine.store.coffee_payment_windows()}
+        engine.store.set_coffee_payment_window(behaviour, model.enabled)
+        return {"enabled_behaviours": engine.store.coffee_payment_windows()}
 
     @app.post("/company/background/{provider_id}/control", status_code=202)
     def control_company_background(

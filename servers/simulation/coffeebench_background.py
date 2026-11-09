@@ -25,6 +25,7 @@ import math
 import os
 from pathlib import Path
 import pickle
+import random
 import sqlite3
 import tempfile
 import threading
@@ -1492,7 +1493,24 @@ async def advance(
     # Company sales are payable only after the ERP invoice was submitted and sent.
     environment.marketplace._erp_invoice_issuers = set(updated["company_business_ids"])
     environment.marketplace._erp_sent_invoices = set(binding.get("sent_sales_invoice_ids", []))
-    environment.marketplace._erp_payment_windows = binding.get("payment_windows", {})
+    enabled_windows = binding.get("payment_windows", [])
+    if isinstance(enabled_windows, dict):
+        # An advance queued before the settings change may still use the old shape.
+        enabled_windows = {window for windows in enabled_windows.values() for window in windows}
+    assignments = getattr(environment.marketplace, "_erp_payment_window_assignments", None)
+    if assignments is None:
+        customers = sorted(set(environment.business_apps) - set(updated["company_business_ids"]))
+        random.Random(updated["checkpoint"]["sha256"]).shuffle(customers)
+        assignments = {
+            window: customers[index % len(customers)]
+            for index, window in enumerate(("friday", "morning")) if customers
+        }
+        environment.marketplace._erp_payment_window_assignments = assignments
+    payment_windows = {}
+    for window, customer in assignments.items():
+        if window in enabled_windows:
+            payment_windows.setdefault(customer, []).append(window)
+    environment.marketplace._erp_payment_windows = payment_windows
     environment.marketplace._erp_start_weekday = _as_datetime(updated["started_at"]).weekday()
     virtual_delta = max(0, int((finish - _as_datetime(updated["started_at"])).total_seconds() // 60))
     horizon = int(environment.max_days) * 1440

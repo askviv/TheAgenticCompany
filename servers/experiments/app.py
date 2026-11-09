@@ -1223,11 +1223,10 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def coffee_payment_windows():
         args = ()
         if request.method == 'POST':
-            customer, behaviour, enabled = (request.form.get(key) for key in ('customer', 'behaviour', 'enabled'))
-            if (customer not in {'farmer_A', 'farmer_B', 'roaster_B', 'retailer_A', 'retailer_B'}
-                    or behaviour not in {'friday', 'morning'} or enabled not in {'true', 'false'}):
+            behaviour, enabled = (request.form.get(key) for key in ('behaviour', 'enabled'))
+            if behaviour not in {'friday', 'morning'} or enabled not in {'true', 'false'}:
                 abort(400)
-            args = (customer, behaviour, enabled == 'true')
+            args = (behaviour, enabled == 'true')
         try:
             return jsonify(coordinator().coffee_payment_windows(*args))
         except CoordinatorError:

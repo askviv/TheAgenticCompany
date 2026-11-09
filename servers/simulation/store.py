@@ -693,20 +693,18 @@ class SQLiteStore:
                      "generation": row["generation"], "agent_id": row["agent_id"], "status": row["status"],
                      "simulated_time": row["simulated_time"], "paused": bool(row["paused"])} for row in rows]
 
-    def coffee_payment_windows(self) -> dict[str, list[str]]:
+    def coffee_payment_windows(self) -> list[str]:
         with self._connection(None) as db:
-            rows = db.execute("SELECT customer, behaviour FROM coffee_payment_windows ORDER BY customer, behaviour")
-            settings: dict[str, list[str]] = {}
-            for row in rows:
-                settings.setdefault(row["customer"], []).append(row["behaviour"])
-        return settings
+            return [row["behaviour"] for row in db.execute(
+                "SELECT DISTINCT behaviour FROM coffee_payment_windows ORDER BY behaviour"
+            )]
 
-    def set_coffee_payment_window(self, customer: str, behaviour: str, enabled: bool) -> None:
+    def set_coffee_payment_window(self, behaviour: str, enabled: bool) -> None:
         with self.transaction() as db:
+            # Retire any customer-specific rows written by the previous UI.
+            db.execute("DELETE FROM coffee_payment_windows WHERE behaviour=?", (behaviour,))
             if enabled:
-                db.execute("INSERT OR IGNORE INTO coffee_payment_windows VALUES (?, ?)", (customer, behaviour))
-            else:
-                db.execute("DELETE FROM coffee_payment_windows WHERE customer=? AND behaviour=?", (customer, behaviour))
+                db.execute("INSERT INTO coffee_payment_windows VALUES (?, ?)", ("", behaviour))
 
     def background_provider_control(self, provider_id: str, company_id: str = "company") -> dict[str, Any]:
         with self._connection(None) as db:

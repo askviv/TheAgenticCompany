@@ -25,10 +25,11 @@ CoffeeBench offers already carry `payment_terms_days`. A buyer can ask for net 6
 
 ## Customer settings
 
-Open **Experiments → Background simulations → CoffeeBench → Customer settings**.
-Switch on Friday payments or payments before 10 a.m. for any counterparty.
-If both are on, the customer can pay before 10 a.m. on Fridays. Settings are saved
-on the server and applied when CoffeeBench starts its next advance. A payment
+Open **Experiments → Background simulations → CoffeeBench → Behaviour settings**.
+Switch on Friday payments or payments before 10 a.m. CoffeeBench chooses the
+counterparties privately and keeps those choices in its checkpoint. The settings
+page and API show only which behaviours are enabled. Changes apply on the next
+advance. A payment
 still requires a submitted invoice sent to the buyer and sufficient buyer cash.
 
 The proposed scenarios in the table need their own simulation rules. For a

@@ -291,20 +291,20 @@ export async function stopCompanyDesktop(employeeId: string): Promise<{ employee
   })
 }
 
-export type CoffeePaymentWindows = Record<string, string[]>
+export type CoffeePaymentWindows = string[]
 
 export async function getCoffeePaymentWindows(): Promise<CoffeePaymentWindows> {
-  const result = await requestJson<{ customers: CoffeePaymentWindows }>("/api/company/background/coffeebench/payment-windows")
-  return result.customers
+  const result = await requestJson<{ enabled_behaviours: CoffeePaymentWindows }>("/api/company/background/coffeebench/payment-windows")
+  return result.enabled_behaviours
 }
 
-export async function setCoffeePaymentWindow(customer: string, behaviour: string, enabled: boolean): Promise<CoffeePaymentWindows> {
+export async function setCoffeePaymentWindow(behaviour: string, enabled: boolean): Promise<CoffeePaymentWindows> {
   const session = await getSession()
-  const result = await requestJson<{ customers: CoffeePaymentWindows }>("/api/company/background/coffeebench/payment-windows", {
+  const result = await requestJson<{ enabled_behaviours: CoffeePaymentWindows }>("/api/company/background/coffeebench/payment-windows", {
     method: "POST",
-    body: new URLSearchParams({ csrf_token: session.csrf_token, customer, behaviour, enabled: String(enabled) }),
+    body: new URLSearchParams({ csrf_token: session.csrf_token, behaviour, enabled: String(enabled) }),
   })
-  return result.customers
+  return result.enabled_behaviours
 }
 
 export async function setBackgroundProviderEnabled(providerId: CompanyNativeEvaluation["provider_id"], enabled: boolean): Promise<{ provider_id: CompanyNativeEvaluation["provider_id"]; enabled: boolean; in_flight: boolean; status: "stopped" | "stopping" | "starting" | "active" | "error" }> {

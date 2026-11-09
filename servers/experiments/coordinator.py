@@ -211,12 +211,12 @@ class SimulationCoordinatorClient:
         return self._request("POST", "/company/pause", idempotency_key=idempotency_key,
                              json={"paused": paused})
 
-    def coffee_payment_windows(self, customer=None, behaviour=None, enabled=None):
+    def coffee_payment_windows(self, behaviour=None, enabled=None):
         endpoint = "/company/background/coffeebench/payment-windows"
-        if customer is None:
+        if behaviour is None:
             return self._request("GET", endpoint)
         return self._request(
-            "POST", f"{endpoint}/{quote(customer, safe='')}/{quote(behaviour, safe='')}",
+            "POST", f"{endpoint}/{quote(behaviour, safe='')}",
             json={"enabled": enabled},
         )
 

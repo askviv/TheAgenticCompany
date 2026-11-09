@@ -507,7 +507,7 @@ class CompanyBackgroundTests(unittest.TestCase):
             "Authorization": "Bearer operator", "Idempotency-Key": "unknown"})
         self.assertEqual(invalid.status_code, 422)
 
-    def test_coffee_payment_windows_are_operator_only_and_persist_per_customer(self):
+    def test_coffee_payment_windows_are_operator_only_and_expose_only_enabled_behaviours(self):
         from fastapi.testclient import TestClient
         from servers.simulation.app import create_app
 
@@ -518,21 +518,19 @@ class CompanyBackgroundTests(unittest.TestCase):
         path = "/company/background/coffeebench/payment-windows"
         operator = {"Authorization": "Bearer operator"}
         self.assertEqual(client.post(
-            f"{path}/retailer_A/friday", json={"enabled": True},
+            f"{path}/friday", json={"enabled": True},
             headers={"Authorization": "Bearer viv"},
         ).status_code, 403)
         self.assertEqual(client.post(
-            f"{path}/retailer_A/friday", json={"enabled": True}, headers=operator,
-        ).json(), {"customers": {"retailer_A": ["friday"]}})
+            f"{path}/friday", json={"enabled": True}, headers=operator,
+        ).json(), {"enabled_behaviours": ["friday"]})
         self.assertEqual(client.post(
-            f"{path}/retailer_B/morning", json={"enabled": True}, headers=operator,
+            f"{path}/morning", json={"enabled": True}, headers=operator,
         ).status_code, 200)
-        self.assertEqual(SQLiteStore(self.store.db_path).coffee_payment_windows(), {
-            "retailer_A": ["friday"], "retailer_B": ["morning"],
-        })
+        self.assertEqual(SQLiteStore(self.store.db_path).coffee_payment_windows(), ["friday", "morning"])
         self.assertEqual(client.post(
-            f"{path}/retailer_A/friday", json={"enabled": False}, headers=operator,
-        ).json(), {"customers": {"retailer_B": ["morning"]}})
+            f"{path}/friday", json={"enabled": False}, headers=operator,
+        ).json(), {"enabled_behaviours": ["morning"]})
 
     def test_control_api_requires_controller_key_and_strict_boolean(self):
         from fastapi.testclient import TestClient

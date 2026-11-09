@@ -796,11 +796,6 @@ function HelpPage() {
   )
 }
 
-const coffeeCustomers = [
-  ["retailer_A", "Retailer A"], ["retailer_B", "Retailer B"], ["roaster_B", "Roaster B"],
-  ["farmer_A", "Farmer A"], ["farmer_B", "Farmer B"],
-] as const
-
 const coffeePaymentWindows = [
   ["friday", "Friday payments"],
   ["morning", "Payments before 10 a.m."],
@@ -820,11 +815,11 @@ function CoffeeBenchSettingsPage() {
     return () => { active = false }
   }, [])
 
-  async function update(customer: string, behaviour: string, enabled: boolean) {
+  async function update(behaviour: string, enabled: boolean) {
     setSaving(true)
     setError(null)
     try {
-      setSettings(await setCoffeePaymentWindow(customer, behaviour, enabled))
+      setSettings(await setCoffeePaymentWindow(behaviour, enabled))
     } catch {
       setError("The change could not be confirmed. Reload to check the saved settings.")
     } finally {
@@ -837,25 +832,20 @@ function CoffeeBenchSettingsPage() {
     <Card>
       <CardHeader>
         <CardTitle>CoffeeBench settings</CardTitle>
-        <CardDescription>Choose when each customer can pay. Times use the simulated UTC clock. If both switches are on, the customer can pay before 10 a.m. on Fridays.</CardDescription>
+        <CardDescription>Choose which behaviours can occur. CoffeeBench assigns them privately. Times use the simulated UTC clock.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 overflow-x-auto">
         {error && <ErrorNotice message={error} title="CoffeeBench settings" />}
-        {settings && <table className="w-full text-left text-sm">
-          <thead><tr><th scope="col" className="p-3">Customer</th>
-            {coffeePaymentWindows.map(([id, label]) => <th key={id} scope="col" className="p-3">{label}</th>)}
-          </tr></thead>
-          <tbody>{coffeeCustomers.map(([customer, label]) => <tr key={customer} className="border-t">
-            <th scope="row" className="p-3">{label}</th>
-            {coffeePaymentWindows.map(([behaviour, title]) => <td key={behaviour} className="p-3">
-              <Switch.Root aria-label={`${label}: ${title}`} checked={settings[customer]?.includes(behaviour) ?? false}
-                disabled={saving} onCheckedChange={(checked) => void update(customer, behaviour, checked)}
-                className="relative inline-flex h-6 w-11 rounded-full bg-input data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
-                <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background transition-transform data-[checked]:translate-x-5" />
-              </Switch.Root>
-            </td>)}
-          </tr>)}</tbody>
-        </table>}
+        {settings && <ul className="divide-y">
+          {coffeePaymentWindows.map(([behaviour, title]) => <li key={behaviour} className="flex items-center justify-between gap-4 p-3">
+            <span>{title}</span>
+            <Switch.Root aria-label={title} checked={settings.includes(behaviour)}
+              disabled={saving} onCheckedChange={(checked) => void update(behaviour, checked)}
+              className="relative inline-flex h-6 w-11 rounded-full bg-input data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+              <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background transition-transform data-[checked]:translate-x-5" />
+            </Switch.Root>
+          </li>)}
+        </ul>}
       </CardContent>
     </Card>
   </div>
@@ -915,7 +905,7 @@ function BackgroundSimulations() {
                   <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background shadow-sm transition-transform data-[checked]:translate-x-5" />
                 </Switch.Root>
               </div>
-              {providerId === "coffeebench" && <Link to="/experiments/coffeebench/settings" className="mt-2 inline-block text-sm underline">Customer settings</Link>}
+              {providerId === "coffeebench" && <Link to="/experiments/coffeebench/settings" className="mt-2 inline-block text-sm underline">Behaviour settings</Link>}
               {provider?.status === "starting" && <p className="mt-2 text-sm text-muted-foreground">Starting…</p>}
               {(provider?.status === "stopping" || (enabled === false && provider?.in_flight)) && <p className="mt-2 text-sm text-muted-foreground">Finishing current work…</p>}
               {issue && <p className="mt-2 text-sm text-destructive">Needs attention ({issue.code}).</p>}
