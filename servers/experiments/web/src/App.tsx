@@ -835,18 +835,18 @@ const coffeePaymentWindows = [
   ["financing", "Customer financing requests"],
   ["batch_cutoff", "Weekly batch cutoff"],
   ["financial_distress", "Financial distress"],
+  ["higher_credit_limit", "Requests a higher credit limit"],
+  ["partial_payment", "Partial payment"],
+  ["wrong_recipient", "Wrong billing recipient"],
+  ["receiving_mismatch", "Receiving mismatch"],
+  ["missing_po", "Missing purchase order reference"],
+  ["reminder", "Payment after a reminder"],
 ] as const
 
 const otherCoffeeBehaviours = [
   ["Prompt payment", "Native behaviour"],
-  ["Payment after a reminder", "Planned"],
-  ["Missing purchase order reference", "Planned"],
-  ["Receiving mismatch", "Planned"],
-  ["Wrong billing recipient", "Planned"],
-  ["Partial payment", "Planned"],
   ["Temporary cash shortage", "Native behaviour"],
   ["Requests longer credit terms", "Native behaviour"],
-  ["Requests a higher credit limit", "Planned"],
   ["Bankruptcy", "Native behaviour"],
 ] as const
 

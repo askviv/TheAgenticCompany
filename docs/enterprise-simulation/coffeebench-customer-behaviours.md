@@ -11,14 +11,14 @@ For company sales, CoffeeBench waits for ERPNext to submit the invoice and recor
 | Morning processing | Can pay before 10 a.m. on the simulated UTC clock. | Learn when payments tend to happen and send invoices early. | Operator switch |
 | Requests order financing | Asks for credit to fund a coffee order. | Receives the request with the ERPNext order reference and can create an application in Lending. | Operator switch |
 | Batch cutoff | Processes payments on Fridays from 10 a.m. simulated UTC. Invoices first observed at or after the cutoff roll into the next Friday batch. | Infer the cutoff and avoid unnecessary reminders. | Operator switch |
-| Reminder needed | Pays after a relevant reminder on the original thread. | Learn which customers need one follow-up and when. | Proposed |
-| Missing purchase order reference | Holds an invoice until it carries the correct PO reference. | Ask what is blocking payment, correct the reference and resend. | Proposed |
-| Receiving mismatch | Holds payment when delivery quantity or condition differs from the invoice. | Check receiving evidence and resolve the discrepancy or arrange a credit. | Proposed. Native shipment delays, losses and returns provide starting events |
-| Wrong billing recipient | Leaves an invoice waiting until it reaches the accounts payable contact. | Confirm the billing contact and resend to the right person. | Proposed |
-| Partial payment | Pays only the undisputed amount. | Apply the receipt, track the remainder and follow up on the disputed amount. | Proposed. Native `pay_invoice` settles the full outstanding balance |
+| Reminder needed | Pays after a delivered reply to the invoice email. | Follow up on the invoice thread. | Operator switch |
+| Missing purchase order reference | Holds payment until the requested PO is on a delivered invoice. | Correct the PO and resend after the finance handoff. | Operator switch |
+| Receiving mismatch | Disputes 10% of the net invoice for a simulated quality issue. | Review the finance handoff and submit a linked credit note. | Operator switch |
+| Wrong billing recipient | Rejects invoices delivered to an address other than the configured accounts payable mailbox. | Resend to accounts payable after the finance handoff. | Operator switch |
+| Partial payment | Pays half of the balance and disputes the remainder. | Reconcile the separate receipt and resolve the remainder with a linked credit note. | Operator switch |
 | Temporary cash shortage | Defers payment until cash is available. | Spot the delay, ask for a realistic date and revisit the account. | Native insufficient-cash handling. A scripted recovery pattern is proposed |
 | Requests longer credit terms | Asks for more time to pay on a new order, for example net 60. | Check the account and exposure, then approve, decline or request approval under the company policy. | Native offer terms. A scripted request is proposed |
-| Requests a higher credit limit | Asks to place an order beyond the existing credit limit. | Check total exposure and ask for a deposit, smaller order or approval. | Proposed |
+| Requests a higher credit limit | Asks to exceed the existing ERPNext credit limit. An unconfigured limit starts at half the first qualifying order. | Review the request through Finance and submit the order if approved. | Operator switch |
 | Financial distress | Defers payment until at least seven simulated days after the due date. | Use the late-payment history when deciding whether to offer further credit. | Operator switch |
 | Bankruptcy | Stops trading when the benchmark declares the business bankrupt. Outstanding receivables can become bad debt. | Treat confirmed insolvency as a reason to stop extending new credit and review existing exposure. | Native bankruptcy and write-off. A scripted warning and credit decision are proposed |
 

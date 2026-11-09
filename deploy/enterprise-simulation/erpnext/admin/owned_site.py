@@ -499,11 +499,13 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
                 from finance_sources import reconcile
                 result = reconcile(payload["source_records"], payload["company_binding"], payload["as_of"])
             elif operation == "read-sent-coffee-invoices":
-                from finance_sources import read_sent_sales_invoices
+                from finance_sources import coffee_billing_state, read_sent_sales_invoices
                 profile = json.loads(Path("/opt/company-identities.json").read_text())
-                result = read_sent_sales_invoices(
-                    payload["erp_company"], profile["company"]["background"]["coffee"]["counterparties"],
-                )
+                directory = profile["company"]["background"]["coffee"]["counterparties"]
+                if "billing_behaviours" in payload:
+                    result = coffee_billing_state(payload["erp_company"], directory, payload["billing_behaviours"])
+                else:
+                    result = read_sent_sales_invoices(payload["erp_company"], directory)
             elif operation == "read-due-obligations":
                 from finance_sources import read_due_obligations
                 result = read_due_obligations(payload["erp_company"], payload["as_of"])

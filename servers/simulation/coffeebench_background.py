@@ -1350,6 +1350,9 @@ def _source_records(environment: Any, snapshot: dict[str, Any]) -> list[dict[str
                 **({"financing_requested": True} if offer.buyer_id == getattr(
                     environment.marketplace, "_erp_active_financing_customer", None
                 ) else {}),
+                **({"credit_limit_requested": True} if "higher_credit_limit" in getattr(
+                    environment.marketplace, "_erp_payment_windows", {}
+                ).get(offer.buyer_id, ()) else {}),
                 "offer_status": offer.status,
                 "offer_posted_at_virtual_minute": offer.posted_at,
                 "listing_quantity": listing.qty,
@@ -1388,14 +1391,27 @@ def _source_records(environment: Any, snapshot: dict[str, Any]) -> list[dict[str
             "bad_debt": invoice.bad_debt,
             "upstream_source": "coffeebench/typings.py:Invoice",
         }
+        if company_side == invoice.issuer:
+            windows = getattr(environment.marketplace, "_erp_payment_windows", {}).get(party, ())
+            exceptions = sorted(set(windows) & {"reminder", "missing_po", "receiving_mismatch", "wrong_recipient", "partial_payment"})
+            if exceptions:
+                invoice_fields["billing_exceptions"] = exceptions
         add("invoice", "invoice", invoice.id, party, invoice.amount, invoice.issue_date * 1440, invoice.id, invoice_fields)
+        partial_amount = getattr(invoice, "partial_paid_amount", 0.0)
+        payments = []
+        if partial_amount:
+            payments.append((f"{invoice.id}:partial", invoice.partial_paid_day, partial_amount))
         if invoice.paid and invoice.paid_date is not None:
-            paid_amount = invoice.amount + invoice.late_fees_accrued - invoice.credited_amount
+            paid_amount = invoice.amount + invoice.late_fees_accrued - invoice.credited_amount - partial_amount
+            payments.append((invoice.id, invoice.paid_date, paid_amount))
+        for payment_id, paid_day, paid_amount in payments:
             add(
-                "payment", "invoice_payment", invoice.id, party, paid_amount,
-                invoice.paid_date * 1440, invoice.id,
+                "payment", "invoice_payment", payment_id, party, paid_amount,
+                paid_day * 1440, invoice.id,
                 {
                     **invoice_fields,
+                    "paid": payment_id == invoice.id,
+                    "paid_day": paid_day,
                     "paid_amount": format(Decimal(str(paid_amount)).quantize(Decimal("0.01")), "f"),
                     "cash_from_party_id": invoice.payer,
                     "cash_to_party_id": invoice.issuer,
@@ -1496,6 +1512,14 @@ async def advance(
     # Company sales are payable only after the ERP invoice was submitted and sent.
     environment.marketplace._erp_invoice_issuers = set(updated["company_business_ids"])
     environment.marketplace._erp_sent_invoices = set(binding.get("sent_sales_invoice_ids", []))
+    credits = binding.get("invoice_credits", {})
+    for company_id in updated["company_business_ids"]:
+        for invoice in environment.business_apps[company_id].accounts_receivable:
+            if invoice.id in credits:
+                previous = getattr(invoice, "_erp_applied_credit", 0.0)
+                credited = float(credits[invoice.id])
+                invoice.credited_amount = round(invoice.credited_amount + max(0.0, credited - previous), 2)
+                invoice._erp_applied_credit = max(previous, credited)
     enabled_windows = binding.get("payment_windows", [])
     if isinstance(enabled_windows, dict):
         # An advance queued before the settings change may still use the old shape.
@@ -1510,7 +1534,10 @@ async def advance(
         }
         environment.marketplace._erp_payment_window_assignments = assignments
     customers = sorted(set(environment.business_apps) - set(updated["company_business_ids"]))
-    for behaviour in ("batch_cutoff", "financial_distress"):
+    for behaviour in (
+        "batch_cutoff", "financial_distress", "reminder", "missing_po",
+        "receiving_mismatch", "wrong_recipient", "partial_payment", "higher_credit_limit",
+    ):
         if behaviour in enabled_windows and behaviour not in assignments and customers:
             assignments[behaviour] = random.Random(
                 f"{updated['checkpoint']['sha256']}:{behaviour}"

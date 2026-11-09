@@ -12,7 +12,7 @@ from typing import Any
 
 import frappe
 
-from finance_handoffs import delegate_finance_task, send_finance_queues
+from finance_handoffs import delegate_finance_task, finance_task_message_id, send_finance_queues
 from source_records import ensure_source_fields, get_source_document, insert_source_document
 from native_accounts import ensure_simulated_bank, map_party_to_currency, submit_imported_bank_transaction
 
@@ -325,6 +325,27 @@ def _insert_offer(record: dict[str, Any], context: dict[str, Any]) -> tuple[str,
             f"{party['name']} is requesting credit to finance order {doc.name} "
             f"({record['currency']} {record['amount']}). Can you take care of it?",
         )
+    if facts.get("credit_limit_requested") and context.get("finance_reviewer"):
+        from erpnext.selling.doctype.customer.customer import get_credit_limit, get_customer_outstanding
+
+        limit = get_credit_limit(party["name"], context["company"])
+        order_total = _decimal(doc.base_grand_total, "order total")
+        if not limit and order_total >= Decimal("0.02"):
+            customer = frappe.get_doc("Customer", party["name"])
+            limit = float((order_total / 2).quantize(Decimal("0.01")))
+            row = next((entry for entry in customer.credit_limits if entry.company == context["company"]), None)
+            if row is None:
+                row = customer.append("credit_limits", {"company": context["company"]})
+            row.credit_limit = limit
+            customer.save()
+        outstanding = Decimal(str(get_customer_outstanding(party["name"], context["company"])))
+        if limit and outstanding + order_total > Decimal(str(limit)):
+            delegate_finance_task(
+                "Sales Order", doc.name, context["finance_reviewer"], context["assistant_email"],
+                f"{party['name']} is asking for a higher credit limit to place order {doc.name}. "
+                "Can you review the request and proceed if you approve it?",
+                source_event_id=f"credit-limit:{record['id']}",
+            )
     return doc.name, inserted
 
 
@@ -492,10 +513,13 @@ def reconcile(source_records: list[dict[str, Any]], company_binding: dict[str, A
             receipts.append({"source_id": record["id"], "doctype": doctype, "name": name, "created": created})
     if company_binding.get("review_coffee_financing"):
         decide_applications(context)
+    if company_binding.get("coffee_billing_behaviours"):
+        coffee_billing_state(context["company"], context["counterparty_mail_directory"],
+                            company_binding["coffee_billing_behaviours"], handoff=context)
     return {"as_of": _date(as_of), "receipts": receipts}
 
 
-def _sales_invoice_mail(company: str, directory: dict[str, Any], *, queue_status, recipient_status):
+def _sales_invoice_mail(company: str, directory: dict[str, Any], *, queue_status, recipient_status, include_misaddressed=False):
     """Find submitted CoffeeBench invoice emails addressed to the mapped buyer."""
     if not frappe.get_meta("Sales Invoice").has_field("custom_source_system"):
         return
@@ -506,18 +530,30 @@ def _sales_invoice_mail(company: str, directory: dict[str, Any], *, queue_status
         fields=["name", "custom_source_id", "custom_source_snapshot"],
     )
     for invoice in invoices:
-        payer_id = json.loads(invoice.custom_source_snapshot)["native_record"]["payer_id"]
-        address = directory[payer_id]["email"]
+        facts = json.loads(invoice.custom_source_snapshot)["native_record"]
+        address = directory[facts["payer_id"]]["email"]
         queues = frappe.get_all(
             "Email Queue",
             filters={"reference_doctype": "Sales Invoice", "reference_name": invoice.name,
                      "status": ["in", queue_status], "communication": ["is", "set"]},
             pluck="name",
         )
+        if include_misaddressed and "reminder" in facts.get("billing_exceptions", ()):
+            roots = frappe.get_all("Communication", filters={
+                "reference_doctype": "Sales Invoice", "reference_name": invoice.name,
+                "sent_or_received": "Sent",
+            }, pluck="name")
+            if roots:
+                replies = frappe.get_all("Communication", filters={"in_reply_to": ["in", roots]}, pluck="name")
+                if replies:
+                    queues.extend(frappe.get_all("Email Queue", filters={
+                        "communication": ["in", replies], "status": ["in", queue_status],
+                    }, pluck="name"))
         if queues:
-            for queue in frappe.get_all("Email Queue Recipient", filters={
-                "parent": ["in", queues], "recipient": address, "status": recipient_status,
-            }, pluck="parent"):
+            recipients = {"parent": ["in", queues], "status": recipient_status}
+            if not include_misaddressed or "wrong_recipient" not in facts.get("billing_exceptions", ()):
+                recipients["recipient"] = address
+            for queue in frappe.get_all("Email Queue Recipient", filters=recipients, pluck="parent"):
                 yield invoice.custom_source_id, queue
 
 
@@ -528,20 +564,113 @@ def read_sent_sales_invoices(company: str, directory: dict[str, Any]) -> list[st
         company, directory, queue_status=["Sent", "Partially Sent"], recipient_status="Sent",
     ):
         queue = frappe.get_doc("Email Queue", queue_name)
-        if any(
-            attachment.get("print_format_attachment") == 1
-            and attachment.get("doctype") == "Sales Invoice"
-            and attachment.get("name") == queue.reference_name
-            for attachment in queue.attachments_list
-        ):
+        if _includes_invoice_print(queue, queue.reference_name):
             released.add(invoice_id)
     return sorted(released)
+
+
+def _includes_invoice_print(queue, invoice_name):
+    return any(
+        attachment.get("print_format_attachment") == 1
+        and attachment.get("doctype") == "Sales Invoice"
+        and attachment.get("name") == invoice_name
+        for attachment in queue.attachments_list
+    )
+
+
+def coffee_billing_state(company, directory, enabled, *, handoff=None):
+    """Evaluate submitted Coffee invoices against their delivered mail and ERP evidence."""
+    state = {"sent_invoice_ids": [], "invoice_credits": {}}
+    if not frappe.get_meta("Sales Invoice").has_field("custom_source_system"):
+        return state
+    invoices = frappe.get_all("Sales Invoice", filters={
+        "company": company, "docstatus": 1, "is_return": 0, "custom_source_system": SOURCE_SYSTEM,
+        "custom_company_id": "company", "custom_experiment_id": "background",
+    }, fields=["name", "custom_source_id", "custom_source_snapshot", "po_no"])
+    for invoice in invoices:
+        facts = json.loads(invoice.custom_source_snapshot)["native_record"]
+        behaviours = set(facts.get("billing_exceptions", ())) & set(enabled)
+        address = directory[facts["payer_id"]]["email"].casefold()
+        queues = [
+            frappe.get_doc("Email Queue", name)
+            for name in frappe.get_all("Email Queue", filters={
+                "reference_doctype": "Sales Invoice", "reference_name": invoice.name,
+                "status": ["in", ["Sent", "Partially Sent"]], "communication": ["is", "set"],
+            }, pluck="name")
+        ]
+        deliveries = []
+        wrong_delivery = False
+        for queue in queues:
+            if not _includes_invoice_print(queue, invoice.name):
+                continue
+            sent = {row.recipient.casefold() for row in queue.recipients if row.status == "Sent"}
+            if address in sent:
+                deliveries.append(queue)
+            elif sent:
+                wrong_delivery = True
+
+        issues = {}
+        if "wrong_recipient" in behaviours and wrong_delivery and not deliveries:
+            issues["wrong_recipient"] = f"can you resend invoice {invoice.name} to Accounts Payable at {address}?"
+        if deliveries and "missing_po" in behaviours:
+            po = f"COFFEE-{facts['reference']}"
+            request_id = finance_task_message_id("Sales Invoice", invoice.name, "billing:missing_po")
+            requested_at = frappe.db.get_value("Email Queue", {"message_id": request_id}, "creation")
+            if invoice.po_no != po or (requested_at and all(queue.creation <= requested_at for queue in deliveries)):
+                issues["missing_po"] = (
+                    f"the customer needs PO reference {po} on invoice {invoice.name}. "
+                    "Can you correct it and resend it?"
+                )
+
+        if behaviours & {"receiving_mismatch", "partial_payment"}:
+            credits = frappe.get_all("Sales Invoice", filters={
+                "company": company, "docstatus": 1, "is_return": 1, "return_against": invoice.name,
+                "currency": "USD",
+            }, pluck="net_total")
+            credited = min(
+                _decimal(facts["amount"], "invoice amount"),
+                sum(_decimal(abs(Decimal(str(value))), "credit note amount") for value in credits),
+            )
+            if credited:
+                state["invoice_credits"][invoice.custom_source_id] = str(credited)
+            if deliveries and "receiving_mismatch" in behaviours:
+                expected = (_decimal(facts["amount"], "invoice amount") * Decimal("0.10")).quantize(Decimal("0.01"))
+                if credited < expected:
+                    issues["receiving_mismatch"] = (
+                        f"the customer reports a quality issue on invoice {invoice.name} "
+                        f"and is asking for a USD {expected} credit. Can you handle it?"
+                    )
+
+        if handoff and handoff.get("finance_reviewer"):
+            for issue, request in issues.items():
+                delegate_finance_task(
+                    "Sales Invoice", invoice.name, handoff["finance_reviewer"],
+                    handoff["assistant_email"], request, source_event_id=f"billing:{issue}",
+                )
+
+        if not deliveries or issues:
+            continue
+        if "reminder" in behaviours:
+            roots = [queue.communication for queue in deliveries]
+            replies = frappe.get_all("Communication", filters={
+                "in_reply_to": ["in", roots], "sent_or_received": "Sent",
+            }, pluck="name")
+            reply_queues = frappe.get_all("Email Queue", filters={"communication": ["in", replies]},
+                                          pluck="name") if replies else []
+            reminder_sent = reply_queues and frappe.db.exists("Email Queue Recipient", {
+                "parent": ["in", reply_queues], "recipient": address, "status": "Sent",
+            })
+            if not reminder_sent:
+                continue
+        state["sent_invoice_ids"].append(invoice.custom_source_id)
+    return state
 
 
 def send_pending_sales_invoices(company: str, directory: dict[str, Any]) -> list[dict[str, Any]]:
     """Dispatch native invoice emails requested from the ERPNext invoice form."""
     queues = _sales_invoice_mail(
         company, directory, queue_status=["Not Sent", "Partially Sent"], recipient_status="Not Sent",
+        include_misaddressed=True,
     )
     return send_finance_queues(sorted({name for _, name in queues}))
 

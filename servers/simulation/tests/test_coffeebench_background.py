@@ -664,6 +664,39 @@ def _native_invoice_payment_fixture(tmp_path, *, late_fee):
     return start, binding, snapshot, action
 
 
+def test_partial_payment_preserves_open_balance_and_distinct_bank_evidence(tmp_path):
+    _, _, snapshot, _ = _native_invoice_payment_fixture(tmp_path, late_fee=0.0)
+    environment = coffee._restore(snapshot["checkpoint"], tmp_path, snapshot["company_business_ids"])
+    invoice = environment.business_apps["roaster_A"].accounts_payable.pop()
+    buyer = environment.business_apps["farmer_A"]
+    seller = environment.business_apps["roaster_A"]
+    buyer.accounts_receivable.remove(invoice)
+    invoice.issuer, invoice.payer = "roaster_A", "farmer_A"
+    buyer.accounts_payable.append(invoice)
+    seller.accounts_receivable.append(invoice)
+    buyer.cash = 1000
+    market = environment.marketplace
+    market._erp_invoice_issuers = {"roaster_A"}
+    market._erp_sent_invoices = {invoice.id}
+    market._erp_start_weekday = 4
+    market._erp_payment_windows = {"farmer_A": ["partial_payment"]}
+
+    assert buyer.pay_invoice(invoice.id)["paid_amount"] == 50
+    assert invoice.net_outstanding == 50
+    assert buyer.pay_invoice(invoice.id)["status"] == "error"
+    assert buyer.cash == 950
+    first = [record for record in coffee._source_records(environment, snapshot) if record["kind"] == "payment"]
+    assert [(record["native_record_id"], record["amount"]) for record in first] == [
+        (f"{invoice.id}:partial", "50.00"),
+    ]
+
+    invoice.credited_amount = 10
+    assert buyer.pay_invoice(invoice.id)["paid_amount"] == 40
+    assert invoice.paid and buyer.cash == 910
+    final = [record for record in coffee._source_records(environment, snapshot) if record["kind"] == "payment"]
+    assert [(record["native_record_id"], record["amount"]) for record in final] == [(invoice.id, "40.00")]
+
+
 def test_payment_evidence_balance_mismatch_does_not_pay_native_invoice(tmp_path):
     start, binding, snapshot, action = _native_invoice_payment_fixture(tmp_path, late_fee=10.0)
     baseline = asyncio.run(coffee.advance(snapshot, start + timedelta(minutes=601), binding))

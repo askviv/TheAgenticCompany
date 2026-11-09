@@ -1304,7 +1304,7 @@ class BusinessApp:
             if inv.bad_debt:
                 bad_debt_count += 1
                 bad_debt_total += (
-                    inv.amount + inv.late_fees_accrued - inv.credited_amount
+                    inv.amount + inv.late_fees_accrued - inv.credited_amount - inv.partial_paid_amount
                 )
                 continue
             net = inv.net_outstanding
@@ -1435,6 +1435,7 @@ class BusinessApp:
                     "status": "error",
                     "message": f"Open AP invoice '{invoice_id}' not found.",
                 }
+            partial_payment = False
             if invoice.issuer in getattr(self.marketplace, "_erp_invoice_issuers", ()):
                 windows = getattr(self.marketplace, "_erp_payment_windows", {}).get(self.agent_id, ())
                 minute = self.time_manager.get_virtual_min()
@@ -1452,7 +1453,13 @@ class BusinessApp:
                         return {"status": "error", "message": "Invoice is waiting for the next weekly payment batch."}
                 if "financial_distress" in windows and self._today() < invoice.due_date + 7:
                     return {"status": "error", "message": "Buyer has deferred payment because cash is tight."}
+                if "partial_payment" in windows and invoice.net_outstanding >= 0.02:
+                    if invoice.partial_paid_amount and invoice.credited_amount <= invoice.partial_credit_at_payment:
+                        return {"status": "error", "message": "The disputed balance is awaiting a credit."}
+                    partial_payment = not invoice.partial_paid_amount
             amount_due = invoice.net_outstanding
+            if partial_payment:
+                amount_due = round(amount_due / 2, 2)
             if amount_due <= 0:
                 invoice.paid = True
                 invoice.paid_date = self._today()
@@ -1467,8 +1474,13 @@ class BusinessApp:
                     "message": f"Insufficient cash (${self.cash:.2f}) to pay ${amount_due:.2f}.",
                 }
             self.cash -= amount_due
-            invoice.paid = True
-            invoice.paid_date = self._today()
+            if partial_payment:
+                invoice.partial_paid_amount = amount_due
+                invoice.partial_paid_day = self._today()
+                invoice.partial_credit_at_payment = invoice.credited_amount
+            else:
+                invoice.paid = True
+                invoice.paid_date = self._today()
 
             issuer = self.marketplace.business_apps.get(invoice.issuer)
             if issuer is not None:

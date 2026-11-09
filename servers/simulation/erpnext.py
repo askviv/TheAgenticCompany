@@ -1061,11 +1061,21 @@ class ERPNextSiteAdmin:
             raise ERPNextError("read-sent-coffee-invoices returned an invalid result")
         return result
 
+    def read_coffee_billing_state(self, erp_company: str, behaviours: list[str]) -> dict[str, Any]:
+        result = self._finance_operation("read-sent-coffee-invoices", {
+            "erp_company": erp_company, "billing_behaviours": behaviours,
+        })
+        if (not isinstance(result, dict) or not isinstance(result.get("sent_invoice_ids"), list)
+                or not isinstance(result.get("invoice_credits"), dict)):
+            raise ERPNextError("CoffeeBench billing evidence returned an invalid result")
+        return result
+
     def finance_source_adapter(self):
         from .finance_sources import NativeFinanceSourceAdapter
 
         return NativeFinanceSourceAdapter(
             self.reconcile_finance_sources, self.read_due_obligations, self.read_sent_coffee_invoices,
+            self.read_coffee_billing_state,
         )
 
     def reconcile_company_issues(self, events: list[dict], company_binding: dict) -> dict:

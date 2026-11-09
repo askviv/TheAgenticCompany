@@ -1514,7 +1514,7 @@ class Environment:
                 continue  # only fresh-yesterday busts; older ones become market context
             reason = self._bankrupt_reason.get(bust_aid, "?")
             written_off = sum(
-                round(inv.amount + inv.late_fees_accrued - inv.credited_amount, 2)
+                round(inv.amount + inv.late_fees_accrued - inv.credited_amount - inv.partial_paid_amount, 2)
                 for inv in ba.accounts_receivable
                 if inv.bad_debt
                 and inv.bad_debt_date == bust_day
@@ -1642,9 +1642,7 @@ class Environment:
         for inv in ba.accounts_payable:
             if inv.paid or inv.returned or inv.bad_debt:
                 continue
-            outstanding = round(
-                inv.amount + inv.late_fees_accrued - inv.credited_amount, 2
-            )
+            outstanding = round(inv.net_outstanding, 2)
             if outstanding <= 0.01:
                 continue
             inv.bad_debt = True

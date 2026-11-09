@@ -216,11 +216,11 @@ class CompanyBackgroundService:
         intents = [intent for provider in providers.values() for intent in provider.get("erp_intents", [])]
         self.engine.store.record_company_finance_source_intents(intents)
         pending = self.engine.store.list_unreceipted_company_finance_source_intents()
-        review_financing = (
-            self.engine.store.background_provider_control("coffeebench")["enabled"]
-            and "financing" in self.engine.store.coffee_payment_windows()
-        )
-        if not pending and not review_financing:
+        enabled = self.engine.store.background_provider_control("coffeebench")["enabled"]
+        behaviours = self.engine.store.coffee_payment_windows() if enabled else []
+        review_financing = "financing" in behaviours
+        billing_behaviours = sorted(set(behaviours) & {"missing_po", "receiving_mismatch", "wrong_recipient"})
+        if not pending and not review_financing and not billing_behaviours:
             issue_reconcile = getattr(self.engine, "company_issue_reconcile", None)
             if issue_reconcile is not None:
                 issue_reconcile()
@@ -228,6 +228,8 @@ class CompanyBackgroundService:
         binding = self._finance_binding()
         if review_financing:
             binding["review_coffee_financing"] = True
+        if billing_behaviours:
+            binding["coffee_billing_behaviours"] = billing_behaviours
         result = self.finance_adapter.reconcile(pending, binding, as_of)
         receipts = result.get("receipts")
         if not isinstance(receipts, list):
@@ -404,7 +406,15 @@ class CompanyBackgroundService:
             if "coffeebench" in selected and read_sent is not None:
                 company_name = _document_name(self.company_binding.get("documents", {}).get("company"))
                 try:
-                    sent_ids = read_sent(company_name)
+                    behaviours = self.engine.store.coffee_payment_windows()
+                    read_billing = getattr(self.finance_adapter, "read_coffee_billing_state", None)
+                    billing = (
+                        read_billing(company_name, behaviours)
+                        if read_billing is not None and set(behaviours) & {
+                            "reminder", "missing_po", "receiving_mismatch", "wrong_recipient", "partial_payment",
+                        }
+                        else {"sent_invoice_ids": read_sent(company_name), "invoice_credits": {}}
+                    )
                 except Exception as error:
                     self._log_failure("CoffeeBench sent invoice read failed", error)
                     read_errors["coffeebench"] = {"code": "sent_invoice_read_failed", "status_code": None}
@@ -413,8 +423,8 @@ class CompanyBackgroundService:
                     bindings = {
                         **bindings,
                         "coffeebench": {
-                            **bindings["coffeebench"], "sent_sales_invoice_ids": sent_ids,
-                            "payment_windows": self.engine.store.coffee_payment_windows(),
+                            **bindings["coffeebench"], "sent_sales_invoice_ids": billing["sent_invoice_ids"],
+                            "invoice_credits": billing["invoice_credits"], "payment_windows": behaviours,
                         },
                     }
             result = self.runtime.advance_company(
