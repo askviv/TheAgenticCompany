@@ -37,6 +37,8 @@ import {
   getCatalog,
   getCompany,
   getCompanyClock,
+  setCompanyClockSpeed,
+  type CompanyClock,
   getCoffeePaymentWindows,
   getEcommerceBehaviours,
   setEcommerceBehaviour,
@@ -97,7 +99,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-type LayoutContext = { refreshKey: number }
+type LayoutContext = { refreshKey: number; companyClock: CompanyClock | null }
 
 const statusText: Record<ExperimentRunStatus, string> = {
   initializing: "Preparing company",
@@ -197,7 +199,7 @@ function ModelCallControl() {
 
 function AppLayout() {
   const [refreshKey, setRefreshKey] = useState(0)
-  const [companyTime, setCompanyTime] = useState<string | null>(null)
+  const [companyClock, setCompanyClock] = useState<CompanyClock | null>(null)
   const snapshot = useRef<Map<string, string> | undefined>(undefined)
 
   useEffect(() => {
@@ -207,9 +209,9 @@ function AppLayout() {
       if (pending) return
       pending = true
       getCompanyClock().then((clock) => {
-        if (active) setCompanyTime(clock.simulated_time)
+        if (active) setCompanyClock(clock)
       }).catch((error) => {
-        if (active) setCompanyTime(null)
+        if (active) setCompanyClock(null)
         console.error("Unable to load company time.", error instanceof Error ? error.name : "UnknownError")
       }).finally(() => { pending = false })
     }
@@ -252,7 +254,10 @@ function AppLayout() {
             <span>The Agentic Company</span>
           </Link>
           <ModelCallControl />
-          <p className="basis-full pb-2 text-center text-xs text-muted-foreground lg:basis-auto lg:pb-0">Company time {companyTime ? formatDate(companyTime) : "—"}</p>
+          <Link to="/settings/company-clock" className="basis-full pb-2 text-center text-xs text-muted-foreground hover:underline lg:basis-auto lg:pb-0">
+            Company time {companyClock?.simulated_time ? formatDate(companyClock.simulated_time) : "—"}
+            {companyClock?.clock_speed != null && ` · ${companyClock.clock_speed}×`}
+          </Link>
         </div>
       </header>
       <div className="md:grid md:grid-cols-[14rem_minmax(0,1fr)]">
@@ -272,6 +277,7 @@ function AppLayout() {
           <div className="mt-2 flex flex-wrap gap-1 md:flex-col">
             {[
               ["/help/company-environment", "Company environment"],
+              ["/settings/company-clock", "Company clock"],
               ["/help/context", "Codex connection"],
               ["/experiments/background", "Background simulations"],
               ["/experiments/coffeebench/settings", "CoffeeBench behaviours"],
@@ -280,11 +286,69 @@ function AppLayout() {
           </div>
         </nav>
         <main className="min-w-0 px-4 py-8 sm:px-6 sm:py-10">
-          <Outlet context={{ refreshKey } satisfies LayoutContext} />
+          <Outlet context={{ refreshKey, companyClock } satisfies LayoutContext} />
         </main>
       </div>
     </div>
   )
+}
+
+function CompanyClockPage() {
+  const { companyClock } = useOutletContext<LayoutContext>()
+  const [speed, setSpeed] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [confirmed, setConfirmed] = useState<number | null>(null)
+  const kernel = companyClock?.clock_mode === "kernel"
+  const requested = Number(speed)
+  const valid = Number.isFinite(requested) && requested > 0 && (!kernel || Number.isSafeInteger(requested))
+
+  async function save() {
+    if (saving || !companyClock?.can_set_speed || !valid) return
+    setSaving(true)
+    setError(null)
+    setConfirmed(null)
+    try {
+      setConfirmed(await setCompanyClockSpeed(requested))
+      setSpeed("")
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The clock speed could not be confirmed.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const instant = companyClock?.simulated_time
+  const displayTime = instant
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium", timeZone: "UTC" }).format(new Date(instant)) + " UTC"
+    : "Unavailable"
+
+  return <section className="max-w-xl space-y-5">
+    <h1 className="text-2xl font-semibold tracking-tight">Company clock</h1>
+    <Card>
+      <CardContent className="space-y-5">
+        <dl className="grid grid-cols-2 gap-4">
+          <div><dt className="text-sm text-muted-foreground">Simulated time</dt><dd className="mt-1 font-medium">{displayTime}</dd></div>
+          <div><dt className="text-sm text-muted-foreground">Current speed</dt><dd className="mt-1 font-medium">{companyClock?.clock_speed == null ? "Unavailable" : `${companyClock.clock_speed}×`}</dd></div>
+        </dl>
+        <form className="flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); void save() }}>
+          <div className="space-y-2">
+            <label htmlFor="company-clock-speed" className="text-sm font-medium">New speed (×)</label>
+            <Input id="company-clock-speed" type="number" min={kernel ? 1 : undefined}
+              step={kernel ? 1 : "any"} value={speed}
+              onChange={(event) => { setSpeed(event.target.value); setConfirmed(null) }}
+              disabled={!companyClock?.can_set_speed || saving} />
+          </div>
+          <Button type="submit" disabled={!companyClock?.can_set_speed || !valid || saving}>
+            {saving ? "Applying…" : "Apply speed"}
+          </Button>
+        </form>
+        {companyClock && !companyClock.can_set_speed && <p className="text-sm text-muted-foreground">Speed control is unavailable.</p>}
+        {confirmed !== null && <p role="status" className="text-sm">Clock speed updated to {confirmed}×.</p>}
+        {error && <ErrorNotice title="Clock speed" message={error} />}
+      </CardContent>
+    </Card>
+  </section>
 }
 
 function SidebarLink({ path, label }: { path: string, label: string }) {
@@ -1715,6 +1779,7 @@ export default function App() {
           <Route path="experiments/coffeebench/settings" element={<BenchmarkSettingsPage key="coffee" />} />
           <Route path="experiments/ecommercebench/settings" element={<BenchmarkSettingsPage key="ecommerce" ecommerce />} />
           <Route path="experiments/:experimentId" element={<ExperimentPage />} />
+          <Route path="settings/company-clock" element={<CompanyClockPage />} />
           <Route path="help" element={<HelpPage />} />
           <Route path="help/company-environment" element={<HelpSection title="Company environment"><CompanySwitcher /></HelpSection>} />
           <Route path="help/context" element={<HelpSection title="Codex connection"><CodexConnectionCard /></HelpSection>} />

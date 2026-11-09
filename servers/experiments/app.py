@@ -613,6 +613,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     @app.get('/streams')
     @app.get('/help')
     @app.get('/help/company-environment')
+    @app.get('/settings/company-clock')
     @app.get('/help/context')
     @app.get('/help/native-evaluations')
     @app.get('/help/company-tools')
@@ -851,7 +852,8 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def api_company_clock():
         try:
             clock=coordinator().company_clock()
-            return jsonify(simulated_time=clock['simulated_time'],clock_mode=clock['clock_mode'])
+            return jsonify(simulated_time=clock['simulated_time'], clock_mode=clock['clock_mode'],
+                           clock_speed=clock.get('clock_speed'), can_set_speed=clock.get('can_set_speed', False))
         except Exception:
             logging.exception('Company clock retrieval failed')
             return jsonify(error='Company clock could not be retrieved.'),503

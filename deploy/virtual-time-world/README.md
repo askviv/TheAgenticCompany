@@ -279,7 +279,7 @@ part of this stage.
 
 The coordinator runtime JSON exposes `sqlite_busy_timeout_seconds` (existing default: 30). Keep that unscaled base value; every simulation SQLite connection multiplies it by the active kernel rate. At 24×, the resulting 720 guest seconds retain a 30-real-second allowance for durable storage contention. This changes resource waiting, not the guest clock or benchmark deadlines. Health reads use a read connection, and displayed company time comes directly from the guest kernel; delayed record processing does not freeze the clock.
 
-Clock speed is deployment configuration. Install `clock.env.example` as `$WORLD_ROOT/config/clock.env`, set `WORLD_CLOCK_RATE`, and run `sudo systemctl reload virtual-time-world-clock.service` to apply it without stopping the VM. The service uses this rate when starting a stopped VM; recovery of an already-running VM retains its durable confirmed clock state. The dashboard displays company time and has no speed editor.
+Open **Settings → Company clock** in the dashboard to see the active rate and change it while the VM is running. Normal VM starts use the last confirmed rate from the durable clock anchor. Operators can also set `WORLD_CLOCK_RATE` in `$WORLD_ROOT/config/clock.env` and explicitly reload `virtual-time-world-clock.service` to apply that rate.
 
 Keep `mailbox_idle_renewal_seconds` at its existing 30-second base value. In kernel-clock mode the runtime multiplies it by the current kernel rate, keeping IMAP IDLE renewal at 30 real seconds. New-mail notifications still wake immediately. Transport heartbeat and reconnect intervals use the same rate at connection setup.
 

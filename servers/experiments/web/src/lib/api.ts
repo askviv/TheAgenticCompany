@@ -458,8 +458,15 @@ export async function retryRun(runId: string): Promise<RunResponse> {
   })
 }
 
-export async function getCompanyClock(): Promise<{ simulated_time: string | null; clock_mode: string }> {
-  return requestJson<{ simulated_time: string | null; clock_mode: string }>("/api/company/clock")
+export type CompanyClock = {
+  simulated_time: string | null
+  clock_mode: string
+  clock_speed: number | null
+  can_set_speed: boolean
+}
+
+export async function getCompanyClock(): Promise<CompanyClock> {
+  return requestJson<CompanyClock>("/api/company/clock")
 }
 
 export type CompanyPackImport = {

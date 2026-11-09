@@ -333,8 +333,19 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         require_role(principal, "controller")
         provider = getattr(engine, "company_time_provider", None)
         instant = provider() if callable(provider) else (engine.company_state() or {}).get("simulated_time")
+        mode = getattr(engine, "company_clock_mode", "real")
+        reader = getattr(engine, "company_clock_speed_reader", None)
+        if mode == "kernel":
+            from .clock_rate import kernel_virtual_time_rate
+
+            speed = kernel_virtual_time_rate(require_kernel=True)
+        elif callable(reader):
+            speed = reader()
+        else:
+            speed = 1 if mode == "real" else None
         return {"simulated_time": instant.isoformat() if hasattr(instant, "isoformat") else instant,
-                "clock_mode": getattr(engine, "company_clock_mode", "real")}
+                "clock_mode": mode, "clock_speed": speed,
+                "can_set_speed": callable(getattr(engine, "company_clock_speed_setter", None))}
 
     @app.get("/company/desktops")
     def list_employee_desktops(principal: Principal = Depends(authenticate)):
