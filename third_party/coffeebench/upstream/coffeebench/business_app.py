@@ -655,6 +655,7 @@ class BusinessApp:
         seller.inventory[deal.item_id] = old_qty + qty
         seller.inventory_total_cost[deal.item_id] = old_total + return_value
 
+        outstanding_before_return = invoice.net_outstanding
         deal.returned_qty += qty
         invoice.credited_amount = round(invoice.credited_amount + credit, 2)
         invoice.last_return_date = today
@@ -662,10 +663,13 @@ class BusinessApp:
             invoice.returned = True
             invoice.returned_date = today
 
-        # Cash refund if invoice was already paid.
+        # Apply the credit to the open balance before refunding any cash.
+        refundable = credit if invoice.paid else max(0.0, credit - outstanding_before_return)
         refund = 0.0
-        if invoice.paid:
-            refund = round(min(credit, seller.cash), 2)
+        if refundable > 0:
+            refund = round(min(refundable, seller.cash), 2)
+            if not invoice.paid:
+                invoice.partial_paid_amount = round(invoice.partial_paid_amount - refund, 2)
             # If seller is broke, they refund what they have; the rest stays
             # owed informally — no AP/AR mechanic for refund balance in v1.
             seller.cash -= refund

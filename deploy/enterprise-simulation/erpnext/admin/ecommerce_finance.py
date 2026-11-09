@@ -522,6 +522,7 @@ def _map_native_outcome(
         "refund_per_unit": refund_per_unit,
         "escrow_reclaimed_native_units": escrow_reclaimed if event_type == "refund_processed" else None,
         "commission_reversed_native_units": commission_reversed if event_type == "refund_processed" else None,
+        "payout_deduction_native_units": payout_deduction if event_type == "refund_processed" else None,
         "delivery_note_names": delivery_note_names,
     }
 
@@ -615,11 +616,12 @@ def _pending_outcome(mapped: dict[str, Any], *reasons: str) -> dict[str, Any]:
             "gross_refund_native_units": format(mapped["amount_native_units"], "f"),
             "escrow_reclaimed_native_units": format(mapped["escrow_reclaimed_native_units"], "f"),
             "commission_reversed_native_units": format(mapped["commission_reversed_native_units"], "f"),
+            "payout_deduction_native_units": format(mapped["payout_deduction_native_units"], "f"),
         }
     return receipt
 
 
-def _allocated_return_rows(mapped: dict[str, Any], order: Any) -> tuple[list[tuple[Any, Any, Decimal]], list[tuple[Any, Any, Decimal]], list[Any], list[str]]:
+def _allocated_return_rows(mapped: dict[str, Any], order: Any, *, submit_drafts: bool = True) -> tuple[list[tuple[Any, Any, Decimal]], list[tuple[Any, Any, Decimal]], list[Any], list[str]]:
     """Resolve exact submitted native records before creating any return document."""
     from erpnext.controllers.sales_and_purchase_return import get_returned_qty_map_for_row
     facts = mapped["facts"]
@@ -683,7 +685,7 @@ def _allocated_return_rows(mapped: dict[str, Any], order: Any) -> tuple[list[tup
             return [], [], existing_documents, [str(error)]
         prior_return, prior_quantity = _existing_outcome_return(
             mapped, "Delivery Note", f"{mapped['source_id']}:return_dn:{name}",
-            note.name, row.name, "dn_detail",
+            note.name, row.name, "dn_detail", submit_drafts=submit_drafts,
         )
         if prior_return:
             existing_documents.append(_outcome_document(prior_return))
@@ -738,7 +740,7 @@ def _allocated_return_rows(mapped: dict[str, Any], order: Any) -> tuple[list[tup
             return [], [], existing_documents, [f"submitted Sales Invoice {invoice_name} rate differs from the exact native refund amount"]
         prior_return, prior_quantity = _existing_outcome_return(
             mapped, "Sales Invoice", f"{mapped['source_id']}:credit_note:{invoice.name}",
-            invoice.name, row.get("name"), "sales_invoice_item",
+            invoice.name, row.get("name"), "sales_invoice_item", submit_drafts=submit_drafts,
         )
         if prior_return:
             existing_documents.append(_outcome_document(prior_return))
@@ -784,7 +786,7 @@ def _return_line_quantities(doctype: str, row: Any, source_stock_units: Decimal)
 
 def _existing_outcome_return(
     mapped: dict[str, Any], doctype: str, source_id: str,
-    original_name: str, original_row_name: str, reference_field: str,
+    original_name: str, original_row_name: str, reference_field: str, *, submit_drafts: bool = True,
 ):
     existing = get_source_document(
         doctype, source_system=SOURCE_SYSTEM, source_id=source_id,
@@ -808,6 +810,8 @@ def _existing_outcome_return(
     if stock_qty <= 0 or Decimal(str(snapshot.get("returned_quantity"))) != stock_qty:
         raise RuntimeError("Existing E-Commerce return quantity conflicts with its durable source receipt")
     if existing.docstatus == 0:
+        if not submit_drafts:
+            return None, Decimal(0)
         existing.submit()
     return existing, stock_qty
 
@@ -892,12 +896,16 @@ def _process_native_outcome(
                 f"the marketplace refunded {record['currency']} {record['amount']} on order {order.name} "
                 f"after payout {payout}. Can you trace the refund, fees and deduction against the payout?",
             )
-    message_id = finance_task_message_id("Sales Order", order.name, mapped["source_id"])
-    if frappe.db.exists("Email Queue", {"message_id": message_id}):
-        return _pending_outcome(mapped, "Finance delegated this refund to Viv for manual follow-up")
-
-    outcome = _process_refund(mapped, order)
-    if outcome["status"] != "completed" and company_binding.get("finance_reviewer"):
+    handoff_event_ids = [
+        mapped["source_id"],
+        f"partial_return:{mapped['source_id']}",
+        f"refund_after_payout:{mapped['source_id']}",
+    ]
+    delegated = any(frappe.db.exists("Email Queue", {
+        "message_id": finance_task_message_id("Sales Order", order.name, event_id),
+    }) for event_id in handoff_event_ids)
+    outcome = _process_refund(mapped, order, delegated=delegated)
+    if outcome["status"] != "completed" and not delegated and company_binding.get("finance_reviewer"):
         delegate_finance_task(
             "Sales Order", order.name, company_binding["finance_reviewer"],
             company_binding["assistant_email"],
@@ -908,12 +916,14 @@ def _process_native_outcome(
     return outcome
 
 
-def _process_refund(mapped: dict[str, Any], order) -> dict[str, Any]:
+def _process_refund(mapped: dict[str, Any], order, *, delegated: bool = False) -> dict[str, Any]:
     event_time = mapped["occurred_at"].date().isoformat()
     facts = mapped["facts"]
-    delivery_allocations, invoice_allocations, documents, pending_reasons = _allocated_return_rows(mapped, order)
+    delivery_allocations, invoice_allocations, documents, pending_reasons = _allocated_return_rows(mapped, order, submit_drafts=not delegated)
     if pending_reasons:
         return _pending_outcome(mapped, *pending_reasons)
+    if delegated and (delivery_allocations or invoice_allocations):
+        return _pending_outcome(mapped, "Finance delegated this refund to Viv for manual follow-up")
     created_any = False
     from erpnext.stock.doctype.delivery_note.delivery_note import make_sales_return as make_delivery_return
     for note, original_row, quantity in delivery_allocations:
@@ -985,6 +995,7 @@ def _process_refund(mapped: dict[str, Any], order) -> dict[str, Any]:
             "gross_refund_native_units": format(mapped["amount_native_units"], "f"),
             "escrow_reclaimed_native_units": format(mapped["escrow_reclaimed_native_units"], "f"),
             "commission_reversed_native_units": format(mapped["commission_reversed_native_units"], "f"),
+            "payout_deduction_native_units": format(mapped["payout_deduction_native_units"], "f"),
         },
     }
 

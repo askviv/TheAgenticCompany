@@ -818,19 +818,22 @@ class CompanyBackgroundRuntime:
                     except BackgroundWorkerError as exc:
                         if (provider_id == "coffeebench" and recovery is None
                                 and exc.code in {"TimeoutError", "background_operation_uncertain"}):
-                            recovered = self.recover_pending_coffeebench(
-                                pending["operation_id"], "automatic-recovery:" + pending["operation_id"],
-                            )
-                            recovered_pending = self.store.get_background_provider_pending(provider_id, company_id)
-                            if recovered_pending is not None and recovered_pending["result"] is not None:
-                                results[provider_id] = recovered_pending["result"]
-                                operation_ids[provider_id] = recovered_pending["operation_id"]
-                                deferred = deferred or prior_until < boundary
-                                next_due = recovered_pending["result"].get("next_due")
-                                if next_due is not None:
-                                    next_due_values.append(self._utc(datetime.fromisoformat(next_due)))
-                                continue
-                            code = recovered.get("code", exc.code)
+                            try:
+                                recovered = self.recover_pending_coffeebench(
+                                    pending["operation_id"], "automatic-recovery:" + pending["operation_id"],
+                                )
+                                recovered_pending = self.store.get_background_provider_pending(provider_id, company_id)
+                                if recovered_pending is not None and recovered_pending["result"] is not None:
+                                    results[provider_id] = recovered_pending["result"]
+                                    operation_ids[provider_id] = recovered_pending["operation_id"]
+                                    deferred = deferred or prior_until < boundary
+                                    next_due = recovered_pending["result"].get("next_due")
+                                    if next_due is not None:
+                                        next_due_values.append(self._utc(datetime.fromisoformat(next_due)))
+                                    continue
+                                code = recovered.get("code", exc.code)
+                            except BackgroundWorkerError as recovery_error:
+                                code = recovery_error.code
                         else:
                             code = exc.code
                         errors[provider_id] = {

@@ -164,7 +164,12 @@ class IssueHandoffStore:
                 return None
             if utc(now) < datetime.fromisoformat(row["deadline_at"]):
                 return None
-            if row["handoff_json"] is None:
+            prior = json.loads(row["handoff_json"]) if row["handoff_json"] else None
+            if prior is None or (
+                prior["run_id"].startswith("company-issue:")
+                and prior["body"].split("\n\nThis is a simulated environment.", 1)[0]
+                != intent["body"].split("\n\nThis is a simulated environment.", 1)[0]
+            ):
                 encoded = json.dumps(intent, sort_keys=True)
                 connection.execute("UPDATE company_issue_handoffs SET handoff_json=?,updated_at=? WHERE issue_key=?",
                                    (encoded, utc(now).isoformat(), key))

@@ -633,7 +633,7 @@ async def _advance_environment(environment: Any, target_minute: int) -> None:
                 *(environment.agents[ev.target_agent].step_query_async() for ev, _ in ready),
                 return_exceptions=True,
             ),
-            timeout=120 * kernel_virtual_time_rate(),
+            timeout=130 * kernel_virtual_time_rate(),
         )
         for (ev, day), response in zip(ready, responses):
             actor_id = ev.target_agent

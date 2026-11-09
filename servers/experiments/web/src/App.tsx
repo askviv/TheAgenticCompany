@@ -355,7 +355,7 @@ function CompanyClockPage() {
 
 function SidebarLink({ path, label }: { path: string, label: string }) {
   return (
-    <NavLink to={path} end className={({ isActive }) =>
+    <NavLink to={path} end={!["/experiments", "/runs", "/help"].includes(path)} className={({ isActive }) =>
       `rounded-md px-3 py-2 text-sm transition-colors ${isActive
         ? "bg-secondary font-medium text-foreground"
         : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
@@ -533,18 +533,18 @@ function ActivityPage() {
   const [activityParams, setActivityParams] = useSearchParams()
   const requestedFilter = activityParams.get("activity")
   const filter = requestedFilter && activityFilters.some(([value]) => value === requestedFilter) ? requestedFilter : "all"
-  const companyRequest = useRef<ReturnType<typeof getCompany> | null>(null)
-  const activityRequest = useRef<ReturnType<typeof getActivity> | null>(null)
+  const companyRequest = useRef<Promise<Awaited<ReturnType<typeof getCompany>> | undefined> | null>(null)
+  const activityRequest = useRef<Promise<Awaited<ReturnType<typeof getActivity>> | undefined> | null>(null)
 
 
   useEffect(() => {
     let active = true
-    const pendingCompany = companyRequest.current ?? getCompany()
-    const pendingActivity = activityRequest.current ?? getActivity()
+    const pendingCompany = companyRequest.current?.then(() => active ? getCompany() : undefined, () => active ? getCompany() : undefined) ?? getCompany()
+    const pendingActivity = activityRequest.current?.then(() => active ? getActivity() : undefined, () => active ? getActivity() : undefined) ?? getActivity()
     companyRequest.current = pendingCompany
     activityRequest.current = pendingActivity
     pendingCompany.then((result) => {
-      if (!active) return
+      if (!active || !result) return
       setCompany(result)
       setError(null)
     }).catch((reason: unknown) => {
@@ -553,7 +553,7 @@ function ActivityPage() {
       if (companyRequest.current === pendingCompany) companyRequest.current = null
     })
     pendingActivity.then((result) => {
-      if (!active) return
+      if (!active || !result) return
       setActivity(result.activity)
       setMetrics(result.metrics)
       setActivityWarning(result.error ?? null)
@@ -1024,7 +1024,7 @@ function CompanyToolsPage() {
 
 const coffeePaymentWindows = [
   ["friday", "Friday payments", "The customer processes payments only on Fridays."],
-  ["morning", "Payments before 10 a.m.", "The customer processes payments only before 10 a.m."],
+  ["morning", "Payments before 10 a.m.", "The customer processes payments before 10 a.m. If Friday payments are also enabled, the Friday batch schedule takes precedence."],
   ["financing", "Customer financing requests", "The customer asks for financing on a coffee order. Finance hands off the request so a Lending application can be submitted."],
   ["batch_cutoff", "Weekly batch cutoff", "The customer pays in a Friday batch starting at 10 a.m. Invoices received at or after the cutoff wait until the following Friday."],
   ["financial_distress", "Financial distress", "The customer asks for longer terms and delays payment by 7 to 28 days after the due date as earlier invoices accumulate."],
@@ -1143,13 +1143,15 @@ function BackgroundSimulations() {
     setBackgroundControlErrors((current) => ({ ...current, [providerId]: "" }))
     try {
       const confirmed = await setBackgroundProviderEnabled(providerId, enabled)
-      setBackground((current) => current && ({
-        ...current,
-        providers: {
-          ...current.providers,
-          [providerId]: { ...current.providers[providerId], ...confirmed },
-        },
-      }))
+      setBackground((current) => {
+        if (!current) return current
+        const errors = { ...current.errors }
+        if (confirmed.status !== "error") delete errors[providerId]
+        return {
+          ...current, errors,
+          providers: { ...current.providers, [providerId]: { ...current.providers[providerId], ...confirmed } },
+        }
+      })
     } catch (reason) {
       setBackgroundControlErrors((current) => ({ ...current, [providerId]: reason instanceof Error ? reason.message : `${providerId} control could not be confirmed. Refresh to reconcile the requested state.` }))
     } finally {
@@ -1434,14 +1436,14 @@ function RunsPage() {
   const [runs, setRuns] = useState<ExperimentRun[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const runsRequest = useRef<ReturnType<typeof getRuns> | null>(null)
+  const runsRequest = useRef<Promise<Awaited<ReturnType<typeof getRuns>> | undefined> | null>(null)
 
   useEffect(() => {
     let active = true
-    const pending = runsRequest.current ?? getRuns()
+    const pending = runsRequest.current?.then(() => active ? getRuns() : undefined, () => active ? getRuns() : undefined) ?? getRuns()
     runsRequest.current = pending
     pending
-      .then((items) => { if (active) { setRuns(items); setError(null) } })
+      .then((items) => { if (active && items) { setRuns(items); setError(null) } })
       .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : "Runs could not be loaded.") })
       .finally(() => {
         if (runsRequest.current === pending) runsRequest.current = null
