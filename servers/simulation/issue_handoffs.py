@@ -338,7 +338,12 @@ class IssueHandoffService:
                            "summary": record.business_description, "actor": "ERPNext"})
             if row["stage"] == Stage.SENT:
                 intent = json.loads(row["handoff_json"])
-                result.append({"id": intent["message_id"], "timestamp": row["updated_at"],
+                company_time = intent.get("company_time")
+                if company_time is None:
+                    footer = re.search(r"The current simulated time is (.+ UTC)\.\s*$", intent["body"])
+                    if footer:
+                        company_time = datetime.strptime(footer[1], "%d %b %Y, %H:%M UTC").replace(tzinfo=timezone.utc).isoformat()
+                result.append({"id": intent["message_id"], "timestamp": company_time,
                                "event": "COFFEE_REQUEST_HANDED_TO_VIV" if marketplace else "ISSUE_HANDED_TO_VIV", "type": "email", "direction": "sent",
                                "title": intent["subject"], "description": "The employee asked Viv to take care of the request.",
                                "summary": record.business_description, "content": intent["body"],
@@ -348,8 +353,9 @@ class IssueHandoffService:
         return result
 
     def _intent(self, record: MarketplaceNotification, actor: dict) -> dict:
+        company_time = datetime.now(timezone.utc).isoformat()
         if not isinstance(record, IssueNotification):
-            return {"sender": actor, "subject": "Fwd: " + record.subject,
+            return {"sender": actor, "company_time": company_time, "subject": "Fwd: " + record.subject,
                     "forward_original": True,
                     "body": "Hi Viv, can you take care of this request?\n\n"
                             + simulation_message_footer(),
@@ -362,7 +368,7 @@ class IssueHandoffService:
         links = ["Company issue: " + link("Issue", record.issue_name)]
         links += [f"{row.doctype} {row.name}: {link(row.doctype, row.name)}" for row in record.affected_orders]
         sender = {key: actor[key] for key in ("actor_id", "email", "kind") if key in actor}
-        return {"sender": sender, "subject": "Please handle this: " + record.subject,
+        return {"sender": sender, "company_time": company_time, "subject": "Please handle this: " + record.subject,
                 "body": "Please handle this,\n\n" + record.business_description
                         + "\n\nRequested outcome: " + record.requested_outcome + "\n\n" + "\n".join(links)
                         + "\n\n" + simulation_message_footer(),

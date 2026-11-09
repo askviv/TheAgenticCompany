@@ -578,6 +578,30 @@ function ActivityPage() {
     value === "all" || entry.type === value || (value === "message" && entry.type === "chat")
   const filtered = activity.filter((entry) => matchesFilter(entry, filter))
     .sort((first, second) => (second.timestamp ?? "").localeCompare(first.timestamp ?? ""))
+  const emails = new Map(filtered.filter((entry) => entry.type === "email").map((entry) => [entry.id, entry]))
+  const replies = new Map<string, ActivityEntry[]>()
+  for (const entry of filtered) {
+    const parent = entry.related_activity_id
+    if (entry.type !== "email" || !parent || parent === entry.id || !emails.has(parent)) continue
+    const thread = replies.get(parent) ?? []
+    thread.push(entry)
+    replies.set(parent, thread)
+  }
+  const ordered: ActivityEntry[] = []
+  const displayed = new Set<ActivityEntry>()
+  const append = (entry: ActivityEntry) => {
+    if (displayed.has(entry)) return
+    displayed.add(entry)
+    ordered.push(entry)
+    if (emails.get(entry.id) === entry) {
+      for (const reply of replies.get(entry.id) ?? []) append(reply)
+    }
+  }
+  const linkedEmails = new Set(Array.from(replies.values()).flat())
+  for (const entry of filtered) {
+    if (!linkedEmails.has(entry)) append(entry)
+  }
+  for (const entry of filtered) append(entry)
   const backgroundErrors = company?.background?.errors ?? {}
   const globalBackgroundErrors = ([
     ["company_background", "Background worker"],
@@ -648,7 +672,7 @@ function ActivityPage() {
       {activityWarning && <ErrorNotice message={activityWarning} title="Some company activity could not be loaded" />}
       {loading ? <div className="space-y-3"><Skeleton className="h-24 w-full" /><Skeleton className="h-24 w-full" /></div> : filtered.length ? (
         <div key={filter} className="space-y-3">
-          {filtered.map((entry) => {
+          {ordered.map((entry) => {
             const isEmail = entry.type === "email"
             const isCommunication = isEmail || entry.type === "message" || entry.type === "chat" || entry.type === "chatter"
             const title = entry.title.trim()
@@ -663,7 +687,7 @@ function ActivityPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
                     <h3 className="font-medium">{entry.title}</h3>
-                    <time className="text-xs text-muted-foreground">{formatDate(entry.timestamp)}</time>
+                    <time className="text-xs text-muted-foreground">{entry.timestamp ? formatDate(entry.timestamp) : ""}</time>
                   </div>
                   {isEmail ? <div className="mt-3 space-y-2 text-sm">
                     <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 break-words">
@@ -709,13 +733,6 @@ function ActivityPage() {
                     {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}
                   </>}
                   {entry.related_activity_id && filtered.some((item) => item.id === entry.related_activity_id) && <a className="mt-2 inline-block text-sm underline" href={`#activity-${entry.related_activity_id}`}>View original message</a>}
-                  {isEmail && entry.direction === "received" && filtered
-                    .filter((item) => item.type === "email" && item.direction === "sent" && item.related_activity_id === entry.id)
-                    .map((item) => <div key={item.id} className="mt-2 text-sm">
-                      <a className="underline" href={`#activity-${encodeURIComponent(item.id)}`}>
-                        View handoff to {item.recipient_name || item.recipient || "recipient"}
-                      </a>
-                    </div>)}
                   {entry.coffee_update && <CoffeeUpdateDetails update={entry.coffee_update} />}
                   {entry.run_id && <Link className="mt-3 inline-flex items-center gap-1 text-sm text-primary hover:underline" to={`/runs/${encodeURIComponent(entry.run_id)}`}>View experiment <ArrowRight className="size-3.5" /></Link>}
                 </div>

@@ -180,7 +180,7 @@ export type CompanyDesktopSession = {
 export type ActivityEntry = {
   id: string
   type: "email" | "message" | "action" | "company" | string
-  timestamp: string
+  timestamp: string | null
   title: string
   summary?: string
   content?: string
