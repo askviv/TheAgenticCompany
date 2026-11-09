@@ -465,17 +465,15 @@ class CompanyBackgroundTests(unittest.TestCase):
         self.service._advance_once(self.engine.company_state(), now)
         self.assertEqual(self.service.runtime.advance_company.call_args.kwargs["provider_ids"], ("coffeebench",))
 
-    def test_coupled_pending_source_selection_is_tracked_before_native_dispatch(self):
+    def test_coffee_does_not_dispatch_ecommerce_pending_work_early(self):
         now = self._prepare_controlled_background()
         self.service.profile["coupling"] = {"ecommerce_to_coffee": {"native_effect": "delivery_lag_days"}}
         self.service._next_due["ecommercebench"] = now + timedelta(days=1)
         for provider in ("coffeebench", "ecommercebench"):
             self.store.persist_background_provider_pending(provider, provider + "-pending", {"source": "unchanged"})
         def advance(*_, **kwargs):
-            self.assertEqual(set(kwargs["provider_ids"]), {"coffeebench", "ecommercebench"})
-            state = self.service.control(False, "stop-coupled-ecom", provider_id="ecommercebench")
-            self.assertEqual(state["status"], "stopping")
-            self.assertTrue(state["in_flight"])
+            self.assertEqual(kwargs["provider_ids"], ("coffeebench",))
+            self.assertFalse(self.service._provider_status("ecommercebench")["in_flight"])
             return {"providers": {}, "provider_errors": {}}
         self.service.runtime.advance_company.side_effect = advance
         self.service._advance_once(self.engine.company_state(), now)
