@@ -12,6 +12,7 @@ import errno
 import imaplib
 import email.policy
 from email.header import decode_header, make_header
+from email.headerregistry import HeaderRegistry, MessageIDHeader
 import json
 import logging
 from pathlib import Path
@@ -43,6 +44,13 @@ from .clock_rate import kernel_virtual_time_rate
 
 LOG = logging.getLogger(__name__)
 SPECIAL_VIV_ID = "viv"
+
+# Each outbound handoff has one parent ID. Preserve it as an RFC identifier
+# instead of letting the generic text header encoder emit MIME encoded words.
+_THREADING_HEADERS = HeaderRegistry()
+for _name in ("in-reply-to", "references"):
+    _THREADING_HEADERS.map_to_type(_name, MessageIDHeader)
+_SMTP_POLICY = email.policy.SMTP.clone(header_factory=_THREADING_HEADERS)
 
 
 class _ActorRef(BaseModel):
@@ -621,7 +629,7 @@ class MailuGateway:
         if delivery_address is not None and self.config.delivery_aliases.get(delivery_address) != recipient_actor.actor_id:
             raise PermissionError("delivery address is not a configured alias of the recipient mailbox")
 
-        message = EmailMessage()
+        message = EmailMessage(policy=_SMTP_POLICY)
         message["From"] = sender_actor.email
         message["To"] = delivery_address or recipient_actor.email
         if reply_to_actor is not None:
