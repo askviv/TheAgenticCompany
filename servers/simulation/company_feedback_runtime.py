@@ -398,8 +398,6 @@ class CompanyFeedbackRuntime:
             )
             self.pipeline.map_record(mapping, record["document"])
         self._register_tau_retail_mappings(result["records"], existing, now)
-        if "invoice_mail" in result:
-            self._record_invoice_mail(result["invoice_mail"])
         from .feedback_contracts import NativeDocumentEvent
 
         for event in [*result.get("events", []), *result.get("issue_events", [])]:
@@ -409,6 +407,9 @@ class CompanyFeedbackRuntime:
                 "INSERT INTO company_feedback_runtime_reports VALUES(?,?) ON CONFLICT(provider) DO UPDATE SET result_json=excluded.result_json",
                 ("native_evidence_cursor", json.dumps(result["cursor"])),
             )
+
+        if "invoice_mail" in result:
+            self._record_invoice_mail(result["invoice_mail"])
 
     def _record_invoice_mail(self, messages):
         with self.store.transaction() as db:

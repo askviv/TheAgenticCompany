@@ -1405,7 +1405,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         metrics={
             'emails_sent': None if company_error else sum(item['type']=='email' and item.get('direction')=='sent' for item in activity),
             'emails_received': None if company_error else sum(item['type']=='email' and item.get('direction')=='received' for item in activity),
-            'messages': sum(item['type']=='message' for item in activity),
+            'messages': sum(item['type'] in {'message', 'chat'} for item in activity),
             'open_experiments': None if company_error else (
                 sum(item['kind']=='workplace' and item['status'] not in {'completed','failed'} for item in tracked_runs)
                 + sum(item['status'] not in {'completed','failed'} for item in company['experiments'])),
@@ -1413,10 +1413,15 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         def category(item):
             return 'message' if item['type'] == 'chat' else item['type']
 
+        def chatter_message(item):
+            return category(item) == 'message' and item.get('direction') == 'sent' and bool(item.get('actor'))
+
         counts = {'all': len(activity)}
         for item in activity:
             name = category(item)
             counts[name] = counts.get(name, 0) + 1
+            if chatter_message(item):
+                counts['chatter'] = counts.get('chatter', 0) + 1
 
         def activity_rank(item):
             try:
@@ -1442,7 +1447,8 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         before = tuple(rank) if cursor is not None else None
         page = nlargest(11, (
             item for item in activity
-            if (filter_type == 'all' or category(item) == filter_type)
+            if (filter_type == 'all' or category(item) == filter_type
+                or (filter_type == 'chatter' and chatter_message(item)))
             and (before is None or activity_rank(item) < before)
         ), key=activity_rank)
         activity = page[:10]

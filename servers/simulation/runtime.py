@@ -715,6 +715,7 @@ def build_app(config_path: str | Path):
     engine.evaluation_service = build_evaluation_service(
         engine, store, evaluation_evidence_directory,
     )
+    engine.viv_smtp_receipts = gateway.viv_smtp_receipts
     issue_workflow = None
     issue_configuration_error = None
     if config.company_binding is not None and config.company_issues_enabled:
@@ -736,7 +737,6 @@ def build_app(config_path: str | Path):
             engine.company_issue_reconcile = lambda: issue_action(issue_workflow.reconcile)
             engine.company_issue_observe = lambda: issue_action(issue_workflow.observe_mail)
             engine.company_issue_activity = issue_workflow.service.activity
-            engine.viv_smtp_receipts = gateway.viv_smtp_receipts
             engine.resend_marketplace_handoff = issue_workflow.service.resend_marketplace_handoff
     company_packs = None
     if config.company_binding is not None:

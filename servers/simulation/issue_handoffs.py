@@ -462,8 +462,23 @@ class IssueHandoffService:
             actor = self.actors[record.recipient_email.casefold()]
             if row["stage"] in (Stage.SUBMITTING, Stage.UNCERTAIN):
                 intent = json.loads(row["handoff_json"])
-                if intent.get("resend_of"):
-                    return  # An interrupted SMTP resend must not be submitted again.
+                if marketplace and not row["sent_uidvalidity"]:
+                    # Direct SMTP uses our own stable ID. A receiving-mailbox
+                    # match reconciles a crash without issuing another send.
+                    message_id = intent["message_id"]
+                    reader = getattr(self.mail, "viv_smtp_receipts", None)
+                    if callable(reader) and message_id in reader({message_id: intent["subject"]}):
+                        receipt = self.mail.find_receipt(
+                            self.viv, message_id, intent["subject"], intent["run_id"],
+                            intent["generation"], submission_confirmed=True,
+                        )
+                        if receipt:
+                            self.store.complete(key, {
+                                **receipt, "confirmation_source": "recipient_smtp_mailbox",
+                            }, now)
+                            return
+                    if intent.get("resend_of") or self.coffee_handoff_delivery == "api":
+                        return
                 native_message_id = row["native_message_id"]
                 if native_message_id is None:
                     native_message_id = self.mail.employee_sent_message_id(

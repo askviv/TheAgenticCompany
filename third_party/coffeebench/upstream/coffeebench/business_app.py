@@ -667,7 +667,7 @@ class BusinessApp:
         refundable = credit if invoice.paid else max(0.0, credit - outstanding_before_return)
         refund = 0.0
         if refundable > 0:
-            refund = round(min(refundable, seller.cash), 2)
+            refund = round(min(refundable, max(0.0, seller.cash)), 2)
             if not invoice.paid:
                 invoice.partial_paid_amount = round(invoice.partial_paid_amount - refund, 2)
             # If seller is broke, they refund what they have; the rest stays

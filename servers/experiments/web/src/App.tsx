@@ -596,7 +596,7 @@ function ActivityPage() {
     try {
       const page = await getActivity(filter, nextCursor, controller.signal)
       if (controller.signal.aborted) return
-      if (page.error) throw new Error(page.error)
+      if (page.error) setActivityWarning(page.error)
       setActivity((current) => [...current, ...page.activity])
       setNextCursor(page.next_cursor)
       setCounts(page.counts)
@@ -736,7 +736,7 @@ function ActivityPage() {
                       <span className="font-medium">To</span><span>{entry.recipient_name || entry.recipient || "Unknown recipient"}</span>
                     </div>
                     <div className="whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 leading-6">
-                      {content || "Message body was not captured."}
+                      {content || summary || "Message body was not captured."}
                     </div>
                     {Boolean(entry.attachments?.length) && <p>Attachments: {entry.attachments?.join(", ")}</p>}
                     {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}

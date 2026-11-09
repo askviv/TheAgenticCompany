@@ -263,6 +263,8 @@ class MailuGateway:
         self._viv_receipt_lock = threading.Lock()
         self._viv_received: set[str] = set()
         self._viv_receipt_refresh_at = 0.0
+        self._viv_last_subject = ""
+        self._viv_search_positions: dict[str, tuple[int, int]] = {}
 
     def viv_smtp_receipts(self, messages: dict[str, str]) -> set[str]:
         """Find exact RFC Message-IDs in the receiving SMTP mailbox."""
@@ -285,22 +287,37 @@ class MailuGateway:
                 response.raise_for_status()
                 return response.json()
 
-            subjects = {subject for mid, subject in messages.items() if mid not in self._viv_received}
-            try:
-                for subject in sorted(subjects):
+            subjects = sorted({subject for mid, subject in messages.items() if mid not in self._viv_received})
+            # Resume after the last subject attempted, even when its request timed out.
+            subjects.sort(key=lambda subject: (subject <= self._viv_last_subject, subject))
+            for subject in subjects:
+                if time.monotonic() >= deadline:
+                    break
+                self._viv_last_subject = subject
+                number, offset = self._viv_search_positions.get(subject, (1, 0))
+                try:
                     page = read("api/Messages", mailboxName=self.config.smtp4dev_mailbox_name,
-                                page=1, pageSize=50, searchTerms=subject)
-                    for candidate in page["results"]:
-                        if candidate.get("subject") != subject:
-                            continue
-                        detail = read("api/Messages/" + quote(candidate["id"], safe=""))
-                        for header in detail["headers"]:
-                            if header["name"].casefold() == "message-id":
-                                message_id = header["value"].strip()
-                                if messages.get(message_id) == subject:
-                                    self._viv_received.add(message_id)
-            except (requests.RequestException, KeyError, TypeError, ValueError) as error:
-                LOG.warning("Viv SMTP receipt refresh failed: %s", type(error).__name__)
+                                page=number, pageSize=50, searchTerms=subject)
+                    remaining_ids = {mid for mid, title in messages.items()
+                                     if title == subject and mid not in self._viv_received}
+                    for index, candidate in enumerate(page["results"][offset:], start=offset):
+                        if candidate.get("subject") == subject:
+                            detail = read("api/Messages/" + quote(candidate["id"], safe=""))
+                            for header in detail["headers"]:
+                                if header["name"].casefold() == "message-id":
+                                    message_id = header["value"].strip()
+                                    if message_id in remaining_ids:
+                                        self._viv_received.add(message_id)
+                                        remaining_ids.remove(message_id)
+                        self._viv_search_positions[subject] = (number, index + 1)
+                        if not remaining_ids:
+                            break
+                    if remaining_ids and number < page["pageCount"]:
+                        self._viv_search_positions[subject] = (number + 1, 0)
+                    else:
+                        self._viv_search_positions.pop(subject, None)
+                except (requests.RequestException, KeyError, TypeError, ValueError) as error:
+                    LOG.warning("Viv SMTP receipt refresh failed: %s", type(error).__name__)
             return set(messages).intersection(self._viv_received)
         finally:
             self._viv_receipt_lock.release()
