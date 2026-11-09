@@ -313,8 +313,7 @@ def test_ecommerce_global_logistics_condition_reaches_coffee_durably(tmp_path):
     assert worker.calls[2].binding == first_coffee_request.binding
     assert worker.calls[2].operation_id == first_coffee_request.operation_id
 
-    # Once the E-Commerce native daily event is due, a Coffee-only tick cannot
-    # claim stale source coverage; the company scheduler must advance E-Commerce first.
+    # A Coffee-only tick proceeds without claiming stale E-Commerce coverage.
     store = SQLiteStore(database)
     store.record_company_source_events(replay["providers"]["ecommercebench"]["events"])
     for provider, operation_id in replay["provider_operation_ids"].items():
@@ -323,11 +322,12 @@ def test_ecommerce_global_logistics_condition_reaches_coffee_durably(tmp_path):
         until + timedelta(days=1), bindings=bindings, provider_ids=("coffeebench",),
         coupling_policy=policy,
     )
-    assert next_day["status"] == "partial"
-    assert next_day["provider_errors"]["coffeebench"]["code"] == "source_provider_not_current"
+    assert next_day["status"] == "complete"
+    assert next_day["provider_errors"] == {}
     assert [request.provider_id for request in worker.calls] == [
-        "ecommercebench", "coffeebench", "coffeebench",
+        "ecommercebench", "coffeebench", "coffeebench", "coffeebench",
     ]
+    assert "external_supply_source_receipt" not in worker.calls[-1].binding
 
 
 def test_confirmed_provider_result_survives_coordinator_crash_until_ack(tmp_path):

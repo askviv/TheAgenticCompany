@@ -352,6 +352,15 @@
           "display_name": "Bank Business Support",
           "kind": "counterparty"
         }
+      },
+      "coupling": {
+        "ecommerce_to_coffee": {
+          "affected_categories": [
+            "all"
+          ],
+          "target_scope": "native_coffee_market",
+          "native_effect": "delivery_lag_days"
+        }
       }
     },
     "issueRouting": {

@@ -187,8 +187,9 @@ class CompanyBackgroundTests(unittest.TestCase):
         service._advance_once(self.engine.company_state(), service._retry_at)
         runtime.advance_company.assert_called_once()
 
-    def test_coupled_coffee_wait_is_visible_during_ecommerce_retry_backoff(self):
+    def test_coffee_advances_during_ecommerce_retry_backoff(self):
         runtime = Mock()
+        runtime.advance_company.return_value = {}
         service = CompanyBackgroundService(
             self.engine, runtime=runtime, finance_adapter=Mock(),
             profile={"coffee": {}, "ecommerce": {}, "coupling": {
@@ -208,9 +209,9 @@ class CompanyBackgroundTests(unittest.TestCase):
 
         service._advance_once(self.engine.company_state(), now)
 
-        runtime.advance_company.assert_not_called()
-        self.assertEqual(service.status()["errors"]["coffeebench"]["code"],
-                         "waiting_for_ecommerce_source")
+        runtime.advance_company.assert_called_once()
+        self.assertEqual(runtime.advance_company.call_args.kwargs["provider_ids"], ("coffeebench",))
+        self.assertNotIn("coffeebench", service.status()["errors"])
 
     def test_successfully_initialized_provider_advances_when_sibling_init_fails(self):
         now = datetime.now(timezone.utc)

@@ -365,26 +365,6 @@ class CompanyBackgroundService:
             retry_providers.extend(provider for provider, value in self._next_due.items()
                                    if value <= now and provider in self._initialized_providers)
         selected = tuple(dict.fromkeys((*due_providers, *retry_providers)))
-        if coupling is not None and "coffeebench" in selected:
-            ecom_pending = self.engine.store.get_background_provider_pending("ecommercebench")
-            if ecom_pending is not None and (
-                ecom_pending["result"] is not None or retry_due
-                or self.engine.store.get_background_provider_pending("coffeebench") is not None
-            ):
-                selected = tuple(dict.fromkeys((*selected, "ecommercebench")))
-            ecom_unavailable = (
-                "ecommercebench" not in self._initialized_providers
-                or "ecommercebench" in self._initialization_errors
-                or "ecommercebench" in self.errors
-            )
-            if ecom_unavailable and not retry_due:
-                selected = tuple(provider for provider in selected if provider != "coffeebench")
-                with self._lock:
-                    self.errors["coffeebench"] = {"code": "waiting_for_ecommerce_source"}
-            elif ecom_unavailable and "ecommercebench" not in self._initialized_providers:
-                selected = tuple(provider for provider in selected if provider != "coffeebench")
-                with self._lock:
-                    self.errors["coffeebench"] = {"code": "waiting_for_ecommerce_source"}
         selected = tuple(provider for provider in selected if enabled[provider])
         if not selected:
             if retry_due:
@@ -492,19 +472,12 @@ class CompanyBackgroundService:
                 self.changed.clear()
                 continue
             now = _aware(company["simulated_time"])
-            coupling = self.profile.get("coupling", {}).get("ecommerce_to_coffee")
-            coffee_blocked = coupling is not None and (
-                "ecommercebench" not in self._initialized_providers
-                or "ecommercebench" in self._initialization_errors
-                or "ecommercebench" in self.errors
-            )
             controls = {provider: self.engine.store.background_provider_control(provider)
                         for provider in ("coffeebench", "ecommercebench")}
             coffee_control = controls["coffeebench"]
             has_due_provider = any(value <= now and provider not in self.errors
                                    and "company_background" not in self.errors
                                    and controls[provider]["enabled"]
-                                   and not (coffee_blocked and provider == "coffeebench")
                                    for provider, value in self._next_due.items())
             retry_due = self._retry_at is not None and self._retry_at <= now
             finance_retry_due = self._finance_retry_at is not None and self._finance_retry_at <= now

@@ -62,7 +62,7 @@ The worker and site-admin operation failures retain safe exception types/cause c
 
 ## Shared logistics conditions
 
-CoffeeBench and E-CommerceBench advance independently in the default company profile. Deployments can explicitly opt in to coupling through `background.coupling.ecommerce_to_coffee`. The reusable `ExternalSupplyCondition` contract carries the original E-Commerce event ID, pinned source revision, global category scope, multiplier, start and expiry. E-Commerce confirms its source window before Coffee advances. Durable pending requests retain the exact condition batch across failures and restarts; a failed source leaves Coffee visibly waiting while unrelated company services continue.
+The company profile enables the E-Commerce logistics feed for CoffeeBench through `background.coupling.ecommerce_to_coffee`. CoffeeBench applies delivery delays from confirmed logistics events when the source covers the current simulation window. Either benchmark can advance independently when the other is stopped, behind, or has an error. An already submitted operation keeps its original request and source evidence when retried.
 
 The coupling applies upstream global logistics events (`affected_categories: all`) to the native Coffee market's Item delivery lags, using the upstream worst-active-multiplier rule. Native Marketplace deal creation uses those lags; normal deliveries then affect inventory availability and financial activity. Company-mapped actors receive the source condition at their next native morning wake and make their own native pricing and procurement decisions. Expiry restores original native lags. Existing accepted deal commitments remain intact.
 
