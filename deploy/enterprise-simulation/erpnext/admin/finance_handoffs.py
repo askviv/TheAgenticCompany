@@ -2,6 +2,7 @@
 
 import hashlib
 import traceback
+from datetime import datetime, timezone
 from html import escape
 from pathlib import Path
 
@@ -31,10 +32,10 @@ def delegate_finance_task(doctype, name, employee, recipient, description):
         rate = 1
     if rate < 1:
         raise ValueError("Simulation clock rate must be positive")
+    simulated_time = datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M UTC")
     footer = (
-        f"Simulation clock at handoff: {rate}× real time. "
-        f"Divide the time remaining until a simulated deadline by {rate} "
-        "to estimate the real time remaining at this rate."
+        f"This is a simulated environment. The clock runs at {rate}× real time. "
+        f"The current simulated time is {simulated_time}."
     )
     queue = frappe.sendmail(
         recipients=[recipient], subject=f"{employee_name} delegated {doctype} {name}",
