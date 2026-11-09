@@ -529,18 +529,26 @@ function ActivityPage() {
   const [manualRefresh, setManualRefresh] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [filter, setFilter] = useState("all")
+  const companyRequest = useRef<ReturnType<typeof getCompany> | null>(null)
+  const activityRequest = useRef<ReturnType<typeof getActivity> | null>(null)
 
 
   useEffect(() => {
     let active = true
-    getCompany().then((result) => {
+    const pendingCompany = companyRequest.current ?? getCompany()
+    const pendingActivity = activityRequest.current ?? getActivity()
+    companyRequest.current = pendingCompany
+    activityRequest.current = pendingActivity
+    pendingCompany.then((result) => {
       if (!active) return
       setCompany(result)
       setError(null)
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : "Company status could not be loaded.")
+    }).finally(() => {
+      if (companyRequest.current === pendingCompany) companyRequest.current = null
     })
-    getActivity().then((result) => {
+    pendingActivity.then((result) => {
       if (!active) return
       setActivity(result.activity)
       setMetrics(result.metrics)
@@ -548,6 +556,7 @@ function ActivityPage() {
     }).catch((reason: unknown) => {
       if (active) setActivityWarning(reason instanceof Error ? reason.message : "Company activity could not be loaded.")
     }).finally(() => {
+      if (activityRequest.current === pendingActivity) activityRequest.current = null
       if (active) {
         setLoading(false)
         setRefreshing(false)
@@ -1308,14 +1317,19 @@ function RunsPage() {
   const [runs, setRuns] = useState<ExperimentRun[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const runsRequest = useRef<ReturnType<typeof getRuns> | null>(null)
 
   useEffect(() => {
     let active = true
-    setLoading(true)
-    getRuns()
+    const pending = runsRequest.current ?? getRuns()
+    runsRequest.current = pending
+    pending
       .then((items) => { if (active) { setRuns(items); setError(null) } })
       .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : "Runs could not be loaded.") })
-      .finally(() => { if (active) setLoading(false) })
+      .finally(() => {
+        if (runsRequest.current === pending) runsRequest.current = null
+        if (active) setLoading(false)
+      })
     return () => { active = false }
   }, [refreshKey])
 
