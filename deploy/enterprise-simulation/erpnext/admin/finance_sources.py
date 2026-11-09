@@ -374,6 +374,15 @@ def _insert_invoice(record: dict[str, Any], context: dict[str, Any]) -> tuple[st
         task_id=context["company_id"], experiment_id="background", company_id=context["company_id"],
         snapshot=_source_values(record),
     )
+    if inserted and context.get("finance_reviewer"):
+        request = (
+            f"can you invoice the customer for order {order.name} and make sure it gets paid?"
+            if doctype == "Sales Invoice"
+            else f"can you take care of the supplier invoice for order {order.name} and make sure it gets paid?"
+        )
+        delegate_finance_task(
+            doctype, doc.name, context["finance_reviewer"], context["assistant_email"], request,
+        )
     return doc.name, inserted
 
 
@@ -425,14 +434,6 @@ def _insert_payment_evidence(record: dict[str, Any], context: dict[str, Any]) ->
             snapshot=_source_values(record),
         )
         submit_imported_bank_transaction(transaction)
-        if context.get("finance_reviewer") and transaction.status == "Unreconciled":
-            delegate_finance_task(
-                transaction.doctype, transaction.name, context["finance_reviewer"], context["assistant_email"],
-                f"Reconcile CoffeeBench Bank Transaction {transaction.name} against ERPNext "
-                f"invoice source reference {facts['invoice_id']}. Payment evidence is on Issue "
-                f"{doc.name}. Review the invoice if it is still a draft. Check for an existing Payment "
-                "Entry and follow the company's approval process for any new entry.",
-            )
     return doc.name, inserted
 
 
@@ -472,12 +473,6 @@ def reconcile(source_records: list[dict[str, Any]], company_binding: dict[str, A
         elif kind == "invoice":
             name, created = _insert_invoice(record, context)
             doctype = "Purchase Invoice" if facts.get("payer_id") in context["company_business_ids"] else "Sales Invoice"
-            if created and company_binding.get("finance_reviewer"):
-                delegate_finance_task(
-                    doctype, name, company_binding["finance_reviewer"], company_binding["assistant_email"],
-                    "Review this CoffeeBench invoice against the source order and submit it "
-                    "if the records agree and the required approvals are in place.",
-                )
         elif kind == "payment":
             name, created = _insert_payment_evidence(record, context)
             doctype = "Issue"

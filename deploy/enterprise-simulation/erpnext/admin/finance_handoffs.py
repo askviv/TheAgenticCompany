@@ -8,9 +8,7 @@ from frappe.desk.form import assign_to
 
 
 def delegate_finance_task(doctype, name, employee, recipient, description):
-    # Keep the previous settlement identity so a retry cannot send a second email.
-    key = name if doctype == "Bank Transaction" else f"{doctype}:{name}"
-    identity = hashlib.sha256(key.encode()).hexdigest()
+    identity = hashlib.sha256(f"{doctype}:{name}".encode()).hexdigest()
     message_id = f"benchmark-finance-{identity}@theagentcompany.local"
     if frappe.db.exists("Email Queue", {"message_id": message_id}):
         return
@@ -24,10 +22,7 @@ def delegate_finance_task(doctype, name, employee, recipient, description):
     })
 
     employee_name = frappe.db.get_value("User", employee, "full_name")
-    instruction = (
-        f"Hi Viv, I’ve been assigned a new task in ERPNext for {doctype} {name}. "
-        f"Can you take care of it? {description}"
-    )
+    instruction = f"Hi Viv, {description}"
     queue = frappe.sendmail(
         recipients=[recipient], subject=f"{employee_name} delegated {doctype} {name}",
         message=f"{escape(instruction)}<br><br>{escape(employee_name)}",
@@ -41,6 +36,7 @@ def delegate_finance_task(doctype, name, employee, recipient, description):
 def send_pending_finance_handoffs():
     queues = frappe.get_all("Email Queue", filters={
         "message_id": ["like", "benchmark-finance-%@theagentcompany.local"],
+        "reference_doctype": ["in", ["Sales Order", "Sales Invoice", "Purchase Invoice"]],
         "status": ["in", ["Not Sent", "Partially Sent"]],
     }, pluck="name", order_by="creation asc")
     for name in queues:

@@ -1173,17 +1173,6 @@ def reconcile(
             if record.get("kind") == "bank_transaction":
                 mapped_bank = _map_native_bank_movement(record, company_binding)
                 transaction, created = _ensure_native_bank_transaction(mapped_bank)
-                if (mapped_bank["movement_type"] == "marketplace_settlement"
-                        and company_binding.get("finance_reviewer")
-                        and frappe.db.get_value("Bank Transaction", transaction, "status") == "Unreconciled"):
-                    delegate_finance_task(
-                        "Bank Transaction", transaction, company_binding["finance_reviewer"],
-                        company_binding["assistant_email"],
-                        f"Reconcile E-CommerceBench marketplace payout {transaction} in ERPNext. "
-                        "Use the bank reference and marketplace records to identify the related "
-                        "accounting entries. Check for existing Payment Entries before preparing "
-                        "any new entries for approval. Flag any amount you cannot allocate.",
-                    )
                 receipts.append({
                     "source_id": str(record["id"]),
                     "doctype": "Bank Transaction",
@@ -1303,8 +1292,7 @@ def reconcile(
             delegate_finance_task(
                 "Sales Order", order.name, company_binding["finance_reviewer"],
                 company_binding["assistant_email"],
-                "Review the E-CommerceBench order for invoicing. Use the recorded fulfillment "
-                "and the normal approval process to prepare and submit the Sales Invoice when due.",
+                f"can you invoice the customer for order {order.name} and make sure it gets paid?",
             )
         receipts.append(
             {
