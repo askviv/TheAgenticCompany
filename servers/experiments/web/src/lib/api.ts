@@ -188,7 +188,6 @@ export type ActivityEntry = {
   recipient?: string | null
   actor_name?: string | null
   recipient_name?: string | null
-  routing_note?: string
   related_activity_id?: string | null
   delivery_status?: string | null
   attachments?: string[] | null

@@ -708,7 +708,6 @@ function ActivityPage() {
                     {showContent && content && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 text-sm leading-6">{formatActivityText(content)}</p>}
                     {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}
                   </>}
-                  {entry.routing_note && <p className="mt-2 text-sm text-muted-foreground">{entry.routing_note}</p>}
                   {entry.related_activity_id && filtered.some((item) => item.id === entry.related_activity_id) && <a className="mt-2 inline-block text-sm underline" href={`#activity-${entry.related_activity_id}`}>View original message</a>}
                   {entry.coffee_update && <CoffeeUpdateDetails update={entry.coffee_update} />}
                   {entry.run_id && <Link className="mt-3 inline-flex items-center gap-1 text-sm text-primary hover:underline" to={`/runs/${encodeURIComponent(entry.run_id)}`}>View experiment <ArrowRight className="size-3.5" /></Link>}

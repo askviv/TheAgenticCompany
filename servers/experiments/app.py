@@ -1410,9 +1410,6 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 participant = item.get(field)
                 if participant:
                     item[field + '_name'] = participant_names.get(participant.casefold(), participant)
-            if (item['type'] == 'email' and item['title'] == 'Updated delivery requirement'
-                    and item.get('actor') == 'customer' and item.get('recipient') == 'viv'):
-                item['routing_note'] = 'Older simulation email sent directly to Viv because of a routing bug.'
         filter_type=request.args.get('type')
         if filter_type in {'email','message','action'}:
             activity=[item for item in activity if item['type']==filter_type]
