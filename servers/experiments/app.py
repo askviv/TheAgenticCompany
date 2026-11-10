@@ -1,6 +1,5 @@
 """Private experiment library: real requests to Viv, tracked as Rocket.Chat threads."""
 import json
-from heapq import nlargest
 import logging
 import math
 import os
@@ -247,6 +246,27 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         return definition
     executor=ThreadPoolExecutor(max_workers=4, thread_name_prefix='experiments')
     app.extensions['experiments_executor']=executor
+    refresh_lock = threading.Lock()
+    refresh_pending = set()
+
+    def queue_refresh(name, refresh):
+        with refresh_lock:
+            if name in refresh_pending:
+                return
+            refresh_pending.add(name)
+
+        def work():
+            try:
+                with app.app_context():
+                    refresh()
+            except Exception:
+                logging.exception('Background dashboard refresh failed component=%s', name)
+            finally:
+                with refresh_lock:
+                    refresh_pending.remove(name)
+
+        executor.submit(work)
+
     changed=threading.Condition()
     version=[0]
     def notify():
@@ -256,6 +276,9 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def row(run_id):
         with db() as c: item=c.execute('SELECT * FROM runs WHERE id=?',(run_id,)).fetchone()
         if item is None: abort(404)
+        return public_run(item)
+
+    def public_run(item):
         data=dict(item);data['messages']=json.loads(data['messages'])
         data['activity']=json.loads(data['activity'])
         data.pop('idempotency_key',None)
@@ -506,7 +529,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             except Exception:
                 logging.exception('Initial thread refresh failed run=%s',run_id)
                 update(run_id,error='Request delivered. Chat updates could not be retrieved. Sync messages to retry.')
-    def refresh_simulation(run_id):
+    def refresh_simulation(run_id, *, company_snapshot=None):
         item=row(run_id)
         if item['kind']!='simulation' or not item['simulation_run_id']: return
         if item['experiment_id'].startswith('tau-provider-'):
@@ -564,7 +587,7 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
             update(run_id,status=status,provider_status=provider['status'],provider_url=portal_url,
                    activity=json.dumps(safe_activity),error=error)
             return
-        state=company_state()
+        state=company_snapshot if company_snapshot is not None else company_state()
         linked=next((entry for entry in state['experiments']
                      if entry.get('experiment_id')==item['simulation_run_id']),None)
         if linked is None: raise CoordinatorError('company','linked_experiment_not_found')
@@ -1351,88 +1374,83 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
         except CoordinatorError as error:
             return company_pack_error(error)
 
-    @app.get('/api/activity')
-    def api_activity():
-        activity=[]
-        external_to_local={}
-        tracked_runs=all_runs()
-        for item in tracked_runs:
-            run=row(item['id'])
-            if run.get('simulation_run_id'):
-                external_to_local[run['simulation_run_id']]=run['id']
-            for index,message in enumerate(run['messages']):
-                author=message.get('author')
-                incoming=bool(author and author==getattr(client(),'viv_username',None))
-                content=message.get('text','')
-                activity.append({'id':f"message:{run['id']}:{index}",'type':'message',
-                    'timestamp':message.get('timestamp'),'title':run['title'],
-                    'summary':content[:240],'content':content,'actor':author,
-                    'direction':'received' if incoming else 'sent','run_id':run['id']})
-        company_error=None
+    def activity_timestamp(value):
         try:
-            company=company_state()
-            for entry in company['activity']:
-                title=entry.get('title') or entry.get('event','Company update')
-                content=entry.get('content') if entry.get('type') == 'email' else (entry.get('content') or entry.get('description',''))
-                event_type=entry.get('type')
-                if event_type not in {'email','message','chat','chatter','action'}: event_type='action'
-                activity.append({'id':entry['id'],'type':event_type,
-                    'timestamp':entry['timestamp'],'title':title,
-                    'summary':entry.get('summary') or (content or '')[:240],
-                    'content':content,'actor':entry.get('actor'),
-                    'recipient':entry.get('recipient'), 'related_activity_id':entry.get('related_activity_id'),
-                    'delivery_status':entry.get('delivery_status'), 'attachments':entry.get('attachments'),
-                    'native_document':entry.get('native_document'),
-                    'direction':entry.get('direction'), 'can_resend':entry.get('can_resend'),
-                    'run_id':external_to_local.get(entry.get('experiment_id')),
-                    **({'coffee_update':entry['coffee_update']} if 'coffee_update' in entry else {})})
+            timestamp = datetime.fromisoformat(value or '')
+        except ValueError:
+            return ''
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        return timestamp.astimezone(timezone.utc).isoformat(timespec='microseconds')
+
+    activity_query = """
+        WITH company_entries AS (
+            SELECT entry.key AS position, entry.value AS payload,
+                   json_extract(entry.value, '$.id') AS id,
+                   CASE WHEN json_extract(entry.value, '$.type') IN
+                       ('email', 'message', 'chat', 'chatter', 'action')
+                       THEN json_extract(entry.value, '$.type') ELSE 'action' END AS type,
+                   coalesce(json_extract(entry.value, '$.direction'), '') AS direction,
+                   json_extract(entry.value, '$.actor') AS actor,
+                   json_extract(entry.value, '$.timestamp') AS timestamp
+            FROM company_state, json_each(company_state.activity) AS entry
+            WHERE singleton = 1
+        ), entries AS (
+            SELECT id, type, direction, actor, timestamp, json_group_array(json(payload)) AS payloads,
+                   NULL AS run_id, NULL AS title, min(position) AS position
+            FROM company_entries GROUP BY id, type, direction
+            UNION ALL
+            SELECT 'message:' || runs.id || ':' || message.key, 'message',
+                   CASE WHEN json_extract(message.value, '$.author') = :viv THEN 'received' ELSE 'sent' END,
+                   json_extract(message.value, '$.author'), json_extract(message.value, '$.timestamp'),
+                   json_array(json(message.value)), runs.id, runs.title, message.key
+            FROM runs, json_each(runs.messages) AS message
+        ), categorized AS (
+            SELECT *, CASE WHEN type = 'chat' THEN 'message' ELSE type END AS category,
+                   type IN ('message', 'chat') AND direction = 'sent'
+                       AND coalesce(actor, '') != '' AS is_chatter
+            FROM entries
+        )
+    """
+
+    def activity_item(entry, external_to_local):
+        item = None
+        for payload in json.loads(entry['payloads']):
+            content = (payload.get('text', '') if entry['run_id'] else
+                       payload.get('content') if entry['type'] == 'email' else
+                       payload.get('content') or payload.get('description', ''))
+            record = {
+                'id': entry['id'], 'type': entry['type'],
+                'timestamp': payload.get('timestamp'),
+                'title': entry['title'] if entry['run_id'] else
+                         payload.get('title') or payload.get('event', 'Company update'),
+                'summary': payload.get('summary') or (content or '')[:240],
+                'content': content, 'actor': payload.get('author' if entry['run_id'] else 'actor'),
+                'direction': entry['direction'] or None,
+                'run_id': entry['run_id'] or external_to_local.get(payload.get('experiment_id')),
+            }
+            if not entry['run_id']:
+                record.update({field: payload.get(field) for field in (
+                    'recipient', 'related_activity_id', 'delivery_status', 'attachments',
+                    'native_document', 'can_resend',
+                )})
+                if 'coffee_update' in payload:
+                    record['coffee_update'] = payload['coffee_update']
+            if item is None:
+                item = record
+            else:
+                item.update({field: value for field, value in record.items() if not item.get(field) and value})
+        return item
+
+    def refresh_activity_snapshot():
+        try:
+            company_state()
         except Exception:
             logging.exception('Company activity retrieval failed')
-            company_error='Company activity could not be retrieved.'
-        # A run's outbox and the evidence collector can record the same email.
-        # Keep separate send and receipt observations, and combine duplicate metadata.
-        unique_activity = {}
-        for item in activity:
-            identity = (item['type'], item['id'], item.get('direction'))
-            if identity not in unique_activity:
-                unique_activity[identity] = item
-            else:
-                record = unique_activity[identity]
-                for field, value in item.items():
-                    if not record.get(field) and value:
-                        record[field] = value
-        activity = list(unique_activity.values())
-        metrics={
-            'emails_sent': None if company_error else sum(item['type']=='email' and item.get('direction')=='sent' for item in activity),
-            'emails_received': None if company_error else sum(item['type']=='email' and item.get('direction')=='received' for item in activity),
-            'messages': sum(item['type'] in {'message', 'chat'} for item in activity),
-            'open_experiments': None if company_error else (
-                sum(item['kind']=='workplace' and item['status'] not in {'completed','failed'} for item in tracked_runs)
-                + sum(item['status'] not in {'completed','failed'} for item in company['experiments'])),
-        }
-        def category(item):
-            return 'message' if item['type'] == 'chat' else item['type']
+            save_company_error('Company activity could not be retrieved.')
 
-        def chatter_message(item):
-            return category(item) == 'message' and item.get('direction') == 'sent' and bool(item.get('actor'))
-
-        counts = {'all': len(activity)}
-        for item in activity:
-            name = category(item)
-            counts[name] = counts.get(name, 0) + 1
-            if chatter_message(item):
-                counts['chatter'] = counts.get('chatter', 0) + 1
-
-        def activity_rank(item):
-            try:
-                timestamp = datetime.fromisoformat(item.get('timestamp') or '')
-                if timestamp.tzinfo is None:
-                    timestamp = timestamp.replace(tzinfo=timezone.utc)
-                date = timestamp.astimezone(timezone.utc).isoformat(timespec='microseconds')
-            except ValueError:
-                date = ''
-            return date, item['type'], item['id'], item.get('direction') or ''
-
+    @app.get('/api/activity')
+    def api_activity():
         filter_type = request.args.get('type', 'all')
         if filter_type not in {'all', 'email', 'message', 'chatter', 'action'}:
             abort(400)
@@ -1444,15 +1462,61 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                 abort(400)
             if not isinstance(rank, list) or len(rank) != 4 or not all(isinstance(value, str) for value in rank):
                 abort(400)
-        before = tuple(rank) if cursor is not None else None
-        page = nlargest(11, (
-            item for item in activity
-            if (filter_type == 'all' or category(item) == filter_type
-                or (filter_type == 'chatter' and chatter_message(item)))
-            and (before is None or activity_rank(item) < before)
-        ), key=activity_rank)
-        activity = page[:10]
-        next_cursor = json.dumps(activity_rank(activity[-1])) if len(page) > 10 else None
+        parameters = {'viv': getattr(client(), 'viv_username', None), 'category': filter_type}
+        cursor_condition = ''
+        if cursor is not None:
+            parameters.update(zip(('date', 'type', 'id', 'direction'), rank))
+            cursor_condition = 'WHERE (date, type, id, direction) < (:date, :type, :id, :direction)'
+        else:
+            queue_refresh('activity', refresh_activity_snapshot)
+
+        with db() as c:
+            c.create_function('activity_timestamp', 1, activity_timestamp, deterministic=True)
+            c.execute('BEGIN')
+            state = c.execute("""
+                SELECT error, (
+                    SELECT count(*) FROM json_each(experiments)
+                    WHERE json_extract(value, '$.status') NOT IN ('completed', 'failed')
+                ) AS open_experiments FROM company_state WHERE singleton = 1
+            """).fetchone()
+            counts = {'all': 0}
+            email_totals = {'sent': 0, 'received': 0}
+            for group in c.execute(activity_query + """
+                SELECT category, direction, count(*) AS total, sum(is_chatter) AS chatter
+                FROM categorized GROUP BY category, direction
+            """, parameters):
+                category, direction, total, chatter = group
+                counts['all'] += total
+                counts[category] = counts.get(category, 0) + total
+                if chatter:
+                    counts['chatter'] = counts.get('chatter', 0) + chatter
+                if category == 'email' and direction in email_totals:
+                    email_totals[direction] = total
+            page = c.execute(activity_query + """
+                , filtered AS (
+                    SELECT *, activity_timestamp(timestamp) AS date FROM categorized
+                    WHERE :category = 'all' OR category = :category
+                       OR (:category = 'chatter' AND is_chatter)
+                )
+                SELECT * FROM filtered
+            """ + cursor_condition + """
+                ORDER BY date DESC, type DESC, id DESC, direction DESC LIMIT 11
+            """, parameters).fetchall()
+            external_to_local = dict(c.execute(
+                'SELECT simulation_run_id, id FROM runs WHERE simulation_run_id IS NOT NULL ORDER BY created_at DESC'
+            ))
+            workplace_open = c.execute("""
+                SELECT count(*) FROM runs WHERE kind = 'workplace' AND status NOT IN ('completed', 'failed')
+            """).fetchone()[0]
+        company_error = state['error']
+        metrics = {
+            'emails_sent': None if company_error else email_totals['sent'],
+            'emails_received': None if company_error else email_totals['received'],
+            'messages': counts.get('message', 0),
+            'open_experiments': None if company_error else workplace_open + state['open_experiments'],
+        }
+        activity = [activity_item(entry, external_to_local) for entry in page[:10]]
+        next_cursor = json.dumps([page[9][field] for field in ('date', 'type', 'id', 'direction')]) if len(page) > 10 else None
         try:
             participant_names = activity_participant_names()
         except (OSError, ValueError, KeyError, TypeError):
@@ -1687,17 +1751,32 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
     def health():
         with db() as c: c.execute('SELECT 1').fetchone()
         return jsonify(status='ok')
+    def refresh_run_statuses():
+        company_snapshot = None
+        company_failure = None
+        for current in all_runs():
+            if current['kind'] != 'simulation' or not current['simulation_run_id']:
+                continue
+            try:
+                if not current['experiment_id'].startswith('tau-provider-') and company_snapshot is None:
+                    if company_failure is None:
+                        try:
+                            company_snapshot = company_state()
+                        except Exception as error:
+                            company_failure = error
+                    if company_failure is not None:
+                        raise company_failure
+                refresh_simulation(current['id'], company_snapshot=company_snapshot)
+            except Exception as error:
+                logging.exception('Simulation status refresh failed run=%s', current['id'])
+                update(current['id'], error=f'Simulation status could not be retrieved ({type(error).__name__}). Refresh to retry.')
+
     @app.get('/api/runs')
     def api_runs():
-        result=[]
-        for current in all_runs():
-            if current['kind']=='simulation' and current['simulation_run_id']:
-                try: refresh_simulation(current['id'])
-                except Exception as error:
-                    logging.exception('Simulation status refresh failed run=%s',current['id'])
-                    update(current['id'],error=f'Simulation status could not be retrieved ({type(error).__name__}). Refresh to retry.')
-            result.append(row(current['id']))
+        result = [public_run(current) for current in all_runs()]
+        queue_refresh('runs', refresh_run_statuses)
         return jsonify(runs=result)
+
     @app.get('/api/events')
     def events():
         def stream():
