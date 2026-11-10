@@ -543,7 +543,8 @@ function ActivityPage() {
   const [loadedFilter, setLoadedFilter] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [olderError, setOlderError] = useState(false)
-  const activityController = useRef<AbortController | null>(null)
+  const paginationController = useRef<AbortController | null>(null)
+  const hasOlderPages = useRef(false)
   const olderRequest = useRef<AbortController | null>(null)
   const olderButton = useRef<HTMLButtonElement>(null)
 
@@ -565,16 +566,24 @@ function ActivityPage() {
 
   useEffect(() => {
     const controller = new AbortController()
-    activityController.current = controller
+    paginationController.current = controller
+    hasOlderPages.current = false
     setLoadingMore(false)
     setOlderError(false)
+    return () => controller.abort()
+  }, [filter, manualRefresh])
+
+  useEffect(() => {
+    const controller = new AbortController()
     getActivity(filter, undefined, controller.signal).then((result) => {
       if (controller.signal.aborted) return
-      setActivity(result.activity)
-      setLoadedFilter(filter)
+      if (!hasOlderPages.current && olderRequest.current !== paginationController.current) {
+        setActivity(result.activity)
+        setLoadedFilter(filter)
+        setNextCursor(result.next_cursor)
+      }
       setMetrics(result.metrics)
       setCounts(result.counts)
-      setNextCursor(result.next_cursor)
       setActivityWarning(result.error ?? null)
     }).catch((reason: unknown) => {
       if (!controller.signal.aborted) setActivityWarning(reason instanceof Error ? reason.message : "Company activity could not be loaded.")
@@ -587,7 +596,7 @@ function ActivityPage() {
   }, [filter, refreshKey, manualRefresh])
 
   const loadOlder = useCallback(async () => {
-    const controller = activityController.current
+    const controller = paginationController.current
     if (!nextCursor || loadedFilter !== filter || refreshing || !controller || controller.signal.aborted
         || olderRequest.current === controller) return
     olderRequest.current = controller
@@ -597,6 +606,7 @@ function ActivityPage() {
       const page = await getActivity(filter, nextCursor, controller.signal)
       if (controller.signal.aborted) return
       if (page.error) setActivityWarning(page.error)
+      hasOlderPages.current = true
       setActivity((current) => [...current, ...page.activity])
       setNextCursor(page.next_cursor)
       setCounts(page.counts)
