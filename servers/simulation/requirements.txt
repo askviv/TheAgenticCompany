@@ -14,7 +14,7 @@ charset-normalizer==3.5.2
     # via requests
 click==8.5.0
     # via uvicorn
-fastapi==0.162.0
+fastapi==0.162.3
     # via -r requirements.in
 h11==0.16.0
     # via uvicorn
@@ -30,20 +30,18 @@ numpy==2.5.4
     # via -r requirements.in
 opentelemetry-api==1.45.2
     # via fastapi
-pydantic==2.14.2
+pydantic==2.14.3
     # via
     #   -r requirements.in
     #   fastapi
-pydantic-core==2.50.2
+pydantic-core==2.50.4
     # via pydantic
-python-dateutil==3.0.0
+python-dateutil==4.0.0
     # via -r requirements.in
 requests==2.34.2
     # via -r requirements.in
 simpy==4.1.2
     # via -r requirements.in
-six==1.17.0
-    # via python-dateutil
 starlette==1.10.0
     # via
     #   -r requirements.in
