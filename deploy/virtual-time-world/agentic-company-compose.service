@@ -8,6 +8,7 @@ Type=oneshot
 RemainAfterExit=yes
 Environment=COMPOSE_CONFIG_DIR=/etc/company-workplace/compose
 ExecStartPre=/usr/bin/python3 /usr/local/lib/virtual-time-world/prepare-healthcheck-cadence.py --config-dir ${COMPOSE_CONFIG_DIR}
+ExecStartPre=/usr/bin/python3 /usr/local/lib/virtual-time-world/prepare-erp-proxy-timeout.py --config-dir ${COMPOSE_CONFIG_DIR}
 ExecStart=/usr/local/lib/virtual-time-world/company-data --config /etc/company-workplace/company-environments.json boot
 ExecReload=/usr/local/lib/virtual-time-world/company-data --config /etc/company-workplace/company-environments.json boot
 ExecStop=/usr/local/lib/virtual-time-world/company-compose-stop

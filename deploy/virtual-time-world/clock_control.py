@@ -591,6 +591,12 @@ class Controller:
     def prepare(self):
         self.prepare_candidate()
 
+    def synchronize_erp_proxy_timeout(self, rate):
+        try:
+            self.ssh('sudo', 'python3', '/usr/local/lib/virtual-time-world/prepare-erp-proxy-timeout.py', '--rate', str(rate))
+        except Exception:
+            LOG.exception('Clock rate changed, but ERP proxy timeout synchronization failed')
+
     def set_rate(self, rate):
         if rate < 1:
             raise ValueError('rate must be a positive integer')
@@ -638,6 +644,7 @@ class Controller:
                 self.save_anchor(db, current_guest, time.time_ns(), rate)
                 db.execute('DELETE FROM rate_change WHERE id=1')
                 db.commit()
+            self.synchronize_erp_proxy_timeout(rate)
             print(f'guest clock rate set to {rate}x')
         finally:
             domain = None
