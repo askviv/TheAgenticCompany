@@ -1395,10 +1395,16 @@ def create_app(config=None, client_factory=RocketChatClient.from_env,
                    json_extract(entry.value, '$.timestamp') AS timestamp
             FROM company_state, json_each(company_state.activity) AS entry
             WHERE singleton = 1
+        ), grouped_company_entries AS (
+            SELECT *, row_number() OVER duplicates AS duplicate_rank,
+                   json_group_array(json(payload)) OVER duplicates AS payloads
+            FROM company_entries
+            WINDOW duplicates AS (PARTITION BY id, type, direction ORDER BY position
+                                  ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
         ), entries AS (
-            SELECT id, type, direction, actor, timestamp, json_group_array(json(payload)) AS payloads,
-                   NULL AS run_id, NULL AS title, min(position) AS position
-            FROM company_entries GROUP BY id, type, direction
+            SELECT id, type, direction, actor, timestamp, payloads,
+                   NULL AS run_id, NULL AS title, position
+            FROM grouped_company_entries WHERE duplicate_rank = 1
             UNION ALL
             SELECT 'message:' || runs.id || ':' || message.key, 'message',
                    CASE WHEN json_extract(message.value, '$.author') = :viv THEN 'received' ELSE 'sent' END,

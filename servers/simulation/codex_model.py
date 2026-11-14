@@ -55,6 +55,10 @@ def set_model_calls_enabled(settings, enabled: bool) -> dict:
         return {"enabled": enabled}
 
 
+class CodexModelCallsDisabled(CodexModelCallsStopped):
+    """The operator stopped model calls before this turn started."""
+
+
 class CodexNoDesktopActionsError(CodexModelError):
     """The native desktop turn ended without invoking CUA."""
 
@@ -287,7 +291,7 @@ class CodexCLIModel:
                     on_submission_started()
                 with _MODEL_PROCESS_LOCK:
                     if not model_calls_enabled(settings):
-                        raise CodexModelCallsStopped("Model calls are stopped by the operator")
+                        raise CodexModelCallsDisabled("Model calls are stopped by the operator")
                     process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE, text=True, cwd=root, env=environment, start_new_session=True)
                     _MODEL_PROCESSES.add(process)

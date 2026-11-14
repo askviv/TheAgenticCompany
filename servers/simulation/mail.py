@@ -352,6 +352,10 @@ class MailuGateway:
         return actor.actor_id == SPECIAL_VIV_ID
 
     def _employee_id(self, actor: _ActorRecord) -> str | None:
+        employee = self._employee_identity(actor)
+        return employee["id"] if employee else None
+
+    def _employee_identity(self, actor: _ActorRecord) -> dict[str, Any] | None:
         if self._is_viv(actor):
             return None
         if self.employee_desktops is None:
@@ -382,7 +386,7 @@ class MailuGateway:
         employee_ids = [item.get("id") for item in matches]
         if len(matches) != 1 or not isinstance(employee_ids[0], str) or not employee_ids[0]:
             raise EmployeeBrowserUnavailable("company profile email does not resolve to one employee identity")
-        return employee_ids[0]
+        return matches[0]
 
     def _employee_webmail(self):
         if self.employee_desktops is None:
@@ -473,14 +477,15 @@ class MailuGateway:
     def process_employee_inbox_message(self, actor: dict[str, Any], uid: int, uidvalidity: str,
                                        claim: Callable[[], None]) -> None:
         mailbox = self._actor(actor, "mailbox")
-        employee_id = self._employee_id(mailbox)
-        if employee_id is None:
+        employee = self._employee_identity(mailbox)
+        if employee is None:
             raise EmployeeBrowserUnavailable("Inbox does not map to a company employee")
         credentials = self._credentials_for(mailbox)
         self._employee_webmail().handle_incoming_message(
-            employee_id, mailbox.email, credentials.username, credentials.password,
+            employee["id"], mailbox.email, credentials.username, credentials.password,
             _roundcube_message_url(self.config.webmail_url, str(uid)), claim,
             lambda: self._verify_inbox_uid(mailbox, uid, uidvalidity),
+            department=employee.get("department"),
         )
 
     def _verify_inbox_uid(self, mailbox: _ActorRecord, uid: int, uidvalidity: str) -> None:

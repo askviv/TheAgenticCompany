@@ -365,24 +365,52 @@ class MailWorkers:
                     "WHERE employee_inbox_turn_cursor.uidvalidity != excluded.uidvalidity",
                     (actor_id, validity, baseline),
                 )
+        from .codex_model import CodexModelCallsDisabled
+        from .codex_remote import CodexInferenceRejected
+
         for uid in uids:
             if self.stopped.is_set():
                 return
+            identity = (actor_id, validity, uid)
+            with store.transaction(write=False) as db:
+                submitted = db.execute(
+                    "SELECT 1 FROM employee_inbox_turn_submissions WHERE actor_id=? AND uidvalidity=? AND uid=?",
+                    identity,
+                ).fetchone()
+            if submitted:
+                continue
+
+            claimed = False
 
             def claim():
+                nonlocal claimed
                 with store.transaction() as db:
-                    updated = db.execute(
-                        "UPDATE employee_inbox_turn_cursor SET last_uid=? "
-                        "WHERE actor_id=? AND uidvalidity=? AND last_uid<?",
-                        (uid, actor_id, validity, uid),
+                    inserted = db.execute(
+                        "INSERT OR IGNORE INTO employee_inbox_turn_submissions "
+                        "SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM employee_inbox_turn_cursor "
+                        "WHERE actor_id=? AND uidvalidity=? AND last_uid<?)",
+                        (*identity, *identity),
                     ).rowcount
-                    if updated != 1:
-                        raise StoreConflict("Employee inbox message already claimed")
+                    if inserted != 1:
+                        raise StoreConflict("Employee inbox turn already claimed or cursor changed")
+                claimed = True
 
-                LOG.info("Employee inbox turn claimed actor=%s uidvalidity=%s uid=%s", actor_id, validity, uid)
-
-            self.engine.mail.process_employee_inbox_message(actor, uid, validity, claim)
-            LOG.info("Employee inbox turn completed actor=%s uidvalidity=%s uid=%s", actor_id, validity, uid)
+            try:
+                self.engine.mail.process_employee_inbox_message(actor, uid, validity, claim)
+            except (CodexInferenceRejected, CodexModelCallsDisabled):
+                if claimed:
+                    with store.transaction() as db:
+                        db.execute("DELETE FROM employee_inbox_turn_submissions "
+                                   "WHERE actor_id=? AND uidvalidity=? AND uid=?", identity)
+                raise
+            # A submission marker survives ambiguous failures and restarts. Only
+            # confirmed completions advance the cursor and remove their marker.
+            with store.transaction() as db:
+                db.execute("UPDATE employee_inbox_turn_cursor SET last_uid=? "
+                           "WHERE actor_id=? AND uidvalidity=? AND last_uid<?", (uid, *identity))
+                db.execute("DELETE FROM employee_inbox_turn_submissions "
+                           "WHERE actor_id=? AND uidvalidity=? AND uid=?", identity)
+            LOG.info("Employee inbox turn completed actor=%s uidvalidity=%s uid=%s", *identity)
 
     def _refresh_employee_inboxes(
         self, actor_id: str, event_queue: queue.Queue[dict[str, Any] | None]
@@ -456,6 +484,9 @@ class MailWorkers:
         with self.engine.store.transaction() as db:
             db.execute("CREATE TABLE IF NOT EXISTS employee_inbox_turn_cursor "
                        "(actor_id TEXT PRIMARY KEY, uidvalidity TEXT NOT NULL, last_uid INTEGER NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS employee_inbox_turn_submissions "
+                       "(actor_id TEXT NOT NULL, uidvalidity TEXT NOT NULL, uid INTEGER NOT NULL, "
+                       "PRIMARY KEY (actor_id, uidvalidity, uid))")
         self.threads = [threading.Thread(target=self._process, name="simulation-mail-processor", daemon=True)]
         self.threads += [threading.Thread(target=self._watch, args=(actor,),
                                         name="simulation-mail-" + actor["actor_id"], daemon=True)

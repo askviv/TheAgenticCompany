@@ -110,7 +110,7 @@ class EmployeeWebmailSender:
 
     def handle_incoming_message(self, employee_id: str, email: str, username: str, password: str,
                                 message_url: str, claim: Callable[[], None],
-                                verify_message: Callable[[], None]) -> None:
+                                verify_message: Callable[[], None], *, department: str | None = None) -> None:
         self._validate_same_origin(message_url)
         with self.employee_desktops.employee_activity(employee_id):
             self.employee_desktops.prepare_cua_runtime(employee_id)
@@ -121,6 +121,7 @@ class EmployeeWebmailSender:
 
             self.model.complete([
                 {"role": "user", "content": self._identity(email, username) +
+                 (f"Your department is {department}. " if department else "") +
                  f"Open this newly delivered inbox message and read it: {message_url}. "
                  "Handle it as the employee. Decide whether a reply is needed based on the message "
                  "and your role. If needed, write your own response and send it using Roundcube Reply. "

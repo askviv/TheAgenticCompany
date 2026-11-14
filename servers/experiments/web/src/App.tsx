@@ -521,6 +521,8 @@ function EmployeeStreamsPage() {
 
 const activityFilters = [["all", "All activity"], ["email", "Emails"], ["message", "Messages"], ["chatter", "Chatter"], ["action", "Company actions"]] as const
 
+const activityKey = (entry: ActivityEntry) => JSON.stringify([entry.type, entry.id, entry.direction])
+
 function ActivityPage() {
   const refreshKey = useRefreshKey()
   const [company, setCompany] = useState<Company | null>(null)
@@ -581,6 +583,11 @@ function ActivityPage() {
         setActivity(result.activity)
         setLoadedFilter(filter)
         setNextCursor(result.next_cursor)
+      } else {
+        setActivity((current) => {
+          const fresh = new Set(result.activity.map(activityKey))
+          return [...result.activity, ...current.filter((entry) => !fresh.has(activityKey(entry)))]
+        })
       }
       setMetrics(result.metrics)
       setCounts(result.counts)
@@ -607,7 +614,10 @@ function ActivityPage() {
       if (controller.signal.aborted) return
       if (page.error) setActivityWarning(page.error)
       hasOlderPages.current = true
-      setActivity((current) => [...current, ...page.activity])
+      setActivity((current) => {
+        const loaded = new Set(current.map(activityKey))
+        return [...current, ...page.activity.filter((entry) => !loaded.has(activityKey(entry)))]
+      })
       setNextCursor(page.next_cursor)
       setCounts(page.counts)
     } catch {
@@ -729,7 +739,7 @@ function ActivityPage() {
             const showContent = Boolean(content && (isEmail || content !== title))
             const showSummary = Boolean(summary && summary !== title && !(showContent && content?.startsWith(summary)))
             const Icon = isEmail ? Mail : entry.type === "message" || entry.type === "chat" ? MessageCircle : Building2
-            return <article key={JSON.stringify([entry.type, entry.id, entry.direction])} id={`activity-${entry.id}`} className="scroll-mt-6 rounded-xl border bg-card p-4 sm:p-5">
+            return <article key={activityKey(entry)} id={`activity-${entry.id}`} className="scroll-mt-6 rounded-xl border bg-card p-4 sm:p-5">
               <div className="flex items-start gap-3">
                 <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-secondary text-secondary-foreground"><Icon className="size-4" /></span>
                 <div className="min-w-0 flex-1">

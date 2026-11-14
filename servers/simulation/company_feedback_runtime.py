@@ -2128,6 +2128,8 @@ class CompanyFeedbackRuntime:
                 db.execute("DELETE FROM company_feedback_runtime_reports WHERE provider=?", (component,))
 
     def _capture_marketplace_handoff_replies(self, gateway, actors, tracked):
+        from .mail import MailReceiptMismatch, MailReplySourceUnavailable
+
         roots_by_mailbox = {}
         for row in tracked:
             notification = json.loads(row["notification_json"])
@@ -2161,9 +2163,10 @@ class CompanyFeedbackRuntime:
             try:
                 replies = gateway.poll_registered_replies(
                     mailbox, set(roots), 0, {"viv"}, include_automated=True,
+                    require_authenticated_submission=True,
                 )
-            except (OSError, imaplib.IMAP4.error) as error:
-                LOG.warning("Marketplace handoff mailbox temporarily unavailable actor=%s error=%s",
+            except (OSError, imaplib.IMAP4.error, MailReceiptMismatch, MailReplySourceUnavailable) as error:
+                LOG.warning("Marketplace handoff mailbox poll failed actor=%s error=%s",
                             mailbox["actor_id"], type(error).__name__)
                 continue
             for reply in replies:
