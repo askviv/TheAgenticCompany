@@ -12,7 +12,9 @@ import errno
 import imaplib
 import email.policy
 from email.header import decode_header, make_header
+from email.headerregistry import HeaderRegistry, MessageIDHeader
 import json
+import logging
 from pathlib import Path
 import re
 import smtplib
@@ -25,6 +27,7 @@ from email.utils import getaddresses
 from typing import Any, Callable
 from urllib.parse import quote, urljoin
 
+import requests
 from authres import AuthenticationResultsHeader, AuthResError
 from imapclient import IMAPClient
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -36,8 +39,18 @@ from servers.company.scenarios import (
 )
 
 
+from .clock_rate import kernel_virtual_time_rate
+
+
+LOG = logging.getLogger(__name__)
 SPECIAL_VIV_ID = "viv"
-SPECIAL_VIV_EMAIL = "agent@agent.example.test"
+
+# Each outbound handoff has one parent ID. Preserve it as an RFC identifier
+# instead of letting the generic text header encoder emit MIME encoded words.
+_THREADING_HEADERS = HeaderRegistry()
+for _name in ("in-reply-to", "references"):
+    _THREADING_HEADERS.map_to_type(_name, MessageIDHeader)
+_SMTP_POLICY = email.policy.SMTP.clone(header_factory=_THREADING_HEADERS)
 
 
 class _ActorRef(BaseModel):
@@ -255,6 +268,67 @@ class MailuGateway:
         self._activity_clients: set[IMAPClient] = set()
         self._activity_clients_lock = threading.Lock()
         self._activity_waits_stopped = threading.Event()
+        self._viv_receipt_lock = threading.Lock()
+        self._viv_received: set[str] = set()
+        self._viv_receipt_refresh_at = 0.0
+        self._viv_last_subject = ""
+        self._viv_search_positions: dict[str, tuple[int, int]] = {}
+
+    def viv_smtp_receipts(self, messages: dict[str, str]) -> set[str]:
+        """Find exact RFC Message-IDs in the receiving SMTP mailbox."""
+        if not messages or not self._viv_receipt_lock.acquire(blocking=False):
+            return set(messages).intersection(self._viv_received)
+        try:
+            rate = kernel_virtual_time_rate()
+            now = time.monotonic()
+            if now < self._viv_receipt_refresh_at:
+                return set(messages).intersection(self._viv_received)
+            self._viv_receipt_refresh_at = now + 15 * rate
+            deadline = now + 2 * rate
+            base = self.config.smtp4dev_api_base_url.rstrip("/") + "/"
+
+            def read(path: str, **params: Any) -> dict:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise requests.Timeout("SMTP receipt refresh budget exhausted")
+                response = requests.get(urljoin(base, path), params=params, timeout=remaining / 2)
+                response.raise_for_status()
+                return response.json()
+
+            subjects = sorted({subject for mid, subject in messages.items() if mid not in self._viv_received})
+            # Resume after the last subject attempted, even when its request timed out.
+            subjects.sort(key=lambda subject: (subject <= self._viv_last_subject, subject))
+            for subject in subjects:
+                if time.monotonic() >= deadline:
+                    break
+                self._viv_last_subject = subject
+                number, offset = self._viv_search_positions.get(subject, (1, 0))
+                try:
+                    page = read("api/Messages", mailboxName=self.config.smtp4dev_mailbox_name,
+                                page=number, pageSize=50, searchTerms=subject)
+                    remaining_ids = {mid for mid, title in messages.items()
+                                     if title == subject and mid not in self._viv_received}
+                    for index, candidate in enumerate(page["results"][offset:], start=offset):
+                        if candidate.get("subject") == subject:
+                            detail = read("api/Messages/" + quote(candidate["id"], safe=""))
+                            for header in detail["headers"]:
+                                if header["name"].casefold() == "message-id":
+                                    message_id = header["value"].strip()
+                                    if message_id in remaining_ids:
+                                        self._viv_received.add(message_id)
+                                        remaining_ids.remove(message_id)
+                        self._viv_search_positions[subject] = (number, index + 1)
+                        if not remaining_ids:
+                            break
+                    if remaining_ids and number < page["pageCount"]:
+                        self._viv_search_positions[subject] = (number + 1, 0)
+                    else:
+                        self._viv_search_positions.pop(subject, None)
+                except (requests.RequestException, KeyError, TypeError, ValueError) as error:
+                    LOG.warning("Viv SMTP receipt refresh failed: %s", type(error).__name__)
+            return set(messages).intersection(self._viv_received)
+        finally:
+            self._viv_receipt_lock.release()
 
     def set_employee_desktops(self, manager: Any | None) -> None:
         """Attach the coordinator-owned employee browser runtime after engine setup."""
@@ -278,6 +352,10 @@ class MailuGateway:
         return actor.actor_id == SPECIAL_VIV_ID
 
     def _employee_id(self, actor: _ActorRecord) -> str | None:
+        employee = self._employee_identity(actor)
+        return employee["id"] if employee else None
+
+    def _employee_identity(self, actor: _ActorRecord) -> dict[str, Any] | None:
         if self._is_viv(actor):
             return None
         if self.employee_desktops is None:
@@ -308,7 +386,7 @@ class MailuGateway:
         employee_ids = [item.get("id") for item in matches]
         if len(matches) != 1 or not isinstance(employee_ids[0], str) or not employee_ids[0]:
             raise EmployeeBrowserUnavailable("company profile email does not resolve to one employee identity")
-        return employee_ids[0]
+        return matches[0]
 
     def _employee_webmail(self):
         if self.employee_desktops is None:
@@ -375,13 +453,59 @@ class MailuGateway:
         )
         return True
 
-    def _reply_source(self, actor: _ActorRecord, message_id: str) -> dict[str, str]:
+    def employee_inbox_snapshot(self, actor: dict[str, Any], after_uid: int | None):
+        """Read inbox identities without opening messages or changing flags."""
+        mailbox = self._actor(actor, "mailbox")
+        if self.employee_desktops is None or self._employee_id(mailbox) is None:
+            return None
+        credentials = self._credentials_for(mailbox)
+        with IMAPClient(
+            self.config.mailu_imap_host, port=self.config.mailu_imap_port, ssl=True,
+            ssl_context=_ssl_context(self.config.tls_ca_file), timeout=self.config.smtp_timeout_seconds,
+        ) as client:
+            client.login(credentials.username, credentials.password)
+            selected = client.select_folder("INBOX", readonly=True)
+            validity = self._uidvalidity(selected)
+            if after_uid is None:
+                uidnext = selected.get(b"UIDNEXT")
+                if not isinstance(uidnext, int) or uidnext < 1:
+                    raise MailReceiptMismatch("Mailu inbox has no valid UIDNEXT")
+                return validity, uidnext - 1, []
+            uids = client.search(["UID", f"{after_uid + 1}:*"])
+            return validity, after_uid, sorted(int(uid) for uid in uids if int(uid) > after_uid)
+
+    def process_employee_inbox_message(self, actor: dict[str, Any], uid: int, uidvalidity: str,
+                                       claim: Callable[[], None]) -> None:
+        mailbox = self._actor(actor, "mailbox")
+        employee = self._employee_identity(mailbox)
+        if employee is None:
+            raise EmployeeBrowserUnavailable("Inbox does not map to a company employee")
+        credentials = self._credentials_for(mailbox)
+        self._employee_webmail().handle_incoming_message(
+            employee["id"], mailbox.email, credentials.username, credentials.password,
+            _roundcube_message_url(self.config.webmail_url, str(uid)), claim,
+            lambda: self._verify_inbox_uid(mailbox, uid, uidvalidity),
+            department=employee.get("department"),
+        )
+
+    def _verify_inbox_uid(self, mailbox: _ActorRecord, uid: int, uidvalidity: str) -> None:
+        credentials = self._credentials_for(mailbox)
+        with IMAPClient(
+            self.config.mailu_imap_host, port=self.config.mailu_imap_port, ssl=True,
+            ssl_context=_ssl_context(self.config.tls_ca_file), timeout=self.config.smtp_timeout_seconds,
+        ) as client:
+            client.login(credentials.username, credentials.password)
+            selected = client.select_folder("INBOX", readonly=True)
+            if self._uidvalidity(selected) != uidvalidity or uid not in client.search(["UID", str(uid)]):
+                raise MailReceiptMismatch("Employee inbox message changed before the agent turn")
+
+    def _reply_source(self, actor: _ActorRecord, message_id: str, *, include_original: bool = False) -> dict[str, Any]:
         """Resolve one exact employee INBOX message without changing its flags."""
         if self._is_viv(actor):
             raise MailReceiptMismatch("a Viv capture message cannot be an employee inbox reply source")
         context = _IssueNotificationContext(message_id=message_id)
         credentials = self._credentials_for(actor)
-        matches: list[dict[str, str]] = []
+        matches: list[dict[str, Any]] = []
         with IMAPClient(
             self.config.mailu_imap_host,
             port=self.config.mailu_imap_port,
@@ -394,16 +518,17 @@ class MailuGateway:
             uidvalidity = self._uidvalidity(selected)
             for uid_value in client.search(["HEADER", "Message-ID", context.message_id]):
                 uid = int(uid_value)
-                fetched = client.fetch(
-                    [uid], [b"BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]"]
-                ).get(uid)
+                field = b"BODY.PEEK[]" if include_original else b"BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]"
+                fetched = client.fetch([uid], [field]).get(uid)
                 if not isinstance(fetched, dict):
                     raise MailReceiptMismatch("Mailu reply-source search returned incomplete metadata")
                 raw = fetched.get(
                     b"BODY[HEADER.FIELDS (MESSAGE-ID)]",
                     fetched.get(b"BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]", b""),
                 )
-                parsed = email.message_from_bytes(raw or b"", policy=email.policy.default)
+                parsed = email.message_from_bytes(
+                    (fetched.get(b"BODY[]") if include_original else raw) or b"", policy=email.policy.default,
+                )
                 actual_id = _single_header(
                     {"message-id": parsed.get_all("Message-ID", [])}, "message-id"
                 )
@@ -412,6 +537,7 @@ class MailuGateway:
                 # The exact Message-ID was found in this employee's authenticated INBOX.
                 # To/Cc may contain aliases, and Bcc is intentionally absent from headers.
                 matches.append({
+                    **({"original": parsed} if include_original else {}),
                     "message_id": context.message_id,
                     "mailbox_uid": str(uid),
                     "uidvalidity": uidvalidity,
@@ -511,6 +637,8 @@ class MailuGateway:
         in_reply_to: str | None = None,
         reply_to_actor_id: str | None = None,
         automated: bool = False,
+        system_handoff: bool = False,
+        forward_original: bool = False,
         delivery_address: str | None = None,
         business_time: str | datetime | None = None,
         on_submission_started: Callable[[], None] = lambda: None,
@@ -551,7 +679,7 @@ class MailuGateway:
         if delivery_address is not None and self.config.delivery_aliases.get(delivery_address) != recipient_actor.actor_id:
             raise PermissionError("delivery address is not a configured alias of the recipient mailbox")
 
-        message = EmailMessage()
+        message = EmailMessage(policy=_SMTP_POLICY)
         message["From"] = sender_actor.email
         message["To"] = delivery_address or recipient_actor.email
         if reply_to_actor is not None:
@@ -564,12 +692,23 @@ class MailuGateway:
             message["X-TAC-Company-Time"] = company_time
         if context.automated:
             message["Auto-Submitted"] = "auto-replied"
-        if context.in_reply_to:
+        if forward_original:
+            if context.in_reply_to is None or not self._is_viv(recipient_actor):
+                raise ValueError("A forwarded handoff requires an original email and Viv as recipient")
+            message["X-Forwarded-Message-ID"] = context.in_reply_to
+        elif context.in_reply_to:
             message["In-Reply-To"] = context.in_reply_to
             message["References"] = context.in_reply_to
         message.set_content(body)
 
-        employee_id = self._employee_id(sender_actor)
+        if system_handoff and not self._is_viv(recipient_actor):
+            raise ValueError("System handoffs must be addressed to Viv")
+        employee_id = None if system_handoff else self._employee_id(sender_actor)
+        if forward_original and employee_id is None:
+            source = self._reply_source(sender_actor, context.in_reply_to, include_original=True)
+            if not source:
+                raise MailReplySourceUnavailable("Original email is missing from the employee inbox")
+            message.add_attachment(source["original"], filename="original-message.eml")
         if employee_id is not None:
             webmail = self._employee_webmail()
             if sender_credentials is None:
@@ -616,6 +755,7 @@ class MailuGateway:
                     context.in_reply_to,
                     sent_snapshot["uidvalidity"],
                     sent_snapshot["uid_next"],
+                    **({"forward_original": True} if forward_original else {}),
                 )
                 if native_message_id is None:
                     raise MailDeliveryUnconfirmed(
@@ -643,6 +783,7 @@ class MailuGateway:
                 require_reply_to=reply_to_actor.email if reply_to_actor is not None else None,
                 on_submission_started=mark_browser_submission_started,
                 on_submission_completed=reconcile_browser_submission,
+                **({"forward_original": True} if forward_original else {}),
             )
             if native_message_id is None:
                 raise MailDeliveryUnconfirmed("employee browser submission has no confirmed native Message-ID")
@@ -710,6 +851,7 @@ class MailuGateway:
         in_reply_to: str | None, submission_started_at: str | None,
         *, sent_uidvalidity: str | None = None, sent_uid_next: int | None = None,
         business_time: str | datetime | None = None, delivery_address: str | None = None,
+        forward_original: bool = False,
     ) -> str | None:
         """Recover one native browser submission from exact Sent-folder evidence."""
         sender_actor = self._actor(sender, "sender")
@@ -732,6 +874,7 @@ class MailuGateway:
         return self._employee_sent_message_id(
             credentials, sender_actor.email, delivery_address or recipient_actor.email, subject, body,
             in_reply_to, sent_uidvalidity, sent_uid_next,
+            **({"forward_original": True} if forward_original else {}),
         )
 
     def _employee_sent_snapshot(self, credentials: _Credentials) -> dict[str, Any]:
@@ -762,7 +905,7 @@ class MailuGateway:
     def _employee_sent_message_id(
         self, credentials: _Credentials, sender_email: str, recipient_email: str,
         subject: str, body: str, in_reply_to: str | None,
-        sent_uidvalidity: str, sent_uid_next: int,
+        sent_uidvalidity: str, sent_uid_next: int, *, forward_original: bool = False,
     ) -> str | None:
         matches: list[str] = []
         with IMAPClient(
@@ -803,13 +946,21 @@ class MailuGateway:
                 actual_in_reply_to = _single_header(
                     {"in-reply-to": parsed.get_all("In-Reply-To", [])}, "in-reply-to"
                 )
+                source_matches = actual_in_reply_to == in_reply_to
+                if forward_original:
+                    source_matches = any(
+                        part.get_content_type() == "message/rfc822"
+                        and any(str(original.get("Message-ID", "")) == in_reply_to
+                                for original in part.get_payload())
+                        for part in parsed.iter_attachments()
+                    )
                 body_part = parsed.get_body(preferencelist=("plain",))
                 actual_body = body_part.get_content() if body_part is not None else None
                 if (
                     _address_header(parsed.get_all("From", [])).casefold() == sender_email.casefold()
                     and actual_recipients == {recipient_email.casefold()}
                     and _decoded_header(parsed.get_all("Subject", [])) == subject
-                    and actual_in_reply_to == in_reply_to
+                    and source_matches
                     and isinstance(actual_body, str)
                     and _normalize_mail_body(actual_body) == _normalize_mail_body(body)
                 ):
@@ -822,6 +973,7 @@ class MailuGateway:
         self,
         recipient: dict[str, Any],
         exact_native_message_id: str,
+        *, include_content: bool = False,
     ) -> dict[str, Any] | None:
         """Inspect a tracked notification's native IMAP receipt without reading it.
 
@@ -859,7 +1011,7 @@ class MailuGateway:
                         [
                             b"FLAGS",
                             b"INTERNALDATE",
-                            b"BODY.PEEK[HEADER.FIELDS (MESSAGE-ID TO)]",
+                            b"BODY.PEEK[]" if include_content else b"BODY.PEEK[HEADER.FIELDS (MESSAGE-ID TO)]",
                         ],
                     )
                     record = fetched.get(uid)
@@ -869,7 +1021,10 @@ class MailuGateway:
                         b"BODY[HEADER.FIELDS (MESSAGE-ID TO)]",
                         record.get(b"BODY.PEEK[HEADER.FIELDS (MESSAGE-ID TO)]"),
                     )
-                    parsed = email.message_from_bytes(raw_headers or b"", policy=email.policy.default)
+                    parsed = email.message_from_bytes(
+                        record.get(b"BODY[]", b"") if include_content else (raw_headers or b""),
+                        policy=email.policy.default,
+                    )
                     actual_message_id = _single_header(
                         {"message-id": parsed.get_all("Message-ID", [])}, "message-id"
                     )
@@ -880,7 +1035,7 @@ class MailuGateway:
                         for _display, address in getaddresses(parsed.get_all("To", []))
                         if address
                     }
-                    if recipient_actor.email.casefold() not in recipients:
+                    if not include_content and recipient_actor.email.casefold() not in recipients:
                         raise MailReceiptMismatch("Mailu exact-message recipient does not match the configured actor")
                     internal_date = record.get(b"INTERNALDATE")
                     if not isinstance(internal_date, datetime) or internal_date.tzinfo is None:
@@ -891,7 +1046,15 @@ class MailuGateway:
                     seen = any(_flag_text(flag).casefold() == r"\seen" for flag in flags)
                     seen_any = seen_any or seen
                     received_at = internal_date.astimezone(timezone.utc).isoformat()
+                    content = {}
+                    if include_content:
+                        body = parsed.get_body(preferencelist=("plain",))
+                        content = {
+                            "attachments": [part.get_filename() for part in parsed.iter_attachments() if part.get_filename()],
+                            "content": body.get_content() if body else None,
+                        }
                     selected_matches.append({
+                        **content,
                         "message_id": context.message_id,
                         "received_at": received_at,
                         "seen": seen,
@@ -991,6 +1154,7 @@ class MailuGateway:
         *,
         expected_uidvalidity: str | None = None,
         require_authenticated_submission: bool = False,
+        include_automated: bool = False,
     ) -> list[dict[str, Any]]:
         """Read only delivered replies to registered message roots in one Mailu INBOX.
 
@@ -1024,6 +1188,7 @@ class MailuGateway:
             ssl_context=_ssl_context(self.config.tls_ca_file),
             timeout=self.config.smtp_timeout_seconds,
         ) as client:
+            client.normalise_times = False
             client.login(credentials.username, credentials.password)
             selected = client.select_folder("INBOX", readonly=True)
             uidvalidity = self._uidvalidity(selected)
@@ -1081,7 +1246,7 @@ class MailuGateway:
                 if require_authenticated_submission and authenticated_actor != sender.actor_id:
                     continue
                 auto_submitted = str(parsed.get("Auto-Submitted", "no")).strip().casefold()
-                if auto_submitted not in {"", "no"}:
+                if not include_automated and auto_submitted not in {"", "no"}:
                     continue
                 fetched = client.fetch([uid], [b"BODY.PEEK[]", b"INTERNALDATE"])
                 full_record = fetched.get(uid)

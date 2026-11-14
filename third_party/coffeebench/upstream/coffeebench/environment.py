@@ -838,10 +838,12 @@ class Environment:
             seller = self.business_apps[deal.seller_id]
             buyer = self.business_apps[deal.buyer_id]
 
-            # Catalog is tangible-only. Buyer receives the full advertised
-            # qty (no quality variance in the simplified 2-item world).
-            received_qty = deal.qty
-            quality_low = False
+            windows = getattr(self.marketplace, "_erp_payment_windows", {}).get(deal.buyer_id, ())
+            quality_low = (
+                deal.seller_id in getattr(self.marketplace, "_erp_invoice_issuers", ())
+                and "receiving_mismatch" in windows
+            )
+            received_qty = deal.qty - max(1, deal.qty // 10) if quality_low else deal.qty
             # Total-cost form: buyer adds qty + (qty × deal.unit_price)
             # to inventory_total_cost. WAVG view derives per-unit on
             # demand. inventory_in journal entry below uses the same
@@ -865,6 +867,12 @@ class Environment:
                 due_date=due_day,
                 reference=deal.id,
             )
+            if quality_low:
+                invoice._erp_receiving_discrepancy = {
+                    "expected_quantity": deal.qty,
+                    "received_quantity": received_qty,
+                    "credit_amount": round((deal.qty - received_qty) * deal.unit_price, 2),
+                }
             seller.accounts_receivable.append(invoice)
             buyer.accounts_payable.append(invoice)
             deal.invoice_id = invoice.id
@@ -1200,7 +1208,7 @@ class Environment:
                 if inv.id in seen:
                     continue
                 seen.add(inv.id)
-                if inv.paid or inv.returned:
+                if inv.paid or inv.returned or not ba._invoice_available_to_buyer(inv):
                     continue
                 if inv.due_date >= day:
                     continue
@@ -1349,10 +1357,11 @@ class Environment:
     def _format_observation(self, agent_id: str, day: int, nudge: str | None) -> str:
         ba = self.business_apps[agent_id]
         ar_total = ba._ar_outstanding()
-        ap_total = ba._ap_outstanding()
+        ap_open = [inv for inv in ba.accounts_payable
+                   if inv.net_outstanding > 0 and ba._invoice_available_to_buyer(inv)]
+        ap_total = sum(inv.net_outstanding for inv in ap_open)
         # AP / AR delinquency breakdown: count of open + overdue invoices
         # and the late-fee dollar pool currently accruing on each side.
-        ap_open = [inv for inv in ba.accounts_payable if inv.net_outstanding > 0]
         ap_overdue = [inv for inv in ap_open if inv.due_date < day]
         ap_late_fees = sum(inv.late_fees_accrued for inv in ap_overdue)
         ar_open = [inv for inv in ba.accounts_receivable if inv.net_outstanding > 0]
@@ -1513,7 +1522,7 @@ class Environment:
                 continue  # only fresh-yesterday busts; older ones become market context
             reason = self._bankrupt_reason.get(bust_aid, "?")
             written_off = sum(
-                round(inv.amount + inv.late_fees_accrued - inv.credited_amount, 2)
+                round(inv.amount + inv.late_fees_accrued - inv.credited_amount - inv.partial_paid_amount, 2)
                 for inv in ba.accounts_receivable
                 if inv.bad_debt
                 and inv.bad_debt_date == bust_day
@@ -1641,9 +1650,7 @@ class Environment:
         for inv in ba.accounts_payable:
             if inv.paid or inv.returned or inv.bad_debt:
                 continue
-            outstanding = round(
-                inv.amount + inv.late_fees_accrued - inv.credited_amount, 2
-            )
+            outstanding = round(inv.net_outstanding, 2)
             if outstanding <= 0.01:
                 continue
             inv.bad_debt = True

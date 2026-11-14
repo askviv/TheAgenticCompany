@@ -1,7 +1,7 @@
 name: tac-enterprise-erp
 
 x-erpnext-image: &erpnext_image
-  image: frappe/erpnext@sha256:74180ed84b3ae245ecad78da94d960034884664caf36d6ea4832cc3bd7152759
+  image: tac-erpnext-apps:2026-11-07
   platform: linux/amd64
   restart: unless-stopped
   labels:

@@ -1,4 +1,4 @@
-We have a collection of spreadsheet data files under the "Data Analysis" folder at {{ company_tools.owncloud }}?dir=/Documents. However, their names are inconsistent, with some being confusing or non-interpretable. Your task is to review the files in the "Data Analysis" folder and identify those with the following naming issues:
+We have a collection of spreadsheet data files under the "Data Analysis" folder in ownCloud under Documents. However, their names are inconsistent, with some being confusing or non-interpretable. Review the files in the "Data Analysis" folder and identify those with the following naming issues:
 
 1. Files without Meaningful Names: Files with names that lack context or interpretability (e.g., a random list of characters, numbers or symbols) are to be avoided. Examples: `"rxuts 31t3b.xlsx"`.
 
@@ -15,4 +15,4 @@ Replace "Category" in the format below with the specific category title (e.g., "
 Category: file_name_1.xlsx, file_name_2.xlsx, ...
 ```
 
-Report the list of problematic files in this format in a message to Jessica Lee on RocketChat at {{ company_tools.rocketchat }}.
+Report the list of problematic files in this format in a message to Jessica Lee on Rocket.Chat.

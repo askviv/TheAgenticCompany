@@ -97,8 +97,47 @@ class SimulationCoordinatorClient:
             raise CoordinatorError(endpoint, "invalid_response")
         return payload
 
+    def company_environments(self) -> dict[str, Any]:
+        return self._request("GET", "/company/environments")
+
+    def clone_company_environment(self, name: str, *, idempotency_key: str) -> dict[str, Any]:
+        return self._request("POST", "/company/environments/clone",
+                             idempotency_key=idempotency_key, json={"name": name})
+
+    def switch_company_environment(self, identifier: str, *, idempotency_key: str) -> dict[str, Any]:
+        return self._request("POST", f"/company/environments/{quote(identifier, safe='')}/switch",
+                             idempotency_key=idempotency_key, json={})
+
+    def rename_company_environment(self, identifier: str, name: str) -> dict[str, Any]:
+        return self._request("POST", f"/company/environments/{quote(identifier, safe='')}/rename",
+                             json={"name": name})
+
+    def company_packs(self) -> dict[str, Any]:
+        return self._request("GET", "/company/packs")
+
+    def company_pack(self, pack_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/company/packs/{quote(pack_id, safe='')}")
+
+    def upload_company_pack(self, archive: Any, *, idempotency_key: str) -> dict[str, Any]:
+        return self._request("POST", "/company/packs", data=archive,
+                             idempotency_key=idempotency_key)
+
+    def import_company_pack(self, pack_id: str, *, idempotency_key: str) -> dict[str, Any]:
+        return self._request("POST", f"/company/packs/{quote(pack_id, safe='')}/import",
+                             idempotency_key=idempotency_key, json={})
+
+    def company_pack_catalog(self) -> dict[str, Any]:
+        return self._request("GET", "/company/packs/catalog")
+
     def company(self) -> dict[str, Any]:
         return self._request("GET", "/company")
+
+    def resend_company_handoff(self, message_id: str, request_id: str) -> dict[str, Any]:
+        return self._request("POST", "/company/activity/resend",
+                             json={"message_id": message_id, "request_id": request_id})
+
+    def company_background(self) -> dict[str, Any]:
+        return self._request("GET", "/company/background")
 
     def company_desktops(self) -> dict[str, Any]:
         return self._request(
@@ -178,6 +217,21 @@ class SimulationCoordinatorClient:
     def pause_company(self, paused: bool, *, idempotency_key: str) -> dict[str, Any]:
         return self._request("POST", "/company/pause", idempotency_key=idempotency_key,
                              json={"paused": paused})
+
+    def ecommerce_behaviours(self, behaviour=None, enabled=None):
+        endpoint = "/company/background/ecommercebench/behaviours"
+        if behaviour is None:
+            return self._request("GET", endpoint)
+        return self._request("POST", f"{endpoint}/{quote(behaviour, safe='')}", json={"enabled": enabled})
+
+    def coffee_payment_windows(self, behaviour=None, enabled=None):
+        endpoint = "/company/background/coffeebench/payment-windows"
+        if behaviour is None:
+            return self._request("GET", endpoint)
+        return self._request(
+            "POST", f"{endpoint}/{quote(behaviour, safe='')}",
+            json={"enabled": enabled},
+        )
 
     def control_background_provider(self, provider_id: str, enabled: bool, *, idempotency_key: str) -> dict[str, Any]:
         if provider_id not in {"coffeebench", "ecommercebench"}:

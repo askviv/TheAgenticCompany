@@ -95,6 +95,7 @@ write_files:
 package_update: true
 packages:
   - docker.io
+  - docker-buildx
   - docker-compose-v2
   - qemu-guest-agent
   - util-linux-extra

@@ -1,0 +1,37 @@
+[
+  {
+    "url": "https://github.com/frappe/erpnext",
+    "revision": "9cd11b19575bfc34f092a24f6c8b368c4dd69481",
+    "version": "v16.53.0"
+  },
+  {
+    "url": "https://github.com/frappe/hrms",
+    "revision": "3b7f8f2854a06fb9eb4d2785e20ddaf8ad750980",
+    "version": "v16.53.1"
+  },
+  {
+    "url": "https://github.com/frappe/lending",
+    "revision": "08419c77d8399487964acfddf6ef8d1a6c7753a4",
+    "version": "v16.8.0"
+  },
+  {
+    "url": "https://github.com/frappe/telephony",
+    "revision": "9447577500a25d242088398157b72c654fa34b20",
+    "version": "develop snapshot"
+  },
+  {
+    "url": "https://github.com/frappe/helpdesk",
+    "revision": "e326986329341c803dd4bf094322670ad0591ca5",
+    "version": "v16.1.0"
+  },
+  {
+    "url": "https://github.com/frappe/crm",
+    "revision": "19786bf033b62c9e686713234ca54d10f612a8af",
+    "version": "v16.0.2"
+  },
+  {
+    "url": "https://github.com/Andrometiq/frappe-passkeys",
+    "revision": "5df6665f0d7bd0b2e1911c2846392db7d3192b4a",
+    "version": "v16.0.7"
+  }
+]

@@ -87,9 +87,20 @@ def create_app(settings: SupplierWorkerSettings | None = None):
         del actor_id
         if model_id != model_settings.model:
             raise ValueError("CoffeeBench background model binding differs from worker configuration")
-        from servers.simulation.codex_remote import create_codex_transport
+        from servers.simulation.clock_rate import kernel_virtual_time_rate
+        from servers.simulation.codex_remote import CodexRemoteModel, create_codex_transport
 
-        return CodexCoffeeModel(create_codex_transport(model_settings), model_id=model_id)
+        if isinstance(model_settings, CodexRemoteSettings):
+            transport = CodexRemoteModel(
+                model_settings, request_timeout=lambda: 125 * kernel_virtual_time_rate(),
+            )
+        else:
+            limit = 125 * kernel_virtual_time_rate()
+            timeout = model_settings.timeout_seconds
+            transport = create_codex_transport(model_settings.model_copy(update={
+                "timeout_seconds": min(timeout, limit) if timeout is not None else limit,
+            }))
+        return CodexCoffeeModel(transport, model_id=model_id)
 
     background_worker = BackgroundWorker(
         str(settings.database_path),

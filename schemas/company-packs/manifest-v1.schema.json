@@ -1,0 +1,539 @@
+{
+  "$defs": {
+    "CompanyPersona": {
+      "additionalProperties": false,
+      "properties": {
+        "applications": {
+          "items": {
+            "enum": [
+              "erpnext",
+              "email",
+              "rocketchat",
+              "owncloud",
+              "plane",
+              "midpoint",
+              "payroll",
+              "lending",
+              "crm",
+              "helpdesk"
+            ],
+            "type": "string"
+          },
+          "title": "Applications",
+          "type": "array"
+        },
+        "company_name": {
+          "minLength": 1,
+          "title": "Company Name",
+          "type": "string"
+        },
+        "business_type": {
+          "minLength": 1,
+          "title": "Business Type",
+          "type": "string"
+        },
+        "industry": {
+          "minLength": 1,
+          "title": "Industry",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "what_it_sells": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "What It Sells",
+          "type": "array"
+        },
+        "how_it_operates": {
+          "minLength": 1,
+          "title": "How It Operates",
+          "type": "string"
+        },
+        "day_to_day": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Day To Day",
+          "type": "array"
+        },
+        "workflows": {
+          "additionalProperties": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minProperties": 1,
+          "title": "Workflows",
+          "type": "object"
+        },
+        "policies": {
+          "additionalProperties": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minProperties": 1,
+          "title": "Policies",
+          "type": "object"
+        },
+        "trading_context": {
+          "minLength": 1,
+          "title": "Trading Context",
+          "type": "string"
+        },
+        "currency": {
+          "pattern": "^[A-Z]{3}$",
+          "title": "Currency",
+          "type": "string"
+        },
+        "country": {
+          "minLength": 1,
+          "title": "Country",
+          "type": "string"
+        }
+      },
+      "required": [
+        "applications",
+        "company_name",
+        "business_type",
+        "industry",
+        "description",
+        "what_it_sells",
+        "how_it_operates",
+        "day_to_day",
+        "workflows",
+        "policies",
+        "trading_context",
+        "currency",
+        "country"
+      ],
+      "title": "CompanyPersona",
+      "type": "object"
+    },
+    "Department": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description"
+      ],
+      "title": "Department",
+      "type": "object"
+    },
+    "Employee": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "display_name": {
+          "minLength": 1,
+          "title": "Display Name",
+          "type": "string"
+        },
+        "department_id": {
+          "maxLength": 100,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Department Id",
+          "type": "string"
+        },
+        "job_title": {
+          "minLength": 1,
+          "title": "Job Title",
+          "type": "string"
+        },
+        "responsibilities": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Responsibilities",
+          "type": "array"
+        },
+        "reports_to": {
+          "anyOf": [
+            {
+              "maxLength": 100,
+              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reports To"
+        },
+        "context": {
+          "minLength": 1,
+          "title": "Context",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "display_name",
+        "department_id",
+        "job_title",
+        "responsibilities",
+        "context"
+      ],
+      "title": "Employee",
+      "type": "object"
+    },
+    "Experiment": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "department_id": {
+          "maxLength": 100,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Department Id",
+          "type": "string"
+        },
+        "sender_employee_id": {
+          "maxLength": 100,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Sender Employee Id",
+          "type": "string"
+        },
+        "brief": {
+          "minLength": 1,
+          "title": "Brief",
+          "type": "string"
+        },
+        "request_message": {
+          "minLength": 1,
+          "title": "Request Message",
+          "type": "string"
+        },
+        "files": {
+          "items": {
+            "maxLength": 100,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
+        },
+        "records": {
+          "items": {
+            "maxLength": 100,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "title": "Records",
+          "type": "array"
+        },
+        "evaluation": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Evaluation",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "department_id",
+        "sender_employee_id",
+        "brief",
+        "request_message",
+        "evaluation"
+      ],
+      "title": "Experiment",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "PackFile": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "drive_path": {
+          "minLength": 1,
+          "title": "Drive Path",
+          "type": "string"
+        },
+        "visibility": {
+          "enum": [
+            "staff",
+            "evaluation"
+          ],
+          "title": "Visibility",
+          "type": "string"
+        },
+        "department_ids": {
+          "items": {
+            "maxLength": 100,
+            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+            "type": "string"
+          },
+          "title": "Department Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "path",
+        "drive_path",
+        "visibility"
+      ],
+      "title": "PackFile",
+      "type": "object"
+    },
+    "Record": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 100,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "doctype": {
+          "enum": [
+            "Customer",
+            "Supplier",
+            "Item",
+            "Purchase Order",
+            "Purchase Receipt",
+            "Purchase Invoice",
+            "Sales Order",
+            "Delivery Note",
+            "Sales Invoice",
+            "Payment Entry",
+            "Bank Transaction",
+            "Account",
+            "Bank Account",
+            "Salary Component",
+            "Salary Structure",
+            "Salary Structure Assignment",
+            "Attendance",
+            "Leave Application",
+            "Timesheet",
+            "Expense Claim",
+            "HD Ticket",
+            "CRM Lead",
+            "Project",
+            "Task",
+            "Contact",
+            "Address",
+            "Quotation",
+            "Material Request",
+            "Stock Entry",
+            "Journal Entry",
+            "Warehouse",
+            "Cost Center",
+            "BOM",
+            "Work Order",
+            "Request for Quotation",
+            "Supplier Quotation",
+            "Payment Request",
+            "Issue",
+            "Opportunity",
+            "Lead",
+            "ToDo",
+            "Payroll Entry",
+            "Salary Slip",
+            "Additional Salary",
+            "Employee Checkin",
+            "Employee Advance",
+            "Loan Application",
+            "Loan",
+            "Loan Product",
+            "Loan Disbursement",
+            "Loan Repayment"
+          ],
+          "title": "Doctype",
+          "type": "string"
+        },
+        "fields": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Fields",
+          "type": "object"
+        },
+        "state": {
+          "default": "draft",
+          "enum": [
+            "draft",
+            "submitted"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "doctype",
+        "fields"
+      ],
+      "title": "Record",
+      "type": "object"
+    },
+    "RoleUnderEvaluation": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "department_id": {
+          "maxLength": 100,
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+          "title": "Department Id",
+          "type": "string"
+        },
+        "responsibilities": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Responsibilities",
+          "type": "array"
+        }
+      },
+      "required": [
+        "title",
+        "department_id",
+        "responsibilities"
+      ],
+      "title": "RoleUnderEvaluation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "id": {
+      "maxLength": 100,
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "version": {
+      "minLength": 1,
+      "title": "Version",
+      "type": "string"
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "company_persona": {
+      "$ref": "#/$defs/CompanyPersona"
+    },
+    "departments": {
+      "items": {
+        "$ref": "#/$defs/Department"
+      },
+      "minItems": 1,
+      "title": "Departments",
+      "type": "array"
+    },
+    "employees": {
+      "items": {
+        "$ref": "#/$defs/Employee"
+      },
+      "minItems": 1,
+      "title": "Employees",
+      "type": "array"
+    },
+    "role_under_evaluation": {
+      "$ref": "#/$defs/RoleUnderEvaluation"
+    },
+    "records": {
+      "items": {
+        "$ref": "#/$defs/Record"
+      },
+      "title": "Records",
+      "type": "array"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/$defs/PackFile"
+      },
+      "title": "Files",
+      "type": "array"
+    },
+    "experiments": {
+      "items": {
+        "$ref": "#/$defs/Experiment"
+      },
+      "minItems": 1,
+      "title": "Experiments",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "id",
+    "version",
+    "title",
+    "company_persona",
+    "departments",
+    "employees",
+    "role_under_evaluation",
+    "experiments"
+  ],
+  "title": "Manifest",
+  "type": "object"
+}

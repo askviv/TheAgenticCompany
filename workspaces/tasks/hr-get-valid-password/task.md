@@ -1,4 +1,4 @@
-You found that Mark Johnson's password doesn't follow the password rules, so you need to go to rocketchat to recieve a valid password from him. When you have a valid password, write it in a local file called `password.txt` under /workspace directory.
+You found that Mark Johnson's password doesn't follow the password rules, so ask him for a valid password on Rocket.Chat. When you have a valid password, write it in a local file called `password.txt` under /workspace directory.
 
 The password rules are as follows:
 1. Length must be between 12-16 characters
@@ -8,5 +8,3 @@ The password rules are as follows:
 5. Must contain at least one special character from: !@#$%^&*
 6. Cannot contain 3 or more consecutive identical characters
 7. Cannot contain the user's name as part of the password
-
-You could find the RocketChat website at {{ company_tools.rocketchat }}/home.

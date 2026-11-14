@@ -7,6 +7,7 @@ from urllib.parse import urljoin
 
 import requests
 import json
+import hashlib
 
 from .scenarios import RealChatTransport
 
@@ -18,8 +19,10 @@ class ChatMessageNotConfirmed(RuntimeError):
 class CuaChatTransport:
     """Use Rocket.Chat's API for identity and receipts, and native CUA for sending."""
 
-    def __init__(self, desktop_manager: Any, session: requests.Session | None = None):
+    def __init__(self, desktop_manager: Any, session: requests.Session | None = None, *,
+                 delivery: str = "browser"):
         self.desktop_manager = desktop_manager
+        self.delivery = delivery
         self.session = session or requests.Session()
         self._helpers = RealChatTransport(self.session)
         self._headers_by_identity: dict[tuple[str, str], dict[str, str]] = {}
@@ -84,7 +87,6 @@ class CuaChatTransport:
     def post(self, fixture: dict[str, Any], credentials: dict[str, str], attempt_id: str,
              *, on_submission_started: Any = None, on_message_id_captured: Any = None,
              on_effective_message_text: Any = None) -> dict[str, str | None]:
-        del attempt_id
         box = fixture["employee_mailbox"]
         base = box["rocketchat_base_url"].rstrip("/") + "/"
         room_id, author_id = box["rocketchat_room_id"], box["rocketchat_expected_user_id"]
@@ -94,6 +96,21 @@ class CuaChatTransport:
         message_text = (mention + " " if mention else "") + fixture["chat_message"]
         if on_effective_message_text is not None:
             on_effective_message_text(message_text)
+        if self.delivery == "api":
+            message_id = hashlib.sha256(attempt_id.encode()).hexdigest()[:32]
+            if on_message_id_captured is not None:
+                on_message_id_captured(message_id)
+            if on_submission_started is not None:
+                on_submission_started()
+            response = self.session.post(
+                urljoin(base, "api/v1/chat.sendMessage"), headers=headers,
+                json={"message": {"_id": message_id, "rid": room_id, "msg": message_text}}, timeout=15,
+            )
+            response.raise_for_status()
+            confirmed = self._helpers._message_by_id(base, headers, message_id, room_id, author_id, message_text)
+            if confirmed is None:
+                raise ChatMessageNotConfirmed("ROCKETCHAT_MESSAGE_API_NOT_CONFIRMED")
+            return self._helpers._receipt(fixture, room, confirmed)
         baseline_ids = {message["_id"] for message in self._read_messages(base, headers, room)
                         if isinstance(message.get("_id"), str)}
         from .browser_chat import employee_id_for_email

@@ -1,4 +1,4 @@
-Navigate to owncloud at {{ company_tools.owncloud }}. Find the provided payments file at "/Documents/Financials/payments.xlsx" and the invoice PDFs in the directory "/Documents/Financials/invoices_pdf".
+In ownCloud, find the provided payments file at "/Documents/Financials/payments.xlsx" and the invoice PDFs in the directory "/Documents/Financials/invoices_pdf".
 
 Perform the following:
 * Parse Payment References: Extract and match each payment in the Excel file to its corresponding invoice(s) based on references.

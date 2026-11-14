@@ -25,3 +25,12 @@ In dockerfile, I already added the following two line to bypass it
 Show_Setup_Wizard: completed
 OVERWRITE_SETTING_Show_Setup_Wizard: completed
 ```
+
+# Bot API tokens
+
+Fresh company identity provisioning grants the existing Rocket.Chat `bot` role
+`create-personal-access-tokens`, while preserving the permission's other roles.
+Bots can then open **My Account → Personal Access Tokens** to create their own
+API credentials. This does not grant administrator access, permission to create
+tokens for other users, or broader room access. Tokens belong in the connecting
+application's protected credential storage, never in this repository.

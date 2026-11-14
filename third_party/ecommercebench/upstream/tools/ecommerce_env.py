@@ -968,10 +968,17 @@ class EcommerceEnv:
             )
             rng_ret = random.Random(self.seed + det_seed)
             n_returned = sum(1 for _ in range(qty) if rng_ret.random() < eff_rate)
+            behaviours = getattr(self, "_company_behaviours", ())
+            if "partial_return" in behaviours and qty > 1:
+                n_returned = max(1, min(n_returned, qty - 1))
+            if "refund_after_payout" in behaviours and not n_returned:
+                n_returned = 1
             if n_returned > 0:
                 return_day = self.current_time.date() + timedelta(
                     days=rng_ret.randint(3, 7)
                 )
+                if "refund_after_payout" in behaviours:
+                    return_day = max(return_day, settle_date + timedelta(days=2))
                 # Fraction of this SKU's stock that is quality_downgrade-defective,
                 # so the return processor can attribute the share of refund+shipping
                 # loss caused by fraud (ERR-03) vs ordinary returns.
@@ -986,6 +993,8 @@ class EcommerceEnv:
                         "refund_per_unit": s["unit_price"],
                         "arrival_date": return_day,
                         "batch_id": batch_id,
+                        **({"settled_net_per_unit": s["revenue_net"] / qty}
+                           if "refund_after_payout" in behaviours else {}),
                         "ship_cost_per_unit": (ship_cost / qty) if qty else 0.0,
                         "defect_frac": defect_frac,
                     }
@@ -2108,7 +2117,11 @@ class EcommerceEnv:
                 # commission gap negative into the wallet. We now reclaim that
                 # commission gap (the platform reverses its commission on a
                 # refunded sale) so the wallet invariant holds.
-                self._refund_from_escrow(ret.get("batch_id"), refund)
+                settled_net = ret.get("settled_net_per_unit")
+                self._refund_from_escrow(
+                    ret.get("batch_id"), refund,
+                    settled_net=settled_net * qty if settled_net is not None else None,
+                )
                 self._ledger["refunds_gross"] += refund
 
                 self._warehouse_add(pid, qty, today)
@@ -2163,7 +2176,7 @@ class EcommerceEnv:
         self.pending_returns = remaining
         return processed
 
-    def _refund_from_escrow(self, batch_id: Optional[int], refund: float) -> None:
+    def _refund_from_escrow(self, batch_id: Optional[int], refund: float, *, settled_net=None) -> None:
         """Deduct a refund from its originating escrow batch first; spill any
         remainder to the wallet.
 
@@ -2182,6 +2195,12 @@ class EcommerceEnv:
                     self.pending_settlement -= take
                     remaining -= take
                     break
+        if settled_net is not None:
+            deduction = min(remaining, max(0.0, settled_net - (refund - remaining)))
+            wallet_deduction = min(self.platform_wallet, deduction)
+            self.platform_wallet -= wallet_deduction
+            self.bank_balance -= deduction - wallet_deduction
+            remaining -= deduction
         if remaining > 1e-9:
             # The remainder is the commission the platform had netted out of this
             # batch (gross − net). On a refund the sale is undone, so the platform

@@ -17,7 +17,7 @@ from servers.simulation.codex_model import (
     CodexAuthenticationError, CodexCLIModel, CodexCLISettings, CodexConfigurationError,
     CodexModelAccessError, CodexModelError, CodexOutputSchemaError, CodexRateLimitError,
     ModelReply, CodexNoDesktopActionsError,
-    model_calls_enabled, set_model_calls_enabled, CodexModelCallsStopped,
+    model_calls_enabled, set_model_calls_enabled, CodexModelCallsStopped, CodexModelCallsDisabled,
 )
 from servers.simulation.codex_device_auth import (
     CodexDeviceAuthManager,
@@ -118,11 +118,16 @@ _SAFE_ERRORS = {
 }
 
 
+class CodexInferenceRejected(CodexModelError):
+    """The inference endpoint rejected the request before invoking Codex."""
+
+
 class CodexRemoteModel:
     """Drop-in completion transport; actor policy remains in the caller."""
 
-    def __init__(self, settings: CodexRemoteSettings, *, session=None):
+    def __init__(self, settings: CodexRemoteSettings, *, session=None, request_timeout=None):
         self.settings = settings
+        self.request_timeout = request_timeout
         self.session = session or requests.Session()
         if session is None:
             self.session.trust_env = False
@@ -142,15 +147,22 @@ class CodexRemoteModel:
                 self.settings.url.rstrip("/") + "/v1/infer",
                 json=payload,
                 headers={"Authorization": "Bearer " + self.settings.bearer_token.get_secret_value()},
+                **({"timeout": self.request_timeout()} if self.request_timeout is not None else {}),
             )
         except requests.RequestException as error:
             raise CodexModelError("Codex inference transport ended without a confirmed result") from error
         if response.status_code != 200:
             try:
-                code = response.json().get("detail", {}).get("error")
+                detail = response.json().get("detail")
+                code = detail.get("error") if isinstance(detail, dict) else None
             except (ValueError, AttributeError):
-                code = None
+                detail = code = None
             error_type = _ERROR_TYPES.get(code, CodexModelError)
+            if response.status_code == 423 and code == "model_calls_disabled":
+                error_type = CodexModelCallsDisabled
+            if (response.status_code == 401 and detail == "unauthorized"
+                    or response.status_code == 422 and isinstance(detail, list)):
+                error_type = CodexInferenceRejected
             raise error_type(f"Codex inference service failed ({error_type.__name__})") from RuntimeError(
                 f"remote inference returned HTTP {response.status_code}"
             )
@@ -213,6 +225,8 @@ def create_codex_inference_app(settings: CodexCLISettings, bearer_token: SecretS
                 mcp_servers=employee_cua_mcp(request.desktop_container, request.desktop_environment)
                 if request.desktop_container is not None else None,
             )
+        except CodexModelCallsDisabled as error:
+            raise HTTPException(status_code=423, detail={"error": "model_calls_disabled"}) from error
         except CodexModelCallsStopped as error:
             raise HTTPException(status_code=423, detail={"error": "model_calls_stopped"}) from error
         except CodexModelError as error:

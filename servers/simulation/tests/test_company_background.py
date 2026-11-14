@@ -187,8 +187,9 @@ class CompanyBackgroundTests(unittest.TestCase):
         service._advance_once(self.engine.company_state(), service._retry_at)
         runtime.advance_company.assert_called_once()
 
-    def test_coupled_coffee_wait_is_visible_during_ecommerce_retry_backoff(self):
+    def test_coffee_advances_during_ecommerce_retry_backoff(self):
         runtime = Mock()
+        runtime.advance_company.return_value = {}
         service = CompanyBackgroundService(
             self.engine, runtime=runtime, finance_adapter=Mock(),
             profile={"coffee": {}, "ecommerce": {}, "coupling": {
@@ -208,9 +209,9 @@ class CompanyBackgroundTests(unittest.TestCase):
 
         service._advance_once(self.engine.company_state(), now)
 
-        runtime.advance_company.assert_not_called()
-        self.assertEqual(service.status()["errors"]["coffeebench"]["code"],
-                         "waiting_for_ecommerce_source")
+        runtime.advance_company.assert_called_once()
+        self.assertEqual(runtime.advance_company.call_args.kwargs["provider_ids"], ("coffeebench",))
+        self.assertNotIn("coffeebench", service.status()["errors"])
 
     def test_successfully_initialized_provider_advances_when_sibling_init_fails(self):
         now = datetime.now(timezone.utc)
@@ -464,17 +465,15 @@ class CompanyBackgroundTests(unittest.TestCase):
         self.service._advance_once(self.engine.company_state(), now)
         self.assertEqual(self.service.runtime.advance_company.call_args.kwargs["provider_ids"], ("coffeebench",))
 
-    def test_coupled_pending_source_selection_is_tracked_before_native_dispatch(self):
+    def test_coffee_does_not_dispatch_ecommerce_pending_work_early(self):
         now = self._prepare_controlled_background()
         self.service.profile["coupling"] = {"ecommerce_to_coffee": {"native_effect": "delivery_lag_days"}}
         self.service._next_due["ecommercebench"] = now + timedelta(days=1)
         for provider in ("coffeebench", "ecommercebench"):
             self.store.persist_background_provider_pending(provider, provider + "-pending", {"source": "unchanged"})
         def advance(*_, **kwargs):
-            self.assertEqual(set(kwargs["provider_ids"]), {"coffeebench", "ecommercebench"})
-            state = self.service.control(False, "stop-coupled-ecom", provider_id="ecommercebench")
-            self.assertEqual(state["status"], "stopping")
-            self.assertTrue(state["in_flight"])
+            self.assertEqual(kwargs["provider_ids"], ("coffeebench",))
+            self.assertFalse(self.service._provider_status("ecommercebench")["in_flight"])
             return {"providers": {}, "provider_errors": {}}
         self.service.runtime.advance_company.side_effect = advance
         self.service._advance_once(self.engine.company_state(), now)
@@ -506,6 +505,31 @@ class CompanyBackgroundTests(unittest.TestCase):
         invalid = client.post("/company/background/unknown/control", json={"enabled": True}, headers={
             "Authorization": "Bearer operator", "Idempotency-Key": "unknown"})
         self.assertEqual(invalid.status_code, 422)
+
+    def test_coffee_payment_windows_are_operator_only_and_expose_only_enabled_behaviours(self):
+        from fastapi.testclient import TestClient
+        from servers.simulation.app import create_app
+
+        client = TestClient(create_app(self.engine, {
+            "operator": {"actor_id": "operator", "role": "controller"},
+            "viv": {"actor_id": "viv", "role": "agent"},
+        }))
+        path = "/company/background/coffeebench/payment-windows"
+        operator = {"Authorization": "Bearer operator"}
+        self.assertEqual(client.post(
+            f"{path}/friday", json={"enabled": True},
+            headers={"Authorization": "Bearer viv"},
+        ).status_code, 403)
+        self.assertEqual(client.post(
+            f"{path}/friday", json={"enabled": True}, headers=operator,
+        ).json(), {"enabled_behaviours": ["friday"]})
+        self.assertEqual(client.post(
+            f"{path}/morning", json={"enabled": True}, headers=operator,
+        ).status_code, 200)
+        self.assertEqual(SQLiteStore(self.store.db_path).coffee_payment_windows(), ["friday", "morning"])
+        self.assertEqual(client.post(
+            f"{path}/friday", json={"enabled": False}, headers=operator,
+        ).json(), {"enabled_behaviours": ["morning"]})
 
     def test_control_api_requires_controller_key_and_strict_boolean(self):
         from fastapi.testclient import TestClient

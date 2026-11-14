@@ -216,12 +216,21 @@ class CompanyBackgroundService:
         intents = [intent for provider in providers.values() for intent in provider.get("erp_intents", [])]
         self.engine.store.record_company_finance_source_intents(intents)
         pending = self.engine.store.list_unreceipted_company_finance_source_intents()
-        if not pending:
+        enabled = self.engine.store.background_provider_control("coffeebench")["enabled"]
+        behaviours = self.engine.store.coffee_payment_windows() if enabled else []
+        review_financing = "financing" in behaviours
+        billing_behaviours = sorted(set(behaviours) & {"missing_po", "receiving_mismatch", "wrong_recipient"})
+        if not pending and not review_financing and not billing_behaviours:
             issue_reconcile = getattr(self.engine, "company_issue_reconcile", None)
             if issue_reconcile is not None:
                 issue_reconcile()
             return
-        result = self.finance_adapter.reconcile(pending, self._finance_binding(), as_of)
+        binding = self._finance_binding()
+        if review_financing:
+            binding["review_coffee_financing"] = True
+        if billing_behaviours:
+            binding["coffee_billing_behaviours"] = billing_behaviours
+        result = self.finance_adapter.reconcile(pending, binding, as_of)
         receipts = result.get("receipts")
         if not isinstance(receipts, list):
             raise ValueError("native finance reconciler did not return source receipts")
@@ -356,26 +365,6 @@ class CompanyBackgroundService:
             retry_providers.extend(provider for provider, value in self._next_due.items()
                                    if value <= now and provider in self._initialized_providers)
         selected = tuple(dict.fromkeys((*due_providers, *retry_providers)))
-        if coupling is not None and "coffeebench" in selected:
-            ecom_pending = self.engine.store.get_background_provider_pending("ecommercebench")
-            if ecom_pending is not None and (
-                ecom_pending["result"] is not None or retry_due
-                or self.engine.store.get_background_provider_pending("coffeebench") is not None
-            ):
-                selected = tuple(dict.fromkeys((*selected, "ecommercebench")))
-            ecom_unavailable = (
-                "ecommercebench" not in self._initialized_providers
-                or "ecommercebench" in self._initialization_errors
-                or "ecommercebench" in self.errors
-            )
-            if ecom_unavailable and not retry_due:
-                selected = tuple(provider for provider in selected if provider != "coffeebench")
-                with self._lock:
-                    self.errors["coffeebench"] = {"code": "waiting_for_ecommerce_source"}
-            elif ecom_unavailable and "ecommercebench" not in self._initialized_providers:
-                selected = tuple(provider for provider in selected if provider != "coffeebench")
-                with self._lock:
-                    self.errors["coffeebench"] = {"code": "waiting_for_ecommerce_source"}
         selected = tuple(provider for provider in selected if enabled[provider])
         if not selected:
             if retry_due:
@@ -390,10 +379,39 @@ class CompanyBackgroundService:
         if not selected:
             return
         try:
+            bindings = self._provider_bindings
+            advance_ids = selected
+            read_errors = {}
+            read_sent = getattr(self.finance_adapter, "read_sent_coffee_invoices", None)
+            if "coffeebench" in selected and read_sent is not None:
+                company_name = _document_name(self.company_binding.get("documents", {}).get("company"))
+                try:
+                    behaviours = self.engine.store.coffee_payment_windows()
+                    read_billing = getattr(self.finance_adapter, "read_coffee_billing_state", None)
+                    billing = (
+                        read_billing(company_name, behaviours)
+                        if read_billing is not None and set(behaviours) & {
+                            "reminder", "missing_po", "receiving_mismatch", "wrong_recipient", "partial_payment",
+                        }
+                        else {"sent_invoice_ids": read_sent(company_name), "invoice_credits": {}}
+                    )
+                except Exception as error:
+                    self._log_failure("CoffeeBench sent invoice read failed", error)
+                    read_errors["coffeebench"] = {"code": "sent_invoice_read_failed", "status_code": None}
+                    advance_ids = tuple(provider for provider in selected if provider != "coffeebench")
+                else:
+                    bindings = {
+                        **bindings,
+                        "coffeebench": {
+                            **bindings["coffeebench"], "sent_sales_invoice_ids": billing["sent_invoice_ids"],
+                            "invoice_credits": billing["invoice_credits"], "payment_windows": behaviours,
+                        },
+                    }
             result = self.runtime.advance_company(
-                now, bindings=self._provider_bindings, provider_ids=selected,
+                now, bindings=bindings, provider_ids=advance_ids,
                 coupling_policy=coupling,
-            )
+            ) if advance_ids else {}
+            provider_errors = {**result.get("provider_errors", {}), **read_errors}
             providers = result.get("providers", {})
             self._fanout([event for provider in providers.values() for event in provider.get("events", [])])
             self.engine.store.record_company_finance_source_intents(
@@ -424,7 +442,7 @@ class CompanyBackgroundService:
             with self._lock:
                 self.errors = {key: {"code": value["code"], "status_code": value["status_code"],
                                      **{k: value[k] for k in ("pending_operation_id", "pending_until") if k in value}}
-                               for key, value in result.get("provider_errors", {}).items()}
+                               for key, value in provider_errors.items()}
                 for provider, error in self._initialization_errors.items():
                     if provider not in self._initialized_providers:
                         self.errors.setdefault(provider, {"code": error["code"], "status_code": error["status_code"]})
@@ -437,7 +455,7 @@ class CompanyBackgroundService:
                     else:
                         self._next_due[provider_id] = _aware(next_due)
                 self._retry_at = (now + timedelta(seconds=30)) if (
-                    result.get("provider_errors") or self._initialization_errors
+                    provider_errors or self._initialization_errors
                 ) else None
             self.changed.set()
         finally:
@@ -454,19 +472,12 @@ class CompanyBackgroundService:
                 self.changed.clear()
                 continue
             now = _aware(company["simulated_time"])
-            coupling = self.profile.get("coupling", {}).get("ecommerce_to_coffee")
-            coffee_blocked = coupling is not None and (
-                "ecommercebench" not in self._initialized_providers
-                or "ecommercebench" in self._initialization_errors
-                or "ecommercebench" in self.errors
-            )
             controls = {provider: self.engine.store.background_provider_control(provider)
                         for provider in ("coffeebench", "ecommercebench")}
             coffee_control = controls["coffeebench"]
             has_due_provider = any(value <= now and provider not in self.errors
                                    and "company_background" not in self.errors
                                    and controls[provider]["enabled"]
-                                   and not (coffee_blocked and provider == "coffeebench")
                                    for provider, value in self._next_due.items())
             retry_due = self._retry_at is not None and self._retry_at <= now
             finance_retry_due = self._finance_retry_at is not None and self._finance_retry_at <= now
@@ -490,8 +501,7 @@ class CompanyBackgroundService:
             with self._lock:
                 due_values = [value for provider, value in self._next_due.items()
                               if provider not in self.errors
-                              and controls[provider]["enabled"]
-                              and not (coffee_blocked and provider == "coffeebench")]
+                              and controls[provider]["enabled"]]
                 due_values.extend(value for value in (self._retry_at, self._finance_retry_at) if value is not None)
             due = min(due_values) if due_values else None
             timeout = None if due is None else max(0.05, (due - now).total_seconds())
@@ -535,7 +545,10 @@ class CompanyBackgroundService:
     @classmethod
     def activity_for_store(cls, store) -> list[dict[str, Any]]:
         activity = []
-        for event in store.list_company_source_events():
+        sources = {event["event_id"]: event for event in store.list_company_source_events()}
+        deliveries, replies = store.coffee_activity_message_statuses()
+        finance = {receipt["source_id"]: receipt for receipt in store.list_company_finance_receipts()}
+        for event in sources.values():
             payload = {key: value for key, value in event["payload"].items()
                        if key in cls._PUBLIC_EVENT_PAYLOAD_KEYS}
             provider = {
@@ -557,7 +570,7 @@ class CompanyBackgroundService:
                              "source": event["source"], "upstream_commit": event["upstream_commit"],
                              "entity_type": event["entity_type"], "entity_id": event["entity_id"],
                              "payload": payload})
-        for receipt in store.list_company_finance_receipts():
+        for receipt in finance.values():
             activity.append({"id": "finance:" + receipt["source_id"], "timestamp": receipt["as_of"],
                              "event": "FINANCE_SOURCE_RECONCILED", "description": f"{receipt['doctype']} {receipt['name']} linked to background activity.",
                              "native_document": {"doctype": receipt["doctype"], "name": receipt["name"]},
@@ -569,11 +582,43 @@ class CompanyBackgroundService:
             if provider is None:
                 continue
             summary = f"Provider update acknowledged through {receipt['cursor']}"
+            trace = {}
+            title = f"{provider} update completed"
+            if receipt["provider_id"] == "coffeebench":
+                messages = []
+                for event_id in receipt["source_event_ids"]:
+                    event = sources.get(event_id)
+                    if event is None or event["event_type"] != "COFFEE_NATIVE_MESSAGE_RECEIVED":
+                        continue
+                    delivery = deliveries.get(event_id, {})
+                    messages.append({
+                        "event_id": event_id, "timestamp": event["simulated_time"],
+                        "title": event["payload"].get("title"), "body": event["payload"].get("body"),
+                        "sender": event["payload"].get("sender_id"), "recipient": delivery.get("recipient"),
+                        "delivery_status": delivery.get("status", "not_queued"),
+                        "message_id": delivery.get("message_id"),
+                        "doctype": delivery.get("doctype"), "name": delivery.get("name"),
+                        "replies": replies.get(event_id, []),
+                    })
+                messages.sort(key=lambda item: item["timestamp"])
+                source_ids = receipt["finance_source_ids"]
+                records = None if source_ids is None else [
+                    {"source_id": source_id, "status": "linked", **finance[source_id]}
+                    if source_id in finance else {"source_id": source_id, "status": "pending"}
+                    for source_id in source_ids
+                ]
+                summary = f"{len(messages)} marketplace {'message' if len(messages) == 1 else 'messages'} received"
+                if records is not None:
+                    summary += f" · {len(records)} ERP {'action' if len(records) == 1 else 'actions'}"
+                if not messages and records == []:
+                    title = "CoffeeBench simulation advanced"
+                    summary = "No new marketplace messages or ERP actions"
+                trace = {"coffee_update": {"cursor": receipt["cursor"], "messages": messages, "records": records}}
             activity.append({"id": f"provider-receipt:{receipt['provider_id']}:{receipt['operation_id']}",
                              "timestamp": receipt["acknowledged_at"],
                              "event": "BACKGROUND_PROVIDER_UPDATE_COMPLETED", "type": "action",
-                             "title": f"{provider} update completed", "summary": summary,
-                             "description": summary})
+                             "title": title, "summary": summary,
+                             "description": summary, **trace})
         for observation in store.list_company_due_obligation_observations():
             activity.append({"id": "obligation:" + observation["observation_id"],
                              "timestamp": observation["observed_at"],

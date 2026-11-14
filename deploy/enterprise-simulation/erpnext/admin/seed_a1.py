@@ -348,10 +348,16 @@ def _ensure_company_employees() -> None:
             user.last_name = last_name or None
             user.save(ignore_permissions=True)
 
+        department = frappe.db.get_value("Department", {"department_name": identity["department"], "company": COMPANY}, "name")
+        if not department:
+            department = frappe.get_doc({"doctype": "Department", "department_name": identity["department"],
+                                         "company": COMPANY}).insert(ignore_permissions=True).name
+
         existing = frappe.db.get_value("Employee", {"user_id": email}, ["name", "company"], as_dict=True)
         if existing:
             if existing.company != COMPANY:
                 raise RuntimeError(f"Canonical employee is linked to a different company: {email}")
+            frappe.db.set_value("Employee", existing.name, "department", department)
             continue
 
         first, _, rest = name.partition(" ")
@@ -366,6 +372,7 @@ def _ensure_company_employees() -> None:
             "date_of_joining": "2026-01-01",
             "user_id": email,
             "company_email": email,
+            "department": department,
         })
         employee.insert(ignore_permissions=True)
 
@@ -581,14 +588,17 @@ def setup_company(site: str, runtime_dir: str) -> dict[str, str]:
     _ensure_workflow()
     _ensure_outgoing_email()
     _ensure_users(site, Path(runtime_dir) / "api-credentials")
-    from frappe.desk.page.setup_wizard.setup_wizard import enable_setup_wizard_complete
+    from business_apps import configure_directory, configure_passkeys
+    configure_directory()
+    configure_passkeys()
+    from frappe.desk.page.setup_wizard.setup_wizard import disable_future_access, enable_setup_wizard_complete
 
     installed = set(frappe.get_all("Installed Application", pluck="app_name"))
     if not {"frappe", "erpnext"}.issubset(installed):
         raise RuntimeError("Required ERPNext applications are not installed")
     for app_name in ("frappe", "erpnext"):
         enable_setup_wizard_complete(app_name)
-    frappe.db.set_single_value("System Settings", "setup_complete", 1)
+    disable_future_access()
     frappe.db.commit()
     frappe.clear_cache()
     return {

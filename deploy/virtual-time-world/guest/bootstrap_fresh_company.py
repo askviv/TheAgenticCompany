@@ -223,6 +223,7 @@ def _mailu_compose(source: Path, profile: dict, mail_domain: str, ports: dict[st
 
 
 def _prepare_erp(source: Path, profile: dict, sandbox_password: str, identities_path: Path) -> Path:
+    _run(["bash", str(source / "deploy/enterprise-simulation/erpnext/business-apps/build.sh")])
     erp_root = ENTERPRISE_ROOT / "erpnext"
     secrets_root = erp_root / "secrets"
     secrets_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -252,8 +253,9 @@ def _prepare_erp(source: Path, profile: dict, sandbox_password: str, identities_
     )
     _private_write(yaml_path, compose)
     json_path = COMPOSE_ROOT / "erpnext.json"
-    rendered = _run(["docker", "compose", "--file", str(yaml_path), "config", "--format", "json"], capture=True)
-    _private_write(json_path, rendered)
+    rendered = json.loads(_run(["docker", "compose", "--file", str(yaml_path), "--profile", "admin", "config", "--format", "json"], capture=True))
+    rendered['services']['site-admin']['environment']['TAC_ERP_PUBLIC_URL'] = f"https://{profile['domains']['erp']}"
+    _private_write(json_path, json.dumps(rendered, indent=2) + "\n")
     return json_path
 
 

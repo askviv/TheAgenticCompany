@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Control the isolated VM's candidate guest clock on its libvirt host."""
 import argparse
-from contextlib import contextmanager
-from datetime import datetime
+from contextlib import closing, contextmanager
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
@@ -88,6 +88,31 @@ class Controller:
             fcntl.flock(lock, fcntl.LOCK_UN)
             os.close(lock)
 
+    @contextmanager
+    def company_namespace_lock(self):
+        # The namespace worker uses the same lifecycle lock. Do not use the
+        # clock lock across issue processing: the guest may call the clock API
+        # while it reconciles its native handoff outcome.
+        directory = self.root / 'company-environments'
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        with (directory / 'manager.lock').open('a') as lock:
+            os.chmod(lock.name, 0o600)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def company_namespace_busy(self):
+        database = self.root / 'company-environments/registry.sqlite3'
+        if not database.exists():
+            return False
+        with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True,
+                                     timeout=30)) as db:
+            jobs = [json.loads(row[0]) for row in db.execute('SELECT payload FROM jobs')]
+        return any(job['status'] == 'running' or (
+            job['status'] == 'queued' and job.get('acknowledged', True)) for job in jobs)
+
     def ssh(self, *command):
         return subprocess.check_output(
             ['ssh', *self.ssh_options, '-p', str(self.port), 'ubuntu@127.0.0.1',
@@ -108,6 +133,8 @@ class Controller:
         self.reconcile_issue_deadlines()
 
     def reconcile_issue_deadlines(self):
+        if self.company_namespace_busy():
+            return
         with self.state() as db:
             deadlines = db.execute('SELECT issue_key,deadline_at FROM issue_deadlines').fetchall()
         if not deadlines:
@@ -129,10 +156,46 @@ class Controller:
         for issue_key, deadline_at in deadlines:
             scheduler.schedule(issue_key, datetime.fromisoformat(deadline_at))
 
+    def cancel_issue_timers(self):
+        """Invalidate this active dataset's timers before restoring another one.
+
+        Only timers are stopped: a service already waiting for the namespace lock
+        must be allowed to finish its current-dataset eligibility check afterwards.
+        """
+        with self.state() as db:
+            keys = {row[0] for row in db.execute('SELECT issue_key FROM issue_deadlines')}
+        if not keys:
+            return
+        expected = {f'tac-issue-handoff-{key}.timer' for key in keys}
+        listed = subprocess.run(
+            ['systemctl', 'list-units', '--all', '--type=timer', '--plain',
+             '--no-legend', '--no-pager', 'tac-issue-handoff-*.timer'],
+            check=True, capture_output=True, text=True,
+        )
+        timers = [line.split()[0] for line in listed.stdout.splitlines()
+                  if line.split() and line.split()[0] in expected]
+        if timers:
+            subprocess.run(['systemctl', 'stop', *timers], check=True,
+                           capture_output=True, text=True)
+
     def process_issue(self, issue_key):
         import re
         if not re.fullmatch(r'[0-9a-f]{64}', issue_key):
             raise ValueError('invalid issue timer identity')
+        with self.company_namespace_lock():
+            if self.company_namespace_busy():
+                return
+            with self.state() as db:
+                current = db.execute('SELECT deadline_at FROM issue_deadlines WHERE issue_key=?',
+                                     (issue_key,)).fetchone()
+            # A callback from a former company must never operate on its
+            # replacement. Handoff deadlines use explicit host-real-time rules,
+            # so recheck the selected dataset's own real deadline as well.
+            if current is None or datetime.now(timezone.utc) < datetime.fromisoformat(current[0]):
+                return
+            self._process_current_issue(issue_key)
+
+    def _process_current_issue(self, issue_key):
         python = '/data/theagentcompany/enterprise/venv/bin/python'
         config = '/data/theagentcompany/enterprise/config/runtime.json'
         guest_source = os.environ.get('VIRTUAL_TIME_GUEST_SOURCE_ROOT',

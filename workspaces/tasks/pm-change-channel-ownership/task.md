@@ -1,2 +1,2 @@
-Find the #general channel in our company's platform's directory at {{ company_tools.rocketchat }}/home
+Find the #general channel on Rocket.Chat
 And assign the user 'theagentcompany' as the owner

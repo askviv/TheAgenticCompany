@@ -38,6 +38,7 @@ class ExperimentChatDispatch:
         state_root: str | Path,
         desktop_manager: Any,
         rocketchat_base_url: str,
+        *, delivery: str = "browser",
     ):
         self.company_profile_path = Path(company_profile_path)
         self.credentials_path = Path(credentials_path)
@@ -45,6 +46,7 @@ class ExperimentChatDispatch:
         self.database = self.state_root / "employee-experiment-chat.sqlite"
         self.lock_root = self.state_root / "employee-experiment-chat-locks"
         self.desktop_manager = desktop_manager
+        self.delivery = delivery
         self.rocketchat_base_url = rocketchat_base_url.rstrip("/") + "/"
         self.state_root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.lock_root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -73,6 +75,9 @@ class ExperimentChatDispatch:
         company = profile.get("company")
         mapping = company.get("experimentDepartmentMap") if isinstance(company, dict) else None
         department = mapping.get(role) if isinstance(mapping, dict) else None
+        if department is None and isinstance(profile.get("employees"), list):
+            department = next((item.get("department") for item in profile["employees"]
+                               if isinstance(item, dict) and item.get("department") == role), None)
         if not isinstance(department, str) or not department:
             raise ExperimentChatError("sender_department_unmapped")
         employees = profile.get("employees")
@@ -80,7 +85,9 @@ class ExperimentChatDispatch:
             raise ExperimentChatError("company_identity_profile_invalid")
         candidates = []
         for employee in employees:
-            if not isinstance(employee, dict) or employee.get("department") != department:
+            if not isinstance(employee, dict):
+                continue
+            if employee.get("department") != department:
                 continue
             account = employee.get("accounts", {}).get("rocketchat") if isinstance(employee.get("accounts"), dict) else None
             if (isinstance(employee.get("id"), str) and employee["id"]
@@ -88,7 +95,7 @@ class ExperimentChatDispatch:
                     and isinstance(account, dict) and isinstance(account.get("id"), str) and account["id"]
                     and isinstance(account.get("username"), str) and account["username"]):
                 candidates.append({
-                    "employee_id": employee["id"], "department": department,
+                    "employee_id": employee["id"], "department": employee["department"],
                     "email": employee["email"], "author_id": account["id"],
                     "username": account["username"],
                 })
@@ -225,7 +232,7 @@ class ExperimentChatDispatch:
         return {"username": username, "password": password}
 
     def _transport(self) -> CuaChatTransport:
-        return CuaChatTransport(self.desktop_manager)
+        return CuaChatTransport(self.desktop_manager, delivery=self.delivery)
 
     @contextmanager
     def _attempt_lock(self, key_hash: str):

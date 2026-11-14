@@ -1,4 +1,4 @@
-Navigate to the Rocketchat web at {{ company_tools.rocketchat }}/home
+On Rocket.Chat,
 Ask Mike Chen, Li Ming, and Zhang Wei about Liu Qiang's recent job performance.
 
 * Ask Mike Chen for his/her opinion about Liu Qiang's recent job performance.

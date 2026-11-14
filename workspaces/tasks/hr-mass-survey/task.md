@@ -4,6 +4,6 @@ Conduct a comprehensive survey to collect information on employees' year-end vac
 * Number_of_Vacation_Days: Total days planned for vacation, in integer format.
 * Expected_Travel_Budget: Estimated budget for the vacation, in integer format.
 
-Talk to employees on Rocketchat at {{ company_tools.rocketchat }}/, and collect the results.
-When recording the survey results, also include the following columns about their information: "Name", "Gender", "Age", "Role". The information can be found on owncloud ({{ company_tools.owncloud }}) at "/Documents/Human Resources Team/Personnell_File.odt".
-Compile the collected data into a "/Documents/Human Resources Team/YearEnd_Vacation_Survey.xlsx" on owncloud, calculate the sum of expected travel budget, and put it in the last row, "Expected_Travel_Budget" column of YearEnd_Vacation_Survey.xlsx.
+Talk to employees on Rocket.Chat, and collect the results.
+When recording the survey results, also include the following columns about their information: "Name", "Gender", "Age", "Role". The information can be found on ownCloud at "/Documents/Human Resources Team/Personnell_File.odt".
+Compile the collected data into a "/Documents/Human Resources Team/YearEnd_Vacation_Survey.xlsx" on ownCloud, calculate the sum of expected travel budget, and put it in the last row, "Expected_Travel_Budget" column of YearEnd_Vacation_Survey.xlsx.

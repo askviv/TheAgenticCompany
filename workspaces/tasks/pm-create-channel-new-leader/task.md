@@ -1,2 +1,2 @@
-Create a public #sales-talk channel in our company's platform directory {{ company_tools.rocketchat }}/home
+Create a public #sales-talk channel on Rocket.Chat
 And invite Mark Johnson to the channel. Make him the channel leader.

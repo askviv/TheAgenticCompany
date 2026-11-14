@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { CompanyPackImport } from "@/CompanyPackImport"
+import { CompanySwitcher } from "@/CompanySwitcher"
 import { Switch } from "@base-ui/react/switch"
 import {
   ArrowLeft,
@@ -30,11 +32,19 @@ import {
 } from "react-router"
 import {
   getActivity,
+  resendActivityEmail,
+  getBenchmarkStatus,
+  type BenchmarkStatus,
   getModelControl,
   setModelControl,
   getCatalog,
   getCompany,
   getCompanyClock,
+  setCompanyClockSpeed,
+  type CompanyClock,
+  getCoffeePaymentWindows,
+  getEcommerceBehaviours,
+  setEcommerceBehaviour,
   getCompanyDesktops,
   getCompanyEvaluations,
   getCompanyTools,
@@ -52,9 +62,11 @@ import {
   startEvaluation,
   startCompanyEvaluation,
   setBackgroundProviderEnabled,
+  setCoffeePaymentWindow,
   startCodexDeviceAuthorization,
   type ActivityEntry,
   type ActivityMetrics,
+  type CoffeePaymentWindows,
   type Company,
   type CompanyDesktopEmployee,
   type CompanyNativeEvaluation,
@@ -90,7 +102,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-type LayoutContext = { refreshKey: number }
+type LayoutContext = { refreshKey: number; companyClock: CompanyClock | null }
 
 const statusText: Record<ExperimentRunStatus, string> = {
   initializing: "Preparing company",
@@ -190,7 +202,7 @@ function ModelCallControl() {
 
 function AppLayout() {
   const [refreshKey, setRefreshKey] = useState(0)
-  const [companyTime, setCompanyTime] = useState<string | null>(null)
+  const [companyClock, setCompanyClock] = useState<CompanyClock | null>(null)
   const snapshot = useRef<Map<string, string> | undefined>(undefined)
 
   useEffect(() => {
@@ -200,9 +212,9 @@ function AppLayout() {
       if (pending) return
       pending = true
       getCompanyClock().then((clock) => {
-        if (active) setCompanyTime(clock.simulated_time)
+        if (active) setCompanyClock(clock)
       }).catch((error) => {
-        if (active) setCompanyTime(null)
+        if (active) setCompanyClock(null)
         console.error("Unable to load company time.", error instanceof Error ? error.name : "UnknownError")
       }).finally(() => { pending = false })
     }
@@ -244,31 +256,112 @@ function AppLayout() {
             <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground"><Beaker className="size-4" /></span>
             <span>The Agentic Company</span>
           </Link>
-          <nav className="flex items-center gap-1" aria-label="Main navigation">
-            <NavLink to="/" end className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-              Activity
-            </NavLink>
-            <NavLink to="/streams" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-              Observe
-            </NavLink>
-          <NavLink to="/experiments" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-              Experiments
-            </NavLink>
-            <NavLink to="/runs" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-              Runs
-            </NavLink>
-            <NavLink to="/help" className={({ isActive }) => `rounded-md px-3 py-2 text-sm transition-colors ${isActive ? "bg-secondary font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
-              Help
-            </NavLink>
-          </nav>
           <ModelCallControl />
-          <p className="basis-full pb-2 text-center text-xs text-muted-foreground lg:basis-auto lg:pb-0">Company time {companyTime ? formatDate(companyTime) : "—"}</p>
+          <Link to="/settings/company-clock" className="basis-full pb-2 text-center text-xs text-muted-foreground hover:underline lg:basis-auto lg:pb-0">
+            Company time {companyClock?.simulated_time ? formatDate(companyClock.simulated_time) : "—"}
+            {companyClock?.clock_speed != null && ` · ${companyClock.clock_speed}×`}
+          </Link>
         </div>
       </header>
-      <main className="w-full px-4 py-8 sm:px-6 sm:py-10">
-        <Outlet context={{ refreshKey } satisfies LayoutContext} />
-      </main>
+      <div className="md:grid md:grid-cols-[14rem_minmax(0,1fr)]">
+        <nav className="border-b p-4 md:min-h-[calc(100svh-3.5rem)] md:border-r md:border-b-0" aria-label="Main navigation">
+          <div className="flex flex-wrap gap-1 md:flex-col">
+            {[
+              ["/", "Activity"],
+              ["/streams", "Observe"],
+              ["/experiments", "Experiments"],
+              ["/runs", "Runs"],
+              ["/help/native-evaluations", "Native evaluations"],
+              ["/help/company-tools", "Company tools"],
+              ["/help", "Help"],
+            ].map(([path, label]) => <SidebarLink key={path} path={path} label={label} />)}
+          </div>
+          <p className="mt-5 px-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Settings</p>
+          <div className="mt-2 flex flex-wrap gap-1 md:flex-col">
+            {[
+              ["/help/company-environment", "Company environment"],
+              ["/settings/company-clock", "Company clock"],
+              ["/help/context", "Codex connection"],
+              ["/experiments/background", "Background simulations"],
+              ["/experiments/coffeebench/settings", "CoffeeBench behaviours"],
+              ["/experiments/ecommercebench/settings", "E-CommerceBench behaviours"],
+            ].map(([path, label]) => <SidebarLink key={path} path={path} label={label} />)}
+          </div>
+        </nav>
+        <main className="min-w-0 px-4 py-8 sm:px-6 sm:py-10">
+          <Outlet context={{ refreshKey, companyClock } satisfies LayoutContext} />
+        </main>
+      </div>
     </div>
+  )
+}
+
+function CompanyClockPage() {
+  const { companyClock } = useOutletContext<LayoutContext>()
+  const [speed, setSpeed] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [confirmed, setConfirmed] = useState<number | null>(null)
+  const kernel = companyClock?.clock_mode === "kernel"
+  const requested = Number(speed)
+  const valid = Number.isFinite(requested) && requested > 0 && (!kernel || Number.isSafeInteger(requested))
+
+  async function save() {
+    if (saving || !companyClock?.can_set_speed || !valid) return
+    setSaving(true)
+    setError(null)
+    setConfirmed(null)
+    try {
+      setConfirmed(await setCompanyClockSpeed(requested))
+      setSpeed("")
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The clock speed could not be confirmed.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const instant = companyClock?.simulated_time
+  const displayTime = instant
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium", timeZone: "UTC" }).format(new Date(instant)) + " UTC"
+    : "Unavailable"
+
+  return <section className="max-w-xl space-y-5">
+    <h1 className="text-2xl font-semibold tracking-tight">Company clock</h1>
+    <Card>
+      <CardContent className="space-y-5">
+        <dl className="grid grid-cols-2 gap-4">
+          <div><dt className="text-sm text-muted-foreground">Simulated time</dt><dd className="mt-1 font-medium">{displayTime}</dd></div>
+          <div><dt className="text-sm text-muted-foreground">Current speed</dt><dd className="mt-1 font-medium">{companyClock?.clock_speed == null ? "Unavailable" : `${companyClock.clock_speed}×`}</dd></div>
+        </dl>
+        <form className="flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); void save() }}>
+          <div className="space-y-2">
+            <label htmlFor="company-clock-speed" className="text-sm font-medium">New speed (×)</label>
+            <Input id="company-clock-speed" type="number" min={kernel ? 1 : undefined}
+              step={kernel ? 1 : "any"} value={speed}
+              onChange={(event) => { setSpeed(event.target.value); setConfirmed(null) }}
+              disabled={!companyClock?.can_set_speed || saving} />
+          </div>
+          <Button type="submit" disabled={!companyClock?.can_set_speed || !valid || saving}>
+            {saving ? "Applying…" : "Apply speed"}
+          </Button>
+        </form>
+        {companyClock && !companyClock.can_set_speed && <p className="text-sm text-muted-foreground">Speed control is unavailable.</p>}
+        {confirmed !== null && <p role="status" className="text-sm">Clock speed updated to {confirmed}×.</p>}
+        {error && <ErrorNotice title="Clock speed" message={error} />}
+      </CardContent>
+    </Card>
+  </section>
+}
+
+function SidebarLink({ path, label }: { path: string, label: string }) {
+  return (
+    <NavLink to={path} end={!["/experiments", "/runs", "/help"].includes(path)} className={({ isActive }) =>
+      `rounded-md px-3 py-2 text-sm transition-colors ${isActive
+        ? "bg-secondary font-medium text-foreground"
+        : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}>
+      {label}
+    </NavLink>
   )
 }
 
@@ -426,6 +519,10 @@ function EmployeeStreamsPage() {
   )
 }
 
+const activityFilters = [["all", "All activity"], ["email", "Emails"], ["message", "Messages"], ["chatter", "Chatter"], ["action", "Company actions"]] as const
+
+const activityKey = (entry: ActivityEntry) => JSON.stringify([entry.type, entry.id, entry.direction])
+
 function ActivityPage() {
   const refreshKey = useRefreshKey()
   const [company, setCompany] = useState<Company | null>(null)
@@ -433,47 +530,136 @@ function ActivityPage() {
   const [metrics, setMetrics] = useState<ActivityMetrics | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [resending, setResending] = useState<string | null>(null)
+  const [resendStatus, setResendStatus] = useState<{ id: string; message: string } | null>(null)
+  const resendRequests = useRef(new Map<string, string>())
   const [activityWarning, setActivityWarning] = useState<string | null>(null)
   const [manualRefresh, setManualRefresh] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
-  const [filter, setFilter] = useState("all")
-
+  const [activityParams, setActivityParams] = useSearchParams()
+  const requestedFilter = activityParams.get("activity")
+  const filter = requestedFilter && activityFilters.some(([value]) => value === requestedFilter) ? requestedFilter : "all"
+  const companyRequest = useRef<Promise<Awaited<ReturnType<typeof getCompany>> | undefined> | null>(null)
+  const [counts, setCounts] = useState<Record<string, number>>({})
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [loadedFilter, setLoadedFilter] = useState<string | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [olderError, setOlderError] = useState(false)
+  const paginationController = useRef<AbortController | null>(null)
+  const hasOlderPages = useRef(false)
+  const olderRequest = useRef<AbortController | null>(null)
+  const olderButton = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     let active = true
-    Promise.allSettled([getCompany(), getActivity()])
-      .then(([companyResult, activityResult]) => {
-        if (!active) return
-        const errors: string[] = []
-        if (companyResult.status === "fulfilled") setCompany(companyResult.value)
-        else errors.push(companyResult.reason instanceof Error ? companyResult.reason.message : "Company status could not be loaded.")
-        if (activityResult.status === "fulfilled") {
-          setActivity(activityResult.value.activity)
-          setMetrics(activityResult.value.metrics)
-          setActivityWarning(activityResult.value.error ?? null)
-        } else {
-          setMetrics(null)
-          setActivityWarning(activityResult.reason instanceof Error ? activityResult.reason.message : "Company activity could not be loaded.")
-        }
-        setError(errors.length ? errors.join(" ") : null)
-      })
-      .finally(() => {
-        if (active) {
-          setLoading(false)
-          setRefreshing(false)
-        }
-      })
+    const pending = companyRequest.current?.then(() => active ? getCompany() : undefined, () => active ? getCompany() : undefined) ?? getCompany()
+    companyRequest.current = pending
+    pending.then((result) => {
+      if (!active || !result) return
+      setCompany(result)
+      setError(null)
+    }).catch((reason: unknown) => {
+      if (active) setError(reason instanceof Error ? reason.message : "Company status could not be loaded.")
+    }).finally(() => {
+      if (companyRequest.current === pending) companyRequest.current = null
+    })
     return () => { active = false }
   }, [refreshKey, manualRefresh])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    paginationController.current = controller
+    hasOlderPages.current = false
+    setLoadingMore(false)
+    setOlderError(false)
+    return () => controller.abort()
+  }, [filter, manualRefresh])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    getActivity(filter, undefined, controller.signal).then((result) => {
+      if (controller.signal.aborted) return
+      if (!hasOlderPages.current && olderRequest.current !== paginationController.current) {
+        setActivity(result.activity)
+        setLoadedFilter(filter)
+        setNextCursor(result.next_cursor)
+      } else {
+        setActivity((current) => {
+          const fresh = new Set(result.activity.map(activityKey))
+          return [...result.activity, ...current.filter((entry) => !fresh.has(activityKey(entry)))]
+        })
+      }
+      setMetrics(result.metrics)
+      setCounts(result.counts)
+      setActivityWarning(result.error ?? null)
+    }).catch((reason: unknown) => {
+      if (!controller.signal.aborted) setActivityWarning(reason instanceof Error ? reason.message : "Company activity could not be loaded.")
+    }).finally(() => {
+      if (controller.signal.aborted) return
+      setLoading(false)
+      setRefreshing(false)
+    })
+    return () => controller.abort()
+  }, [filter, refreshKey, manualRefresh])
+
+  const loadOlder = useCallback(async () => {
+    const controller = paginationController.current
+    if (!nextCursor || loadedFilter !== filter || refreshing || !controller || controller.signal.aborted
+        || olderRequest.current === controller) return
+    olderRequest.current = controller
+    setLoadingMore(true)
+    setOlderError(false)
+    try {
+      const page = await getActivity(filter, nextCursor, controller.signal)
+      if (controller.signal.aborted) return
+      if (page.error) setActivityWarning(page.error)
+      hasOlderPages.current = true
+      setActivity((current) => {
+        const loaded = new Set(current.map(activityKey))
+        return [...current, ...page.activity.filter((entry) => !loaded.has(activityKey(entry)))]
+      })
+      setNextCursor(page.next_cursor)
+      setCounts(page.counts)
+    } catch {
+      if (!controller.signal.aborted) setOlderError(true)
+    } finally {
+      if (olderRequest.current === controller) olderRequest.current = null
+      if (!controller.signal.aborted) setLoadingMore(false)
+    }
+  }, [filter, loadedFilter, nextCursor, refreshing])
+
+  useEffect(() => {
+    if (!olderButton.current || olderError || loadingMore || typeof IntersectionObserver === "undefined") return
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) void loadOlder()
+    }, { rootMargin: "200px" })
+    observer.observe(olderButton.current)
+    return () => observer.disconnect()
+  }, [loadOlder, loadingMore, olderError])
 
   const refreshCompanyActivity = () => {
     setRefreshing(true)
     setManualRefresh((current) => current + 1)
   }
 
-  const filtered = [...activity]
-    .filter((entry) => filter === "all" || entry.type === filter || (filter === "message" && entry.type === "chat") || (filter === "chatter" && (entry.type === "chatter" || (entry.type === "message" && entry.direction === "sent" && Boolean(entry.actor)))))
-    .sort((first, second) => second.timestamp.localeCompare(first.timestamp))
+  const resend = async (entry: ActivityEntry) => {
+    if (resending) return
+    const requestId = resendRequests.current.get(entry.id) ?? crypto.randomUUID()
+    resendRequests.current.set(entry.id, requestId)
+    setResending(entry.id)
+    setResendStatus(null)
+    try {
+      await resendActivityEmail(entry.id, requestId)
+      resendRequests.current.delete(entry.id)
+      setResendStatus({ id: entry.id, message: "Resent to Viv." })
+      refreshCompanyActivity()
+    } catch {
+      setResendStatus({ id: entry.id, message: "Resend could not be confirmed." })
+    } finally {
+      setResending(null)
+    }
+  }
+
   const backgroundErrors = company?.background?.errors ?? {}
   const globalBackgroundErrors = ([
     ["company_background", "Background worker"],
@@ -503,7 +689,7 @@ function ActivityPage() {
         </AlertDescription>
       </Alert>}
       {company?.error && <ErrorNotice message={company.error} title="Company needs attention" />}
-      {error && <ErrorNotice message={error} title="Company activity unavailable" />}
+      {error && <ErrorNotice message={error} title="Company status could not be loaded" />}
 
 
 
@@ -529,50 +715,173 @@ function ActivityPage() {
           </Button>
         </div>
         <div className="flex flex-wrap gap-2" role="group" aria-label="Filter activity">
-          {[ ["all", "All activity"], ["email", "Emails"], ["message", "Messages"], ["chatter", "Chatter"], ["action", "Company actions"] ].map(([value, label]) => (
-            <Button key={value} size="sm" variant={filter === value ? "default" : "outline"} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</Button>
+          {activityFilters.map(([value, label]) => (
+            <Button key={value} type="button" size="sm" variant={filter === value ? "default" : "outline"}
+              aria-pressed={filter === value} onClick={() => setActivityParams((current) => {
+                const next = new URLSearchParams(current)
+                if (value === "all") next.delete("activity")
+                else next.set("activity", value)
+                return next
+              }, { preventScrollReset: true })}>{label} ({(counts[value] ?? 0).toLocaleString()})</Button>
           ))}
         </div>
       </div>
 
       {activityWarning && <ErrorNotice message={activityWarning} title="Some company activity could not be loaded" />}
-      {loading ? <div className="space-y-3"><Skeleton className="h-24 w-full" /><Skeleton className="h-24 w-full" /></div> : filtered.length ? (
-        <div className="space-y-3">
-          {filtered.map((entry) => {
+      {loading || (loadedFilter !== filter && !activityWarning) ? <div className="space-y-3"><Skeleton className="h-24 w-full" /><Skeleton className="h-24 w-full" /></div> : loadedFilter === filter && activity.length ? (
+        <div key={filter} className="space-y-3">
+          {activity.map((entry) => {
             const isEmail = entry.type === "email"
+            const isCommunication = isEmail || entry.type === "message" || entry.type === "chat" || entry.type === "chatter"
             const title = entry.title.trim()
             const content = entry.content?.trim()
             const summary = entry.summary?.trim()
-            const showContent = Boolean(content && content !== title)
+            const showContent = Boolean(content && (isEmail || content !== title))
             const showSummary = Boolean(summary && summary !== title && !(showContent && content?.startsWith(summary)))
             const Icon = isEmail ? Mail : entry.type === "message" || entry.type === "chat" ? MessageCircle : Building2
-            return <article key={entry.id} className="rounded-xl border bg-card p-4 sm:p-5">
+            return <article key={activityKey(entry)} id={`activity-${entry.id}`} className="scroll-mt-6 rounded-xl border bg-card p-4 sm:p-5">
               <div className="flex items-start gap-3">
                 <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-secondary text-secondary-foreground"><Icon className="size-4" /></span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                    <h3 className="font-medium">{entry.title}</h3>
-                    <time className="text-xs text-muted-foreground">{formatDate(entry.timestamp)}</time>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-medium">{entry.title}</h3>
+                      {isEmail && entry.delivery_status && <Badge variant="outline">{entry.delivery_status}</Badge>}
+                    </div>
+                    <time className="text-xs text-muted-foreground">{entry.timestamp ? formatDate(entry.timestamp) : ""}</time>
                   </div>
-                  {(entry.actor || entry.direction) && <p className="mt-1 text-xs text-muted-foreground">{[entry.actor, entry.direction === "sent" ? "Sent" : entry.direction === "received" ? "Received" : null].filter(Boolean).join(" · ")}</p>}
-                  {showSummary && summary && <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/85">{formatActivityText(summary)}</p>}
-                  {showContent && content && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 text-sm leading-6">{formatActivityText(content)}</p>}
+                  {isEmail ? <div className="mt-3 space-y-2 text-sm">
+                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 break-words">
+                      <span className="font-medium">From</span><span>{entry.actor_name || entry.actor || "Unknown sender"}</span>
+                      <span className="font-medium">To</span><span>{entry.recipient_name || entry.recipient || "Unknown recipient"}</span>
+                    </div>
+                    <div className="whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 leading-6">
+                      {content || summary || "Message body was not captured."}
+                    </div>
+                    {Boolean(entry.attachments?.length) && <p>Attachments: {entry.attachments?.join(", ")}</p>}
+                    {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}
+                  </div> : isCommunication ? <div className="mt-3 overflow-x-auto rounded-lg border bg-muted/60">
+                    <table className="w-full text-left text-sm">
+                      <thead className="border-b">
+                        <tr>
+                          <th scope="col" className="p-3 font-medium">Direction</th>
+                          <th scope="col" className="p-3 font-medium">From / To</th>
+                          <th scope="col" className="p-3 font-medium">Message</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="align-top">
+                          <td className="p-3 font-medium">{entry.direction === "received" ? "Received" : entry.direction === "sent" ? "Sent" : entry.delivery_status || "Recorded"}
+                            {entry.direction && entry.delivery_status && <p className="mt-1 text-xs font-normal text-muted-foreground">{entry.delivery_status}</p>}
+                          </td>
+                          <td className="break-words p-3">
+                            <p><span className="font-medium">From</span> {entry.actor_name || entry.actor || "Unknown sender"}</p>
+                            {entry.recipient && <p className="mt-1"><span className="font-medium">To</span> {entry.recipient_name || entry.recipient}</p>}
+                          </td>
+                          <td className="w-full min-w-48 break-words p-3">
+                            <p className="whitespace-pre-wrap leading-6">{content ? formatActivityText(content) : "Message body was not captured."}</p>
+                            {Boolean(entry.attachments?.length) && <p className="mt-2">Attachments: {entry.attachments?.join(", ")}</p>}
+                            {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div> : <>
+                    {entry.actor && <p className="mt-1 text-xs text-muted-foreground">{entry.actor}</p>}
+                    {showSummary && summary && <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-foreground/85">{formatActivityText(summary)}</p>}
+                    {showContent && content && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-muted/60 p-3 text-sm leading-6">{formatActivityText(content)}</p>}
+                    {entry.native_document && <ActivityDocumentLink document={entry.native_document} />}
+                  </>}
+                  {entry.can_resend && <div className="mt-3 flex items-center gap-3">
+                    <Button size="sm" variant="outline" disabled={resending !== null} onClick={() => void resend(entry)}>
+                      {resending === entry.id ? "Resending…" : "Resend to Viv"}
+                    </Button>
+                    <span role="status" className="text-sm text-muted-foreground">
+                      {resendStatus?.id === entry.id && resendStatus.message}
+                    </span>
+                  </div>}
+                  {entry.coffee_update && <CoffeeUpdateDetails update={entry.coffee_update} />}
                   {entry.run_id && <Link className="mt-3 inline-flex items-center gap-1 text-sm text-primary hover:underline" to={`/runs/${encodeURIComponent(entry.run_id)}`}>View experiment <ArrowRight className="size-3.5" /></Link>}
                 </div>
               </div>
             </article>
           })}
+          {nextCursor && <Button ref={olderButton} variant="outline" onClick={() => void loadOlder()} disabled={loadingMore || refreshing}>
+            {loadingMore ? "Loading older activity…" : olderError ? "Retry loading older activity" : "Load older activity"}
+          </Button>}
         </div>
       ) : (
         <div className="rounded-xl border border-dashed px-6 py-14 text-center">
           <MessageCircle className="mx-auto size-8 text-muted-foreground" />
-          <p className="mt-3 font-medium">{activity.length ? "No activity matches this filter" : "Nothing has happened yet"}</p>
+          <p className="mt-3 font-medium">{counts.all ? "No activity matches this filter" : "Nothing has happened yet"}</p>
           <p className="mt-1 text-sm text-muted-foreground">Run an experiment to introduce a problem into the company.</p>
           <Button className="mt-5" render={<Link to="/experiments" />}>Browse experiments <ArrowRight /></Button>
         </div>
       )}
     </section>
   )
+}
+
+function ActivityDocumentLink({ document }: { document: NonNullable<ActivityEntry["native_document"]> }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
+  const label = `${document.doctype} ${document.name}`
+  return <details className="mt-2 text-sm" onToggle={(event) => {
+    if (!event.currentTarget.open || url) return
+    void getCompanyTools().then((tools) => {
+      const base = tools.find((tool) => tool.id === "erpnext")?.url
+      if (!base) { setUnavailable(true); return }
+      const slug = document.doctype.toLowerCase().replaceAll(" ", "-")
+      setUrl(new URL(`/app/${encodeURIComponent(slug)}/${encodeURIComponent(document.name)}`, base).href)
+    }).catch(() => setUnavailable(true))
+  }}>
+    <summary className="cursor-pointer">{label}</summary>
+    {url ? <a href={url} target="_blank" rel="noreferrer" className="underline">Open in ERPNext</a>
+      : <p>{unavailable ? "ERPNext link unavailable" : "Loading ERPNext link…"}</p>}
+  </details>
+}
+
+function CoffeeUpdateDetails({ update }: { update: NonNullable<ActivityEntry["coffee_update"]> }) {
+  const [erpUrl, setErpUrl] = useState<string | null>(null)
+  const hasRecords = update.messages.some((message) => message.doctype && message.name)
+    || update.records?.some((record) => record.doctype && record.name)
+  const recordLink = (doctype: string, name: string) => {
+    const label = `${doctype} ${name}`
+    if (!erpUrl) return label
+    const slug = doctype.toLowerCase().replaceAll(" ", "-")
+    return <a className="underline" href={new URL(`/app/${encodeURIComponent(slug)}/${encodeURIComponent(name)}`, erpUrl).href} target="_blank" rel="noreferrer">{label}</a>
+  }
+  return <details className="mt-3 text-sm" onToggle={(event) => {
+    if (event.currentTarget.open && hasRecords && !erpUrl) {
+      void getCompanyTools().then((tools) => setErpUrl(tools.find((tool) => tool.id === "erpnext")?.url ?? null))
+        .catch((error) => console.error("Could not load ERPNext link.", error))
+    }
+  }}>
+    <summary className="cursor-pointer font-medium underline">View update details</summary>
+    <div className="mt-3 space-y-3">
+      <p>Simulation advanced through {formatDate(update.cursor)}.</p>
+      {update.messages.length === 0 && <p>No incoming marketplace messages recorded.</p>}
+      {update.messages.map((message) => <div key={message.event_id} className="border-t pt-3">
+        <p className="font-medium">{message.title}</p>
+        <p className="text-muted-foreground">{message.sender} · {formatDate(message.timestamp)}</p>
+        <p className="my-2 whitespace-pre-wrap break-words">{message.body}</p>
+        <p>{message.delivery_status === "delivered" ? "Email delivery confirmed" : message.delivery_status === "not_queued" ? "Email not queued" : "Email delivery awaiting confirmation"}{message.recipient && ` · ${message.recipient}`}</p>
+        {message.message_id && <p className="break-all text-xs text-muted-foreground">{message.message_id}</p>}
+        {message.doctype && message.name && <p>{recordLink(message.doctype, message.name)}</p>}
+        <a className="underline" href={`#activity-${message.event_id}`}>View source event</a>
+        {message.replies.map((reply, index) => <div key={index} className="mt-2 border-l pl-3">
+          <p className="font-medium">Marketplace reply · {reply.status}</p>
+          <p>{reply.title}</p>
+          <p className="whitespace-pre-wrap break-words">{reply.body}</p>
+        </div>)}
+      </div>)}
+      {update.records === null ? <p>ERP action links were not recorded for this historical update.</p>
+        : update.records.length === 0 ? <p>No ERP actions recorded.</p>
+          : <ul className="list-disc pl-5">{update.records.map((record) => <li key={record.source_id}>
+            {record.doctype && record.name ? recordLink(record.doctype, record.name) : "ERP action pending reconciliation"}
+          </li>)}</ul>}
+    </div>
+  </details>
 }
 
 function CodexConnectionCard() {
@@ -753,6 +1062,29 @@ function SavedNativeEvaluations() {
 }
 
 function HelpPage() {
+  return (
+    <section className="space-y-5">
+      <h1 className="text-2xl font-semibold tracking-tight">Help</h1>
+      <nav className="flex flex-wrap gap-2" aria-label="Help pages">
+        <Button variant="outline" render={<Link to="/help/company-environment" />}>Company environment</Button>
+        <Button variant="outline" render={<Link to="/help/context" />}>Codex connection</Button>
+        <Button variant="outline" render={<Link to="/help/native-evaluations" />}>Native evaluations</Button>
+        <Button variant="outline" render={<Link to="/help/company-tools" />}>Company tools</Button>
+      </nav>
+    </section>
+  )
+}
+
+function HelpSection({ title, children }: { title: string, children: React.ReactNode }) {
+  return (
+    <section className="space-y-5">
+      <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+      {children}
+    </section>
+  )
+}
+
+function CompanyToolsPage() {
   const [companyTools, setCompanyTools] = useState<CompanyToolLink[]>([])
   const [companyToolsError, setCompanyToolsError] = useState<string | null>(null)
 
@@ -760,22 +1092,17 @@ function HelpPage() {
     let active = true
     getCompanyTools().then((tools) => {
       if (active) setCompanyTools(tools)
-    }).catch(() => {
-      if (active) setCompanyToolsError("The deployment’s Company tools URL mapping is missing or invalid. An operator needs to correct it.")
+    }).catch((reason: unknown) => {
+      if (active) setCompanyToolsError(reason instanceof Error && reason.message.includes("company_tools_coordinator_unavailable")
+        ? "The coordinator could not provide the selected company applications. Restore its connection and reload to retrieve Company tools."
+        : "The deployment’s Company tools URL mapping is missing or invalid. An operator needs to correct it.")
     })
     return () => { active = false }
   }, [])
 
   return (
-    <section className="space-y-7">
-      <h1 className="text-2xl font-semibold tracking-tight">Help</h1>
-      <CodexConnectionCard />
-      <SavedNativeEvaluations />
+    <HelpSection title="Company tools">
       <Card>
-        <CardHeader>
-          <CardTitle>Company tools</CardTitle>
-          <CardDescription>Open the company’s systems and administration using this deployment’s configured addresses.</CardDescription>
-        </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           {companyToolsError ? <ErrorNotice message={companyToolsError} title="Company tools unavailable" /> : companyTools.map((tool) => (
             <Button key={tool.id} variant="outline" render={<a href={tool.url} target="_blank" rel="noopener noreferrer" />}>
@@ -784,21 +1111,120 @@ function HelpPage() {
           ))}
         </CardContent>
       </Card>
-    </section>
+    </HelpSection>
   )
+}
+
+const coffeePaymentWindows = [
+  ["friday", "Friday payments", "The customer processes payments only on Fridays."],
+  ["morning", "Payments before 10 a.m.", "The customer processes payments before 10 a.m. If Friday payments are also enabled, the Friday batch schedule takes precedence."],
+  ["financing", "Customer financing requests", "The customer asks for financing on a coffee order. Finance hands off the request so a Lending application can be submitted."],
+  ["batch_cutoff", "Weekly batch cutoff", "The customer pays in a Friday batch starting at 10 a.m. Invoices received at or after the cutoff wait until the following Friday."],
+  ["financial_distress", "Financial distress", "The customer asks for longer terms and delays payment by 7 to 28 days after the due date as earlier invoices accumulate."],
+  ["higher_credit_limit", "Requests a higher credit limit", "The customer asks for a higher credit limit when a new order exceeds their existing limit."],
+  ["partial_payment", "Partial payment", "The customer pays half the outstanding invoice and disputes the rest until a linked credit note is submitted."],
+  ["wrong_recipient", "Wrong billing recipient", "The first invoice goes to internal Finance. The customer waits for it to be resent to Accounts Payable."],
+  ["receiving_mismatch", "Receiving mismatch", "The customer receives fewer units than ordered and disputes the missing amount until a linked credit note is submitted."],
+  ["missing_po", "Missing purchase order reference", "The customer holds payment until they receive an invoice with the requested purchase order reference."],
+  ["reminder", "Payment after a reminder", "The customer waits for a payment reminder delivered as a reply on the invoice email thread."],
+] as const
+
+const otherCoffeeBehaviours = [
+  ["Prompt payment", "Native behaviour"],
+  ["Temporary cash shortage", "Native behaviour"],
+  ["Requests longer credit terms", "Native behaviour"],
+  ["Bankruptcy", "Native behaviour"],
+] as const
+
+const ecommerceBehaviours = [
+  ["cancellation_after_picking", "Cancellation after picking"],
+  ["stockout", "Partial shipment or stockout"],
+  ["parcel_loss", "Lost or damaged parcel"],
+  ["partial_return", "Partial return"],
+  ["refund_after_payout", "Refund after payout"],
+  ["payout_mismatch", "Marketplace payout mismatch"],
+] as const
+
+function BenchmarkSettingsPage({ ecommerce = false }: { ecommerce?: boolean }) {
+  const title = ecommerce ? "E-CommerceBench behaviours" : "CoffeeBench behaviours"
+  const behaviours = ecommerce ? ecommerceBehaviours : coffeePaymentWindows
+  const load = ecommerce ? getEcommerceBehaviours : getCoffeePaymentWindows
+  const save = ecommerce ? setEcommerceBehaviour : setCoffeePaymentWindow
+  const [settings, setSettings] = useState<CoffeePaymentWindows | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    load().then(
+      (result) => { if (active) setSettings(result) },
+      () => { if (active) setError("Behaviour settings could not be loaded.") },
+    )
+    return () => { active = false }
+  }, [load])
+
+  async function update(behaviour: string, enabled: boolean) {
+    setSaving(true)
+    setError(null)
+    try {
+      setSettings(await save(behaviour, enabled))
+    } catch {
+      setError("The change could not be confirmed. Reload to check the saved settings.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <section className="space-y-5">
+    <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+    <Card>
+      <CardHeader>
+        <CardTitle>Behaviour switches</CardTitle>
+        {!ecommerce && <CardDescription>Payment windows use simulated UTC.</CardDescription>}
+      </CardHeader>
+      <CardContent className="space-y-4 overflow-x-auto">
+        {error && <ErrorNotice message={error} title={title} />}
+        {!settings && !error && <p role="status" className="text-sm text-muted-foreground">Loading behaviours…</p>}
+        {settings && <ul className="divide-y">
+          {behaviours.map(([behaviour, title, description]) => <li key={behaviour} className="flex items-center justify-between gap-4 p-3">
+            <div>
+              <div>{title}</div>
+              {description && <p id={`behaviour-${behaviour}`} className="text-sm text-muted-foreground">{description}</p>}
+            </div>
+            <Switch.Root aria-label={title} aria-describedby={description ? `behaviour-${behaviour}` : undefined} checked={settings.includes(behaviour)}
+              disabled={saving} onCheckedChange={(checked) => void update(behaviour, checked)}
+              className="relative inline-flex h-6 w-11 shrink-0 rounded-full bg-input data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
+              <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background transition-transform data-[checked]:translate-x-5" />
+            </Switch.Root>
+          </li>)}
+        </ul>}
+      </CardContent>
+    </Card>
+    {!ecommerce && <Card>
+      <CardHeader><CardTitle>Other scenarios</CardTitle></CardHeader>
+      <CardContent>
+        <ul className="divide-y">
+          {otherCoffeeBehaviours.map(([title, status]) => <li key={title} className="flex flex-wrap items-center justify-between gap-2 p-3">
+            <span>{title}</span>
+            <Badge variant="secondary">{status}</Badge>
+          </li>)}
+        </ul>
+      </CardContent>
+    </Card>}
+  </section>
 }
 
 function BackgroundSimulations() {
   const refreshKey = useRefreshKey()
-  const [company, setCompany] = useState<Company | null>(null)
+  const [background, setBackground] = useState<BenchmarkStatus | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [backgroundControlBusy, setBackgroundControlBusy] = useState<Record<string, boolean>>({})
   const [backgroundControlErrors, setBackgroundControlErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
     let active = true
-    getCompany().then((value) => {
-      if (active) { setCompany(value); setError(null) }
+    getBenchmarkStatus().then((value) => {
+      if (active) { setBackground(value); setError(null) }
     }).catch((reason: unknown) => {
       if (active) setError(reason instanceof Error ? reason.message : "Company status could not be loaded.")
     })
@@ -809,8 +1235,16 @@ function BackgroundSimulations() {
     setBackgroundControlBusy((current) => ({ ...current, [providerId]: true }))
     setBackgroundControlErrors((current) => ({ ...current, [providerId]: "" }))
     try {
-      await setBackgroundProviderEnabled(providerId, enabled)
-      setCompany(await getCompany())
+      const confirmed = await setBackgroundProviderEnabled(providerId, enabled)
+      setBackground((current) => {
+        if (!current) return current
+        const errors = { ...current.errors }
+        if (confirmed.status !== "error") delete errors[providerId]
+        return {
+          ...current, errors,
+          providers: { ...current.providers, [providerId]: { ...current.providers[providerId], ...confirmed } },
+        }
+      })
     } catch (reason) {
       setBackgroundControlErrors((current) => ({ ...current, [providerId]: reason instanceof Error ? reason.message : `${providerId} control could not be confirmed. Refresh to reconcile the requested state.` }))
     } finally {
@@ -819,29 +1253,33 @@ function BackgroundSimulations() {
   }
 
   return <div className="space-y-4">
-    {error && <ErrorNotice message={error} title="Background simulations unavailable" />}
+    {error && <ErrorNotice message={error} title="Benchmark status" />}
       <Card>
         <CardHeader>
-          <CardTitle>Background simulations</CardTitle>
+          <CardTitle>Benchmark controls</CardTitle>
         </CardHeader>
-        <CardContent className="grid gap-4 sm:grid-cols-2">
+        <CardContent className="divide-y">
           {([['coffeebench', 'CoffeeBench'], ['ecommercebench', 'E-CommerceBench']] as const).map(([providerId, label]) => {
-            const provider = company?.background?.providers[providerId]
+            const provider = background?.providers[providerId]
             const enabled = provider?.enabled
-            const issue = company?.background?.errors[providerId] ?? company?.background?.errors.configuration
-            return <div key={providerId} className="rounded-lg border p-4">
+            const issue = background?.errors[providerId] ?? background?.errors.configuration
+            return <div key={providerId} className="py-3 first:pt-0 last:pb-0">
               <div className="flex items-center justify-between gap-4">
-                <span id={`${providerId}-label`} className="font-medium">{label}</span>
-                <Switch.Root
+                <div className="flex items-center gap-3">
+                  <span id={`${providerId}-label`} className="font-medium">{label}</span>
+                  <span className="text-sm text-muted-foreground">{enabled === undefined ? (error || issue ? null : "Loading…") : enabled ? "On" : "Off"}</span>
+                </div>
+                {enabled !== undefined && <Switch.Root
                   aria-labelledby={`${providerId}-label`}
                   checked={enabled === true}
-                  disabled={backgroundControlBusy[providerId] || enabled === undefined || provider?.status === "stopping" || (enabled === false && provider?.in_flight === true)}
+                  disabled={backgroundControlBusy[providerId] || provider?.status === "stopping" || (enabled === false && provider?.in_flight === true)}
                   onCheckedChange={(checked) => void setBackgroundProvider(providerId, checked)}
                   className="relative inline-flex h-6 w-11 shrink-0 items-center rounded-full bg-input transition-colors data-[checked]:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Switch.Thumb className="block size-5 translate-x-0.5 rounded-full bg-background shadow-sm transition-transform data-[checked]:translate-x-5" />
-                </Switch.Root>
+                </Switch.Root>}
               </div>
+              {providerId === "coffeebench" && <Link to="/experiments/coffeebench/settings" className="mt-2 inline-block text-sm underline">Behaviour settings</Link>}
               {provider?.status === "starting" && <p className="mt-2 text-sm text-muted-foreground">Starting…</p>}
               {(provider?.status === "stopping" || (enabled === false && provider?.in_flight)) && <p className="mt-2 text-sm text-muted-foreground">Finishing current work…</p>}
               {issue && <p className="mt-2 text-sm text-destructive">Needs attention ({issue.code}).</p>}
@@ -856,7 +1294,9 @@ function BackgroundSimulations() {
 
 function LibraryPage() {
   const refreshKey = useRefreshKey()
+  const [importRevision, setImportRevision] = useState(0)
   const [experiments, setExperiments] = useState<Experiment[]>([])
+  const [catalogWarning, setCatalogWarning] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -881,9 +1321,10 @@ function LibraryPage() {
     let active = true
     setLoading(true)
     getCatalog()
-      .then(({ experiments: items }) => {
+      .then(({ experiments: items, error: importedError }) => {
         if (active) {
           setExperiments(items)
+          setCatalogWarning(importedError ? `Imported experiments are unavailable (${importedError.code}). Built-in experiments remain available. Refresh to retry.` : null)
           setError(null)
         }
       })
@@ -894,7 +1335,7 @@ function LibraryPage() {
         if (active) setLoading(false)
       })
     return () => { active = false }
-  }, [refreshKey])
+  }, [refreshKey, importRevision])
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase()
@@ -910,7 +1351,6 @@ function LibraryPage() {
       <div className="flex flex-col gap-5 border-b pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1.5">
           <h1 className="text-2xl font-semibold tracking-tight">Experiment library</h1>
-          <p className="text-sm text-muted-foreground">Choose a company problem. Filter by type or benchmark.</p>
         </div>
         <div className="flex w-full items-center gap-2 sm:w-80">
           <div className="relative w-full">
@@ -919,7 +1359,11 @@ function LibraryPage() {
           </div>
         </div>
       </div>
-      <BackgroundSimulations />
+      <nav className="flex flex-wrap gap-2" aria-label="Simulation settings">
+        <Button variant="outline" render={<Link to="/experiments/background" />}>Background simulations</Button>
+        <Button variant="outline" render={<Link to="/experiments/coffeebench/settings" />}>CoffeeBench behaviours</Button>
+      </nav>
+      <CompanyPackImport onImported={() => setImportRevision((value) => value + 1)} />
 
       <fieldset className="space-y-3">
         <legend className="text-sm font-medium">Benchmark</legend>
@@ -951,6 +1395,7 @@ function LibraryPage() {
         <p className="text-xs text-muted-foreground">Select one or more types. No selection shows all types.</p>
       </fieldset>
 
+      {catalogWarning && <ErrorNotice message={catalogWarning} title="Imported library unavailable" />}
       {error && <ErrorNotice message={error} title="Library unavailable" />}
       {loading ? <LoadingCards /> : !error && filtered.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -1084,14 +1529,19 @@ function RunsPage() {
   const [runs, setRuns] = useState<ExperimentRun[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const runsRequest = useRef<Promise<Awaited<ReturnType<typeof getRuns>> | undefined> | null>(null)
 
   useEffect(() => {
     let active = true
-    setLoading(true)
-    getRuns()
-      .then((items) => { if (active) { setRuns(items); setError(null) } })
+    const pending = runsRequest.current?.then(() => active ? getRuns() : undefined, () => active ? getRuns() : undefined) ?? getRuns()
+    runsRequest.current = pending
+    pending
+      .then((items) => { if (active && items) { setRuns(items); setError(null) } })
       .catch((reason: unknown) => { if (active) setError(reason instanceof Error ? reason.message : "Runs could not be loaded.") })
-      .finally(() => { if (active) setLoading(false) })
+      .finally(() => {
+        if (runsRequest.current === pending) runsRequest.current = null
+        if (active) setLoading(false)
+      })
     return () => { active = false }
   }, [refreshKey])
 
@@ -1560,8 +2010,19 @@ export default function App() {
           <Route index element={<ActivityPage />} />
           <Route path="streams" element={<EmployeeStreamsPage />} />
           <Route path="experiments" element={<LibraryPage />} />
+          <Route path="experiments/background" element={<section className="space-y-5">
+            <h1 className="text-2xl font-semibold tracking-tight">Background simulations</h1>
+            <BackgroundSimulations />
+          </section>} />
+          <Route path="experiments/coffeebench/settings" element={<BenchmarkSettingsPage key="coffee" />} />
+          <Route path="experiments/ecommercebench/settings" element={<BenchmarkSettingsPage key="ecommerce" ecommerce />} />
           <Route path="experiments/:experimentId" element={<ExperimentPage />} />
+          <Route path="settings/company-clock" element={<CompanyClockPage />} />
           <Route path="help" element={<HelpPage />} />
+          <Route path="help/company-environment" element={<HelpSection title="Company environment"><CompanySwitcher /></HelpSection>} />
+          <Route path="help/context" element={<HelpSection title="Codex connection"><CodexConnectionCard /></HelpSection>} />
+          <Route path="help/native-evaluations" element={<HelpSection title="Native evaluations"><SavedNativeEvaluations /></HelpSection>} />
+          <Route path="help/company-tools" element={<CompanyToolsPage />} />
           <Route path="runs" element={<RunsPage />} />
           <Route path="runs/:runId" element={<RunPage />} />
           <Route path="*" element={<NotFound />} />

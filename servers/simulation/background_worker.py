@@ -376,11 +376,10 @@ class BackgroundWorker:
                 raise BackgroundProviderFailed(type(exc).__name__) from exc
 
     async def advance(self, request: BackgroundAdvanceRequest) -> BackgroundResult:
-        provider_id = request.provider_id
-        async with self._locked_provider(provider_id, request.company_id):
-            return await self._advance_locked(request)
+        async with self._locked_provider(request.provider_id, request.company_id):
+            return await self._advance_claimed(request)
 
-    async def _advance_locked(self, request: BackgroundAdvanceRequest) -> BackgroundResult:
+    async def _advance_claimed(self, request: BackgroundAdvanceRequest) -> BackgroundResult:
         provider_id = request.provider_id
         upstream_commit, _initializer = self._provider(provider_id)
         body = self._request_dict(request)
@@ -446,6 +445,7 @@ class BackgroundWorker:
                 cursor=advanced["snapshot"]["cursor"], snapshot=advanced["snapshot"],
                 result=result.model_dump(mode="json"), intents=result.erp_intents,
                 company_id=request.company_id,
+                expected_state_updated_at=state["updated_at"] if provider_id == "coffeebench" else None,
             )
             return result
         except (IdempotencyConflict, StoreConflict, BackgroundOperationUncertain, StoreNotFound):
@@ -670,7 +670,7 @@ class BackgroundWorker:
                     confirmed_cursor=cursor, checkpoint_sha256=digest,
                     company_id=previous.company_id,
                 )
-            return await self._advance_locked(recovery)
+            return await self._advance_claimed(recovery)
 
     async def apply_company_action(self, action: TranslatedAction) -> NativeActionReceipt:
         """Apply a mapped company action in Coffee's native clock and persist its receipt."""
@@ -678,7 +678,7 @@ class BackgroundWorker:
             raise ValueError("CoffeeBench feedback action requires its pinned benchmark and company_time")
         operation_id = f"company-action:{action.action_id}"
         body = {"company_id": "company", "action": action.model_dump(mode="json")}
-        async with self._locked_provider("coffeebench", "company"):
+        async with self._locked_provider("coffeebench"):
             state = self.store.get_background_provider_state("coffeebench")
             if state is None:
                 raise StoreNotFound("CoffeeBench background provider has not been initialized")
@@ -719,6 +719,7 @@ class BackgroundWorker:
                     result=result.model_dump(mode="json"),
                     intents=result.erp_intents,
                     company_id="company",
+                    expected_state_updated_at=state["updated_at"],
                 )
                 return self._action_receipt(result.model_dump(mode="json"), action.action_id)
             except (IdempotencyConflict, StoreConflict, StoreNotFound):

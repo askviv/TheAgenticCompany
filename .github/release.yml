@@ -1,0 +1,17 @@
+changelog:
+  categories:
+    - title: Upgrade Notes
+      labels:
+        - breaking-change
+        - migration
+    - title: Added
+      labels:
+        - enhancement
+        - feature
+    - title: Fixed
+      labels:
+        - bug
+        - fix
+    - title: Changed
+      labels:
+        - '*'

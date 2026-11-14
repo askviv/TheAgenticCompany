@@ -20,6 +20,15 @@ sudo install -m 0600 /path/to/deployment-profile.json \
 sudo deploy/virtual-time-world/up.sh
 ```
 
+Set `viv.email` to the deployment's handoff recipient. The name of the
+profile section refers to the simulation's agent role and the email address
+can belong to any configured receiver. The coordinator reads that address
+from its mail actor configuration and submits employee handoffs through
+Mailu using standard SMTP. The deployment profile supplies the exact
+Postfix route for installations that use a private relay, such as the
+local preview bridge. Keep environment addresses in the private profile
+or, for an existing installation, in its runtime config and Mailu maps.
+
 When deliberately replacing the selected world's VM and guest storage, use the
 same profile with `sudo deploy/virtual-time-world/up.sh --fresh`.
 
@@ -108,11 +117,11 @@ hostnames (`domains.owncloud`, `chat`, `plane`, `mail`, `erp`, `midpoint`, and
 host installer supplies that profile; it does not invent domains or
 credentials.
 
-Experiment task instructions and the Company tools links share the JSON file
-selected by `COMPANY_TOOLS_URLS_FILE`. The retained `task.md` instructions use
-Jinja placeholders such as `{{ company_tools.owncloud }}`; the experiment
-catalogue renders them from that mapping. Configure URLs in the mapping rather
-than editing task text. Existing run snapshots and messages are not rewritten.
+Experiment instructions refer to tools by name, such as ERPNext or ownCloud.
+The catalogue renders placeholders such as `{{ company_tools.owncloud }}` as
+tool names. The Company tools links use the addresses in
+`COMPANY_TOOLS_URLS_FILE`. Existing run snapshots and messages retain their
+original text.
 
 The bootstrap creates a guest-local root CA and server certificate with OpenSSL, installs the root into the guest OS trust store, and
 renders Caddy configuration from the repository template. Each certificate
@@ -279,7 +288,7 @@ part of this stage.
 
 The coordinator runtime JSON exposes `sqlite_busy_timeout_seconds` (existing default: 30). Keep that unscaled base value; every simulation SQLite connection multiplies it by the active kernel rate. At 24×, the resulting 720 guest seconds retain a 30-real-second allowance for durable storage contention. This changes resource waiting, not the guest clock or benchmark deadlines. Health reads use a read connection, and displayed company time comes directly from the guest kernel; delayed record processing does not freeze the clock.
 
-Clock speed is deployment configuration. Install `clock.env.example` as `$WORLD_ROOT/config/clock.env`, set `WORLD_CLOCK_RATE`, and run `sudo systemctl reload virtual-time-world-clock.service` to apply it without stopping the VM. The service uses this rate when starting a stopped VM; recovery of an already-running VM retains its durable confirmed clock state. The dashboard displays company time and has no speed editor.
+Open **Settings → Company clock** in the dashboard to see the active rate and change it while the VM is running. Normal VM starts use the last confirmed rate from the durable clock anchor. Operators can also set `WORLD_CLOCK_RATE` in `$WORLD_ROOT/config/clock.env` and explicitly reload `virtual-time-world-clock.service` to apply that rate.
 
 Keep `mailbox_idle_renewal_seconds` at its existing 30-second base value. In kernel-clock mode the runtime multiplies it by the current kernel rate, keeping IMAP IDLE renewal at 30 real seconds. New-mail notifications still wake immediately. Transport heartbeat and reconnect intervals use the same rate at connection setup.
 
@@ -323,3 +332,21 @@ existing image path. The original HDD directory is retained only until the
 operator verifies startup, then must be removed. No company reset is performed.
 
 Architecture-specific kernel entry points and Apple Silicon/UTM limitations are documented in the [build guide](../../docs/enterprise-simulation/architecture-builds.md).
+
+### Host Ethernet and Wi-Fi on the same subnet
+
+`up.sh` installs `90-company-multihomed-arp.conf` into `/etc/sysctl.d/` and loads
+it with the native `sysctl` command. It makes address replies and announcements
+use the interface that owns the address, preventing Wi-Fi from advertising the
+Ethernet address. Ubuntu reapplies the settings during boot. Existing hosts can
+apply the same configuration without restarting the network or the company:
+
+```sh
+sudo install -m 0644 deploy/virtual-time-world/90-company-multihomed-arp.conf /etc/sysctl.d/90-company-multihomed-arp.conf
+sudo sysctl --load /etc/sysctl.d/90-company-multihomed-arp.conf
+```
+
+These settings preserve DHCP addresses and routes. Peers with a stale address
+cache may need a gratuitous ARP announcement from the correct interface, e.g.
+`sudo arping -U -c 3 -I enp3s0f0 192.168.0.200` on the Mini. Interface names and
+addresses in that maintenance command are deployment-specific.

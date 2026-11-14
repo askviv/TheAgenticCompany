@@ -25,6 +25,7 @@ import math
 import os
 from pathlib import Path
 import pickle
+import random
 import sqlite3
 import tempfile
 import threading
@@ -625,9 +626,14 @@ async def _advance_environment(environment: Any, target_minute: int) -> None:
             ready.append((ev, day))
         if not ready:
             continue
-        responses = await asyncio.gather(
-            *(environment.agents[ev.target_agent].step_query_async() for ev, _ in ready),
-            return_exceptions=True,
+        # Bound an inference wave in real time. Cancellation discards the
+        # private world for this attempt before it can publish a checkpoint.
+        responses = await asyncio.wait_for(
+            asyncio.gather(
+                *(environment.agents[ev.target_agent].step_query_async() for ev, _ in ready),
+                return_exceptions=True,
+            ),
+            timeout=130 * kernel_virtual_time_rate(),
         )
         for (ev, day), response in zip(ready, responses):
             actor_id = ev.target_agent
@@ -1346,6 +1352,14 @@ def _source_records(environment: Any, snapshot: dict[str, Any]) -> list[dict[str
                 "total_price": format(total.quantize(Decimal("0.01")), "f"),
                 "payment_terms_days": offer.payment_terms_days,
                 "offer_message": offer.message,
+                **({"requested_extra_days": offer._erp_distress_extension}
+                   if getattr(offer, "_erp_distress_extension", 0) else {}),
+                **({"financing_requested": True} if offer.buyer_id == getattr(
+                    environment.marketplace, "_erp_active_financing_customer", None
+                ) else {}),
+                **({"credit_limit_requested": True} if "higher_credit_limit" in getattr(
+                    environment.marketplace, "_erp_payment_windows", {}
+                ).get(offer.buyer_id, ()) else {}),
                 "offer_status": offer.status,
                 "offer_posted_at_virtual_minute": offer.posted_at,
                 "listing_quantity": listing.qty,
@@ -1384,14 +1398,29 @@ def _source_records(environment: Any, snapshot: dict[str, Any]) -> list[dict[str
             "bad_debt": invoice.bad_debt,
             "upstream_source": "coffeebench/typings.py:Invoice",
         }
+        if discrepancy := getattr(invoice, "_erp_receiving_discrepancy", None):
+            invoice_fields["receiving_discrepancy"] = discrepancy
+        if company_side == invoice.issuer:
+            windows = getattr(environment.marketplace, "_erp_payment_windows", {}).get(party, ())
+            exceptions = sorted(set(windows) & {"reminder", "missing_po", "receiving_mismatch", "wrong_recipient", "partial_payment"})
+            if exceptions:
+                invoice_fields["billing_exceptions"] = exceptions
         add("invoice", "invoice", invoice.id, party, invoice.amount, invoice.issue_date * 1440, invoice.id, invoice_fields)
+        partial_amount = getattr(invoice, "partial_paid_amount", 0.0)
+        payments = []
+        if partial_amount:
+            payments.append((f"{invoice.id}:partial", invoice.partial_paid_day, partial_amount))
         if invoice.paid and invoice.paid_date is not None:
-            paid_amount = invoice.amount + invoice.late_fees_accrued - invoice.credited_amount
+            paid_amount = invoice.amount + invoice.late_fees_accrued - invoice.credited_amount - partial_amount
+            payments.append((invoice.id, invoice.paid_date, paid_amount))
+        for payment_id, paid_day, paid_amount in payments:
             add(
-                "payment", "invoice_payment", invoice.id, party, paid_amount,
-                invoice.paid_date * 1440, invoice.id,
+                "payment", "invoice_payment", payment_id, party, paid_amount,
+                paid_day * 1440, invoice.id,
                 {
                     **invoice_fields,
+                    "paid": payment_id == invoice.id,
+                    "paid_day": paid_day,
                     "paid_amount": format(Decimal(str(paid_amount)).quantize(Decimal("0.01")), "f"),
                     "cash_from_party_id": invoice.payer,
                     "cash_to_party_id": invoice.issuer,
@@ -1489,10 +1518,63 @@ async def advance(
         updated["checkpoint"], _checkpoint_directory(binding),
         updated["company_business_ids"],
     )
+    # Company sales are payable only after the ERP invoice was submitted and sent.
+    environment.marketplace._erp_invoice_issuers = set(updated["company_business_ids"])
+    environment.marketplace._erp_sent_invoices = set(binding.get("sent_sales_invoice_ids", []))
+    credits = binding.get("invoice_credits", {})
+    for company_id in updated["company_business_ids"]:
+        for invoice in environment.business_apps[company_id].accounts_receivable:
+            if invoice.id in credits:
+                previous = getattr(invoice, "_erp_applied_credit", 0.0)
+                credited = float(credits[invoice.id])
+                invoice.credited_amount = round(invoice.credited_amount + max(0.0, credited - previous), 2)
+                invoice._erp_applied_credit = max(previous, credited)
+    enabled_windows = binding.get("payment_windows", [])
+    if isinstance(enabled_windows, dict):
+        # An advance queued before the settings change may still use the old shape.
+        enabled_windows = {window for windows in enabled_windows.values() for window in windows}
+    assignments = getattr(environment.marketplace, "_erp_payment_window_assignments", None)
+    if assignments is None:
+        customers = sorted(set(environment.business_apps) - set(updated["company_business_ids"]))
+        random.Random(updated["checkpoint"]["sha256"]).shuffle(customers)
+        assignments = {
+            window: customers[index % len(customers)]
+            for index, window in enumerate(("friday", "morning")) if customers
+        }
+        environment.marketplace._erp_payment_window_assignments = assignments
+    customers = sorted(set(environment.business_apps) - set(updated["company_business_ids"]))
+    for behaviour in (
+        "batch_cutoff", "financial_distress", "reminder", "missing_po",
+        "receiving_mismatch", "wrong_recipient", "partial_payment", "higher_credit_limit",
+    ):
+        if behaviour in enabled_windows and behaviour not in assignments and customers:
+            assignments[behaviour] = random.Random(
+                f"{updated['checkpoint']['sha256']}:{behaviour}"
+            ).choice(customers)
+    payment_windows = {}
+    for window, customer in assignments.items():
+        if window in enabled_windows:
+            payment_windows.setdefault(customer, []).append(window)
+    environment.marketplace._erp_payment_windows = payment_windows
+    if "financing" in enabled_windows and not hasattr(environment.marketplace, "_erp_financing_customer"):
+        customers = sorted(set(environment.business_apps) - set(updated["company_business_ids"]))
+        if customers:
+            environment.marketplace._erp_financing_customer = random.Random(
+                f"{updated['checkpoint']['sha256']}:financing"
+            ).choice(customers)
+    environment.marketplace._erp_active_financing_customer = (
+        getattr(environment.marketplace, "_erp_financing_customer", None)
+        if "financing" in enabled_windows else None
+    )
+    environment.marketplace._erp_start_weekday = _as_datetime(updated["started_at"]).weekday()
     virtual_delta = max(0, int((finish - _as_datetime(updated["started_at"])).total_seconds() // 60))
     horizon = int(environment.max_days) * 1440
     horizon_finished = virtual_delta >= horizon
     target_minute = min(virtual_delta, horizon - 1)
+    sent_at = getattr(environment.marketplace, "_erp_invoice_first_seen_at", {})
+    for invoice_id in environment.marketplace._erp_sent_invoices:
+        sent_at.setdefault(invoice_id, target_minute)
+    environment.marketplace._erp_invoice_first_seen_at = sent_at
     condition_status_before = {
         condition["event_id"]: condition.get("status")
         for condition in updated.get("external_supply_conditions", [])

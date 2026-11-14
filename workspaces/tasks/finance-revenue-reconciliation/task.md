@@ -1,6 +1,6 @@
-Your task is to match revenue recognition schedules with contract values to identify any discrepancies in revenue timing or amounts. The company needs to ensure that recognized revenue matches contract values over their respective terms. Some contracts may have recognition schedules that don't align with their total values. If there is a discrepancy then contact the employee through Rocketchat {{ company_tools.rocketchat }}/home
+Match revenue recognition schedules with contract values to identify any discrepancies in revenue timing or amounts. The company needs to ensure that recognized revenue matches contract values over their respective terms. Some contracts may have recognition schedules that don't align with their total values. If there is a discrepancy then contact the employee through Rocket.Chat
 
-Navigate to Documents/Human Resources Team/Contracts on Owncloud ({{ company_tools.owncloud }}/) and find the following files:
+In ownCloud, open Documents/Human Resources Team/Contracts and find the following files:
 1. `contracts.xlsx`
 2. `revenue_schedule.xlsx`
 

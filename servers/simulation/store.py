@@ -229,6 +229,13 @@ class SQLiteStore:
                     erp_binding_json TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS coffee_payment_windows (
+                    customer TEXT NOT NULL, behaviour TEXT NOT NULL,
+                    PRIMARY KEY(customer, behaviour)
+                );
+                CREATE TABLE IF NOT EXISTS ecommerce_behaviours (
+                    behaviour TEXT PRIMARY KEY
+                );
                 CREATE TABLE IF NOT EXISTS background_provider_controls (
                     company_id TEXT NOT NULL, provider_id TEXT NOT NULL,
                     enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
@@ -465,6 +472,8 @@ class SQLiteStore:
             if "result_json" not in pending_columns:
                 connection.execute("ALTER TABLE background_provider_pending ADD COLUMN result_json TEXT")
             receipt_columns = {row["name"] for row in connection.execute("PRAGMA table_info(background_provider_result_receipts)")}
+            if "finance_source_ids_json" not in receipt_columns:
+                connection.execute("ALTER TABLE background_provider_result_receipts ADD COLUMN finance_source_ids_json TEXT")
             if "evidence_origin" not in receipt_columns:
                 connection.execute(
                     "ALTER TABLE background_provider_result_receipts "
@@ -688,6 +697,32 @@ class SQLiteStore:
             return [{"experiment_id": row["run_id"], "scenario_id": row["scenario_id"],
                      "generation": row["generation"], "agent_id": row["agent_id"], "status": row["status"],
                      "simulated_time": row["simulated_time"], "paused": bool(row["paused"])} for row in rows]
+
+    def ecommerce_behaviours(self) -> list[str]:
+        with self._connection(None) as db:
+            return [row["behaviour"] for row in db.execute(
+                "SELECT behaviour FROM ecommerce_behaviours ORDER BY behaviour"
+            )]
+
+    def set_ecommerce_behaviour(self, behaviour: str, enabled: bool) -> None:
+        with self.transaction() as db:
+            if enabled:
+                db.execute("INSERT OR IGNORE INTO ecommerce_behaviours VALUES (?)", (behaviour,))
+            else:
+                db.execute("DELETE FROM ecommerce_behaviours WHERE behaviour=?", (behaviour,))
+
+    def coffee_payment_windows(self) -> list[str]:
+        with self._connection(None) as db:
+            return [row["behaviour"] for row in db.execute(
+                "SELECT DISTINCT behaviour FROM coffee_payment_windows ORDER BY behaviour"
+            )]
+
+    def set_coffee_payment_window(self, behaviour: str, enabled: bool) -> None:
+        with self.transaction() as db:
+            # Retire any customer-specific rows written by the previous UI.
+            db.execute("DELETE FROM coffee_payment_windows WHERE behaviour=?", (behaviour,))
+            if enabled:
+                db.execute("INSERT INTO coffee_payment_windows VALUES (?, ?)", ("", behaviour))
 
     def background_provider_control(self, provider_id: str, company_id: str = "company") -> dict[str, Any]:
         with self._connection(None) as db:
@@ -947,6 +982,7 @@ class SQLiteStore:
         result: dict[str, Any],
         intents: list[dict[str, Any]],
         company_id: str = "company",
+        expected_state_updated_at: str | None = None,
     ) -> dict[str, Any]:
         request_hash = _digest(request)
         started_value = started_at.isoformat() if isinstance(started_at, datetime) else str(started_at)
@@ -964,6 +1000,19 @@ class SQLiteStore:
                 if operation["result_json"] != result_json:
                     raise StoreConflict("background operation completed with a different result")
                 return _decode(operation["result_json"])
+
+            if expected_state_updated_at is not None:
+                state = connection.execute(
+                    "SELECT updated_at FROM background_provider_state WHERE company_id=? AND provider_id=?",
+                    (company_id, provider_id),
+                ).fetchone()
+                superseded = connection.execute(
+                    "SELECT 1 FROM background_operation_recovery_resolutions "
+                    "WHERE company_id=? AND provider_id=? AND previous_operation_id=?",
+                    (company_id, provider_id, operation_id),
+                ).fetchone()
+                if superseded or state is None or state["updated_at"] != expected_state_updated_at:
+                    raise StoreConflict("CoffeeBench checkpoint owner or base changed before save")
 
             connection.execute(
                 "INSERT INTO background_provider_state(company_id,provider_id,upstream_commit,seed,started_at,cursor,snapshot_json,updated_at) "
@@ -1444,10 +1493,11 @@ class SQLiteStore:
             return
         connection.execute(
             "INSERT INTO background_provider_result_receipts(company_id,provider_id,operation_id,"
-            "upstream_commit,cursor,coverage_until,next_due,result_sha256,source_event_ids_json,evidence_origin,created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "upstream_commit,cursor,coverage_until,next_due,result_sha256,source_event_ids_json,evidence_origin,created_at,"
+            "finance_source_ids_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
             (company_id, provider_id, operation_id, expected[0], expected[1], expected[1],
-             *expected[2:], "coordinator_result", _now()),
+             *expected[2:], "coordinator_result", _now(),
+             _json(sorted({intent["id"] for intent in result.get("erp_intents", [])}))),
         )
 
     def record_derived_background_provider_result_receipt(
@@ -1533,6 +1583,7 @@ class SQLiteStore:
             "cursor": row["cursor"], "coverage_until": row["coverage_until"], "next_due": row["next_due"],
             "result_sha256": row["result_sha256"],
             "source_event_ids": _decode(row["source_event_ids_json"]),
+            "finance_source_ids": _decode(row["finance_source_ids_json"]) if row["finance_source_ids_json"] is not None else None,
             "evidence_origin": row["evidence_origin"],
             "created_at": row["created_at"], "acknowledged_at": row["acknowledged_at"],
         }
@@ -1575,6 +1626,34 @@ class SQLiteStore:
                 (company_id, provider_id),
             ).fetchone()
         return None if row is None else self._background_provider_result_receipt_dict(row)
+
+    def coffee_activity_message_statuses(self) -> tuple[dict, dict]:
+        """Read only the company-facing projection of the native mail ledger."""
+        with self._connection(None) as connection:
+            tables = {row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE name IN "
+                "('company_native_message_outbox','company_coffee_thread_actions')"
+            )}
+            deliveries = {}
+            replies: dict[str, list[dict]] = {}
+            if "company_native_message_outbox" in tables:
+                for row in connection.execute(
+                    "SELECT source_event_id,status,message_id,"
+                    "json_extract(private_payload_json,'$.erp_doctype') AS doctype,"
+                    "json_extract(private_payload_json,'$.erp_name') AS name,"
+                    "json_extract(private_payload_json,'$.recipient.actor_id') AS recipient "
+                    "FROM company_native_message_outbox"
+                ):
+                    deliveries[row["source_event_id"]] = dict(row)
+            if "company_coffee_thread_actions" in tables:
+                for row in connection.execute(
+                    "SELECT source_event_id,status,"
+                    "json_extract(action_json,'$.arguments.title') AS title,"
+                    "json_extract(action_json,'$.arguments.body') AS body "
+                    "FROM company_coffee_thread_actions ORDER BY updated_at"
+                ):
+                    replies.setdefault(row["source_event_id"], []).append(dict(row))
+        return deliveries, replies
 
     def list_acknowledged_native_background_provider_result_receipts(
         self, company_id: str = "company",

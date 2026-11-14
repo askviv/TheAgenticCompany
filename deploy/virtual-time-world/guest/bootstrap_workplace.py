@@ -583,6 +583,12 @@ def main() -> int:
     args.compose_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     args.compose_dir.chmod(0o700)
     configs = _prepare_app_compose(args.source, profile, args.compose_dir)
+    application_services = Path('/etc/company-workplace/application-services.json')
+    if not application_services.exists():
+        mapping = json.loads((args.source / 'deploy/virtual-time-world/application-services.example.json').read_text())
+        for group in mapping:
+            group['compose_file'] = str(args.compose_dir / Path(group['compose_file']).name)
+        _write(application_services, json.dumps(mapping, indent=2) + '\n', 0o600)
     midpoint_initialized = _preflight_projects(configs)
     state_dir = Path("/etc/company-workplace/state")
     seed_markers = (state_dir / "rocketchat-seed-restored", state_dir / "plane-seed-restored")

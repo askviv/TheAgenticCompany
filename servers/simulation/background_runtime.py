@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import logging
 from typing import Any
 
 import requests
@@ -21,6 +22,9 @@ from servers.simulation.ecommerce_background import (
 )
 from servers.simulation.feedback_contracts import NativeActionReceipt, TranslatedAction
 from servers.simulation.store import SQLiteStore, StoreConflict, StoreNotFound
+
+
+LOG = logging.getLogger(__name__)
 
 
 class BackgroundWorkerError(RuntimeError):
@@ -320,83 +324,6 @@ class CompanyBackgroundRuntime:
                 "result_sha256", "source_event_ids",
             ) if key in receipt
         } | {"coverage_until": receipt.get("coverage_until") or receipt["cursor"]}
-
-    def _verify_durable_ecommerce_handoff(
-        self, company_id: str, coffee_target: datetime, binding: dict[str, Any],
-    ) -> bool:
-        receipt = binding.get("external_supply_source_receipt")
-        conditions = binding.get("external_supply_conditions")
-        policy = binding.get("external_supply_condition_policy")
-        if (policy is None or not isinstance(receipt, dict) or not isinstance(conditions, list)
-                or policy != {
-                    "affected_categories": ["all"],
-                    "target_scope": "native_coffee_market",
-                    "native_effect": "delivery_lag_days",
-                }
-                or receipt.get("provider_id") != "ecommercebench"
-                or receipt.get("upstream_commit") != ECOMMERCE_UPSTREAM_COMMIT
-                or not isinstance(receipt.get("cursor"), str)
-                or not isinstance(receipt.get("operation_id"), str) or not receipt["operation_id"]
-                or not isinstance(receipt.get("result_sha256"), str)
-                or len(receipt["result_sha256"]) != 64
-                or any(char not in "0123456789abcdef" for char in receipt["result_sha256"])):
-            return False
-        normalized = [ExternalSupplyCondition.model_validate(item).model_dump(mode="json") for item in conditions]
-        if receipt.get("conditions_sha256") != self._canonical_hash(normalized):
-            return False
-        stored_receipt = self.store.get_background_provider_result_receipt(
-            "ecommercebench", receipt["operation_id"], require_acknowledged=True, company_id=company_id,
-        )
-        if stored_receipt is None:
-            return False
-        event_ids = receipt.get("source_event_ids")
-        if (not isinstance(event_ids, list) or event_ids != sorted(set(event_ids))
-                or any(not isinstance(item, str) or not item for item in event_ids)):
-            return False
-        source_cursor = self._utc(datetime.fromisoformat(receipt["cursor"].replace("Z", "+00:00")))
-        coverage_until = coffee_target
-        next_due_value = receipt.get("next_due", stored_receipt.get("next_due"))
-        if source_cursor > coffee_target or next_due_value is None:
-            return False
-        next_due = self._utc(datetime.fromisoformat(str(next_due_value).replace("Z", "+00:00")))
-        if coffee_target >= next_due:
-            return False
-        if source_cursor < coverage_until:
-            expected_identity = self._ecommerce_source_identity_sha256(company_id)
-            coverage = self.store.get_background_provider_result_coverage(
-                "ecommercebench", receipt["operation_id"], coverage_until.isoformat(), company_id=company_id,
-            )
-            if (coverage is None or coverage["source_identity_sha256"] != expected_identity
-                    or coverage["gap_event_ids_sha256"] != self._canonical_hash([])):
-                return False
-        elif source_cursor != coverage_until:
-            return False
-        if receipt.get("coverage_until") not in (None, coverage_until.isoformat(), coverage_until.strftime("%Y-%m-%dT%H:%M:%SZ")):
-            return False
-        if stored_receipt.get("coverage_until") not in (None, source_cursor.isoformat(), coverage_until.isoformat(),
-                                                         coverage_until.strftime("%Y-%m-%dT%H:%M:%SZ")):
-            return False
-        persisted_events = {str(event["event_id"]): event
-                            for event in self.store.list_company_source_events(company_id)}
-        if any(
-            event_id not in persisted_events
-            or persisted_events[event_id].get("source") != "qwenlm-ecommercebench-calendar"
-            or persisted_events[event_id].get("upstream_commit") != ECOMMERCE_UPSTREAM_COMMIT
-            or self._utc(datetime.fromisoformat(
-                str(persisted_events[event_id]["simulated_time"]).replace("Z", "+00:00")
-            )) > coffee_target
-            for event_id in event_ids
-        ):
-            return False
-        stored_view = self._confirmed_receipt_view(stored_receipt)
-        exact_keys = ("provider_id", "operation_id", "upstream_commit", "cursor",
-                      "next_due", "result_sha256", "source_event_ids")
-        if any(receipt.get(key, stored_view.get(key)) != stored_view.get(key) for key in exact_keys):
-            return False
-        expected_conditions = self._coffee_supply_conditions(company_id, coffee_target, [])
-        expected_conditions.sort(key=lambda item: str(item["event_id"]))
-        normalized.sort(key=lambda item: str(item["event_id"]))
-        return normalized == expected_conditions
 
     def _ecommerce_source_identity_sha256(self, company_id: str) -> str:
         initialization = self.store.get_background_initialization_request("ecommercebench", company_id)
@@ -824,7 +751,6 @@ class CompanyBackgroundRuntime:
         ecom_result_events: list[dict[str, Any]] = []
         ecom_result_receipt: dict[str, Any] | None = None
         ecom_target: datetime | None = None
-        ecom_result_confirmed = False
         if (coupling_policy is not None and "coffeebench" in selected
                 and "ecommercebench" not in selected
                 and self.store.get_background_provider_pending("coffeebench", company_id) is None):
@@ -842,24 +768,22 @@ class CompanyBackgroundRuntime:
                 )
                 if latest_cursor <= boundary and source_current:
                     ecom_target = boundary
-                    ecom_result_confirmed = True
                     if latest_cursor < boundary:
                         try:
                             ecom_result_receipt = self._cover_current_ecommerce_result(company_id, boundary)
                         except LegacyEcommerceHandoffIntegrityError as exc:
-                            errors["coffeebench"] = {"status_code": None, "code": exc.code}
+                            LOG.warning("Skipping E-Commerce supply conditions for CoffeeBench: %s", exc.code)
                     else:
                         ecom_result_receipt = self._confirmed_receipt_view(latest_ecommerce)
         for provider_id in (value for value in self.ADVANCE_ORDER if value in selected):
             pending = self.store.get_background_provider_pending(provider_id, company_id)
             pending_until: datetime | None = None
-            legacy_handoff_verified = False
             if pending is not None:
                 pending_request = BackgroundAdvanceRequest.model_validate(pending["request"])
                 pending_until = self._utc(pending_request.until)
                 if provider_id == "coffeebench" and coupling_policy is not None:
                     try:
-                        legacy_handoff_verified = self._verify_legacy_handoff_if_needed(
+                        self._verify_legacy_handoff_if_needed(
                             pending_request, pending["created_at"],
                         )
                     except LegacyEcommerceHandoffIntegrityError as exc:
@@ -869,38 +793,6 @@ class CompanyBackgroundRuntime:
                             "pending_until": pending_until.isoformat(),
                         }
                         continue
-            elif (provider_id == "coffeebench" and coupling_policy is not None
-                  and "ecommercebench" not in selected and ecom_result_receipt is None):
-                errors[provider_id] = errors.get(provider_id, {
-                    "status_code": None, "code": "source_provider_not_current",
-                })
-                continue
-            if (provider_id == "coffeebench" and "ecommercebench" in selected
-                    and coupling_policy is not None):
-                coffee_target = pending_until or boundary
-                if (not ecom_result_confirmed or ecom_target is None
-                        or coffee_target > ecom_target
-                        or (pending is None and ecom_target != boundary)):
-                    no_ecommerce_pending = (
-                        self.store.get_background_provider_pending("ecommercebench", company_id) is None
-                    )
-                    durable_handoff = (
-                        pending is not None and (
-                            legacy_handoff_verified
-                            or (no_ecommerce_pending and self._verify_durable_ecommerce_handoff(
-                                company_id, coffee_target, pending_request.binding,
-                            ))
-                        )
-                    )
-                    if not durable_handoff:
-                        errors[provider_id] = {
-                            "status_code": None,
-                            "code": "source_provider_not_current" if not legacy_handoff_verified
-                            else "legacy_handoff_target_mismatch",
-                        }
-                        continue
-                    ecom_target = coffee_target
-                    ecom_result_confirmed = True
             if pending is not None:
                 prior_request = BackgroundAdvanceRequest.model_validate(pending["request"])
                 prior_until = self._utc(prior_request.until)
@@ -924,8 +816,28 @@ class CompanyBackgroundRuntime:
                         else:
                             result = self.worker.advance(prior_request)
                     except BackgroundWorkerError as exc:
+                        if (provider_id == "coffeebench" and recovery is None
+                                and exc.code in {"TimeoutError", "background_operation_uncertain"}):
+                            try:
+                                recovered = self.recover_pending_coffeebench(
+                                    pending["operation_id"], "automatic-recovery:" + pending["operation_id"],
+                                )
+                                recovered_pending = self.store.get_background_provider_pending(provider_id, company_id)
+                                if recovered_pending is not None and recovered_pending["result"] is not None:
+                                    results[provider_id] = recovered_pending["result"]
+                                    operation_ids[provider_id] = recovered_pending["operation_id"]
+                                    deferred = deferred or prior_until < boundary
+                                    next_due = recovered_pending["result"].get("next_due")
+                                    if next_due is not None:
+                                        next_due_values.append(self._utc(datetime.fromisoformat(next_due)))
+                                    continue
+                                code = recovered.get("code", exc.code)
+                            except BackgroundWorkerError as recovery_error:
+                                code = recovery_error.code
+                        else:
+                            code = exc.code
                         errors[provider_id] = {
-                            "status_code": exc.status_code, "code": exc.code,
+                            "status_code": exc.status_code, "code": code,
                             "pending_operation_id": pending["operation_id"],
                             "pending_until": prior_until.isoformat(),
                         }
@@ -938,7 +850,6 @@ class CompanyBackgroundRuntime:
                 deferred = deferred or prior_until < boundary
                 if provider_id == "ecommercebench":
                     ecom_target = prior_until
-                    ecom_result_confirmed = True
                     ecom_result_events = list(result.get("events", []))
                     ecom_result_receipt = self._ecommerce_receipt(pending["operation_id"], result)
                 next_due = result.get("next_due")
@@ -948,12 +859,11 @@ class CompanyBackgroundRuntime:
 
             operation_id = f"{company_id}:{provider_id}:{tick_id}"
             request_binding = bindings[provider_id]
-            if provider_id == "coffeebench" and coupling_policy is not None:
+            if (provider_id == "coffeebench" and coupling_policy is not None
+                    and ecom_target == boundary and ecom_result_receipt is not None):
                 conditions = self._coffee_supply_conditions(
                     company_id, boundary, ecom_result_events,
                 )
-                if ecom_result_receipt is None:
-                    raise StoreConflict("CoffeeBench condition handoff lacks its confirmed E-Commerce result")
                 handoff_receipt = {
                     **ecom_result_receipt,
                     "conditions_sha256": self._canonical_hash(conditions),
@@ -988,7 +898,6 @@ class CompanyBackgroundRuntime:
             operation_ids[provider_id] = operation_id
             if provider_id == "ecommercebench":
                 ecom_target = boundary
-                ecom_result_confirmed = True
                 ecom_result_events = list(result.get("events", []))
                 ecom_result_receipt = self._ecommerce_receipt(operation_id, result)
             next_due = result.get("next_due")

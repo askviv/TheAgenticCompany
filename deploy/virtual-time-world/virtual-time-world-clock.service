@@ -11,7 +11,7 @@ Environment=WORLD_SSH_PORT=22220
 EnvironmentFile=/data/theagentcompany/virtual-time-world/config/clock.env
 Environment=VIRTUAL_TIME_SOURCE_ROOT=/data/theagentcompany/virtual-time-world/company-source
 Environment=PYTHONPATH=/data/theagentcompany/virtual-time-world/company-source
-ExecStart=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py --root ${WORLD_ROOT} --name ${WORLD_NAME} --ssh-port ${WORLD_SSH_PORT} run --rate ${WORLD_CLOCK_RATE}
+ExecStart=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py --root ${WORLD_ROOT} --name ${WORLD_NAME} --ssh-port ${WORLD_SSH_PORT} run
 ExecReload=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py --root ${WORLD_ROOT} --name ${WORLD_NAME} --ssh-port ${WORLD_SSH_PORT} set-rate ${WORLD_CLOCK_RATE}
 ExecStop=/data/theagentcompany/virtual-time-world/host-venv/bin/python /usr/local/lib/virtual-time-world/clock_control.py --root ${WORLD_ROOT} --name ${WORLD_NAME} --ssh-port ${WORLD_SSH_PORT} stop
 Restart=on-failure

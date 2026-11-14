@@ -9,6 +9,7 @@ import logging
 import traceback
 from typing import Any, Literal
 from uuid import UUID, uuid4
+import requests
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -39,6 +40,11 @@ from servers.simulation.store import IdempotencyConflict, StoreConflict, StoreNo
 from servers.simulation.provider_experiments import ProviderExperimentRequest
 
 logger = logging.getLogger(__name__)
+
+
+class CompanyEnvironmentName(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=160)
 Role = Literal["controller", "evaluator", "approver", "agent"]
 ERP_READ_OPERATIONS = frozenset({
     "get_purchase_order", "get_purchase_receipt", "get_purchase_invoice", "get_supplier",
@@ -76,6 +82,11 @@ class ExperimentChatDispatchRequest(BaseModel):
 class CoffeeBackgroundRecoveryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     previous_operation_id: str = Field(min_length=1, max_length=240)
+
+
+class HandoffResend(BaseModel):
+    message_id: str = Field(min_length=1, max_length=998)
+    request_id: UUID
 
 
 def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -> FastAPI:
@@ -216,6 +227,19 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         feedback_activity = getattr(engine, "company_feedback_activity", None)
         if callable(feedback_activity):
             activity.extend(feedback_activity())
+        viv_mail = [item for item in activity if item.get("type") == "email"
+                    and item.get("recipient") == "viv"]
+        receipt_reader = getattr(engine, "viv_smtp_receipts", None)
+        received = receipt_reader({
+            item.get("native_message_id") or item["id"]: item["title"]
+            for item in viv_mail if item.get("title")
+        }) if callable(receipt_reader) else set()
+        for item in viv_mail:
+            message_id = item.pop("native_message_id", None) or item["id"]
+            if message_id in received:
+                item["delivery_status"] = "Received"
+            elif item.get("direction") == "sent":
+                item["delivery_status"] = "Sent"
         activity.sort(key=lambda item: (str(item.get("timestamp", "")), str(item["id"])))
         result = {"company_id": "company", "background": background_status, "status": company["status"],
                   "simulated_time": company["simulated_time"], "paused": company["paused"],
@@ -322,13 +346,46 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         require_role(principal, "controller")
         return company_payload()
 
+    @app.post("/company/activity/resend")
+    def resend_company_activity(payload: HandoffResend, principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        resend = getattr(engine, "resend_marketplace_handoff", None)
+        if resend is None:
+            raise HTTPException(status_code=503, detail="Handoff resend is unavailable")
+        try:
+            resend(payload.message_id, str(payload.request_id))
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Sent handoff not found") from error
+        except StoreConflict as error:
+            raise HTTPException(status_code=409, detail="Resend already in progress or delivery unconfirmed") from error
+        return {"accepted": True}
+
+    @app.get("/company/background")
+    def get_company_background(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        reader = getattr(engine, "company_background_status", None)
+        if not callable(reader):
+            raise HTTPException(status_code=503, detail="Benchmark status is not configured")
+        return reader()
+
     @app.get("/company/clock")
     async def get_company_clock(principal: Principal = Depends(authenticate)):
         require_role(principal, "controller")
         provider = getattr(engine, "company_time_provider", None)
         instant = provider() if callable(provider) else (engine.company_state() or {}).get("simulated_time")
+        mode = getattr(engine, "company_clock_mode", "real")
+        reader = getattr(engine, "company_clock_speed_reader", None)
+        if mode == "kernel":
+            from .clock_rate import kernel_virtual_time_rate
+
+            speed = kernel_virtual_time_rate(require_kernel=True)
+        elif callable(reader):
+            speed = reader()
+        else:
+            speed = 1 if mode == "real" else None
         return {"simulated_time": instant.isoformat() if hasattr(instant, "isoformat") else instant,
-                "clock_mode": getattr(engine, "company_clock_mode", "real")}
+                "clock_mode": mode, "clock_speed": speed,
+                "can_set_speed": callable(getattr(engine, "company_clock_speed_setter", None))}
 
     @app.get("/company/desktops")
     def list_employee_desktops(principal: Principal = Depends(authenticate)):
@@ -447,6 +504,43 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
         status_code = 202 if result.get("status") == "uncertain" else 200
         return JSONResponse(result, status_code=status_code, headers={"Cache-Control": "no-store"})
 
+    @app.get("/company/background/ecommercebench/behaviours")
+    def ecommerce_behaviours(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        return {"enabled_behaviours": engine.store.ecommerce_behaviours()}
+
+    @app.post("/company/background/ecommercebench/behaviours/{behaviour}")
+    def set_ecommerce_behaviour(
+        behaviour: Literal[
+            "cancellation_after_picking", "stockout", "parcel_loss", "partial_return",
+            "refund_after_payout", "payout_mismatch",
+        ],
+        model: BackgroundControlRequest,
+        principal: Principal = Depends(authenticate),
+    ):
+        require_role(principal, "controller")
+        engine.store.set_ecommerce_behaviour(behaviour, model.enabled)
+        return {"enabled_behaviours": engine.store.ecommerce_behaviours()}
+
+    @app.get("/company/background/coffeebench/payment-windows")
+    def coffee_payment_windows(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        return {"enabled_behaviours": engine.store.coffee_payment_windows()}
+
+    @app.post("/company/background/coffeebench/payment-windows/{behaviour}")
+    def set_coffee_payment_window(
+        behaviour: Literal[
+            "friday", "morning", "financing", "batch_cutoff", "financial_distress",
+            "reminder", "missing_po", "receiving_mismatch", "wrong_recipient",
+            "partial_payment", "higher_credit_limit",
+        ],
+        model: BackgroundControlRequest,
+        principal: Principal = Depends(authenticate),
+    ):
+        require_role(principal, "controller")
+        engine.store.set_coffee_payment_window(behaviour, model.enabled)
+        return {"enabled_behaviours": engine.store.coffee_payment_windows()}
+
     @app.post("/company/background/{provider_id}/control", status_code=202)
     def control_company_background(
         provider_id: Literal["coffeebench", "ecommercebench"],
@@ -496,6 +590,99 @@ def create_app(engine: Any, principals: dict[str, Principal | dict[str, str]]) -
             raise HTTPException(status_code=409, detail=exc.code) from exc
         except (StoreConflict, IdempotencyConflict) as exc:
             raise HTTPException(status_code=409, detail="CoffeeBench recovery conflicts with current state") from exc
+
+    def environment_request(method: str, *args):
+        client = getattr(engine, "company_environments", None)
+        if client is None:
+            raise HTTPException(status_code=503, detail="company_environments_unavailable")
+        try:
+            return getattr(client, method)(*args)
+        except requests.HTTPError as error:
+            status = error.response.status_code
+            raise HTTPException(status_code=status if 400 <= status < 500 else 503,
+                                detail="company_environment_request_failed") from error
+        except requests.RequestException as error:
+            raise HTTPException(status_code=503, detail="company_environments_unreachable") from error
+
+    @app.get("/company/environments")
+    def company_environments(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        return environment_request("company_environments")
+
+    @app.post("/company/environments/clone", status_code=202)
+    def clone_company_environment(body: CompanyEnvironmentName,
+                                  key: str = Depends(idempotency_key),
+                                  principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        return environment_request("clone_company_environment", body.name, key)
+
+    @app.post("/company/environments/{identifier}/switch", status_code=202)
+    def switch_company_environment(identifier: str, key: str = Depends(idempotency_key),
+                                   principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        return environment_request("switch_company_environment", identifier, key)
+
+    @app.post("/company/environments/{identifier}/rename")
+    def rename_company_environment(identifier: str, body: CompanyEnvironmentName,
+                                   principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        return environment_request("rename_company_environment", identifier, body.name)
+
+    def company_pack_service():
+        service = getattr(engine, "company_packs", None)
+        if service is None:
+            raise HTTPException(status_code=503, detail="Company pack imports are not configured")
+        return service
+
+    @app.post("/company/packs", status_code=201)
+    async def upload_company_pack(request: Request, principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        from servers.company.packs import ArchiveLimits
+        from .company_packs import PackVersionConflict
+        maximum = ArchiveLimits().max_archive_bytes
+        data = bytearray()
+        async for chunk in request.stream():
+            if len(data) + len(chunk) > maximum:
+                raise HTTPException(status_code=413, detail="Company pack archive exceeds the upload limit")
+            data.extend(chunk)
+        try:
+            # ZIP validation/storage is CPU/file work; keep it off the event loop.
+            from starlette.concurrency import run_in_threadpool
+            return await run_in_threadpool(company_pack_service().upload, bytes(data))
+        except PackVersionConflict as error:
+            raise HTTPException(status_code=409, detail="pack_version_conflict") from error
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail="pack_invalid_archive") from error
+
+    @app.get("/company/packs")
+    def list_company_packs(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        service = company_pack_service()
+        return {"packs": service.list(), "applications": service.applications()}
+
+    @app.get("/company/packs/catalog")
+    def company_pack_catalog(principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        return company_pack_service().catalog()
+
+    @app.get("/company/packs/{identifier}")
+    def get_company_pack(identifier: UUID, principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        service = company_pack_service()
+        try:
+            return service.public(service.get(str(identifier)))
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Company pack import not found") from error
+
+    @app.post("/company/packs/{identifier}/import", status_code=202)
+    def import_company_pack(identifier: UUID, principal: Principal = Depends(authenticate)):
+        require_role(principal, "controller")
+        try:
+            return company_pack_service().queue(str(identifier))
+        except KeyError as error:
+            raise HTTPException(status_code=404, detail="Company pack import not found") from error
+        except ValueError as error:
+            raise HTTPException(status_code=503, detail="pack_clock_unavailable") from error
 
     @app.get("/company/problem-catalog")
     def get_problem_catalog(principal: Principal = Depends(authenticate)):

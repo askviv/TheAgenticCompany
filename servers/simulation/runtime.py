@@ -15,7 +15,7 @@ import threading
 import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -36,7 +36,7 @@ from .erpnext import ERPNextAdapter, ERPNextSiteAdmin
 from .erpnext import ERPNextRetailAdmin
 from .mail import MailuGateway
 from .problem_adapters import TauRetailProblemAdapter
-from .store import SQLiteStore
+from .store import SQLiteStore, StoreConflict
 
 LOG = logging.getLogger(__name__)
 
@@ -53,6 +53,10 @@ class RuntimeConfig(BaseModel):
     retail_operator_users: list[str] = Field(default_factory=list, min_length=0)
     company_binding: dict[str, Any] | None = None
     company_profile_file: Path = Path(__file__).resolve().parents[2] / "deploy/single-host/company-identities.json"
+    company_application_services_file: Path = Path("/etc/company-workplace/application-services.json")
+    company_pack_credentials_file: Path = Path("/etc/company-workplace/secrets/midpoint-connector-secrets.json")
+    coffee_handoff_delivery: Literal["browser", "api"] = "browser"
+    experiment_chat_delivery: Literal["browser", "api"] = "browser"
     employee_chat_credentials_file: Path | None = None
     rocketchat_base_url: str = "https://chat.company.example.test"
     background_model_id: str = "gpt-6-luna"
@@ -297,8 +301,8 @@ class MailWorkers:
                 self.errors.pop(component, None)
                 if changed:
                     self.changed.set()
-                    if actor.get("kind") == "employee":
-                        self._enqueue_employee_inbox(actor)
+                if actor.get("kind") != "counterparty":
+                    self._enqueue_employee_inbox(actor)
             except (OSError, imaplib.IMAP4.error) as error:
                 if self.stopped.is_set():
                     return
@@ -336,6 +340,78 @@ class MailWorkers:
                     self.employee_inbox_coalesced_events.get(actor_id, 0) + 1
                 )
 
+    def _process_employee_inbox(self, actor: dict[str, Any]) -> None:
+        store = self.engine.store
+        actor_id = actor["actor_id"]
+        with store.transaction(write=False) as db:
+            cursor = db.execute(
+                "SELECT uidvalidity, last_uid FROM employee_inbox_turn_cursor WHERE actor_id=?",
+                (actor_id,),
+            ).fetchone()
+        snapshot = self.engine.mail.employee_inbox_snapshot(actor, cursor["last_uid"] if cursor else None)
+        if snapshot is None:
+            return
+        validity, baseline, uids = snapshot
+        if cursor is not None and cursor["uidvalidity"] != validity:
+            snapshot = self.engine.mail.employee_inbox_snapshot(actor, None)
+            if snapshot is None:
+                return
+            validity, baseline, uids = snapshot
+        if cursor is None or cursor["uidvalidity"] != validity:
+            with store.transaction() as db:
+                db.execute(
+                    "INSERT INTO employee_inbox_turn_cursor VALUES (?,?,?) "
+                    "ON CONFLICT(actor_id) DO UPDATE SET uidvalidity=excluded.uidvalidity, last_uid=excluded.last_uid "
+                    "WHERE employee_inbox_turn_cursor.uidvalidity != excluded.uidvalidity",
+                    (actor_id, validity, baseline),
+                )
+        from .codex_model import CodexModelCallsDisabled
+        from .codex_remote import CodexInferenceRejected
+
+        for uid in uids:
+            if self.stopped.is_set():
+                return
+            identity = (actor_id, validity, uid)
+            with store.transaction(write=False) as db:
+                submitted = db.execute(
+                    "SELECT 1 FROM employee_inbox_turn_submissions WHERE actor_id=? AND uidvalidity=? AND uid=?",
+                    identity,
+                ).fetchone()
+            if submitted:
+                continue
+
+            claimed = False
+
+            def claim():
+                nonlocal claimed
+                with store.transaction() as db:
+                    inserted = db.execute(
+                        "INSERT OR IGNORE INTO employee_inbox_turn_submissions "
+                        "SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM employee_inbox_turn_cursor "
+                        "WHERE actor_id=? AND uidvalidity=? AND last_uid<?)",
+                        (*identity, *identity),
+                    ).rowcount
+                    if inserted != 1:
+                        raise StoreConflict("Employee inbox turn already claimed or cursor changed")
+                claimed = True
+
+            try:
+                self.engine.mail.process_employee_inbox_message(actor, uid, validity, claim)
+            except (CodexInferenceRejected, CodexModelCallsDisabled):
+                if claimed:
+                    with store.transaction() as db:
+                        db.execute("DELETE FROM employee_inbox_turn_submissions "
+                                   "WHERE actor_id=? AND uidvalidity=? AND uid=?", identity)
+                raise
+            # A submission marker survives ambiguous failures and restarts. Only
+            # confirmed completions advance the cursor and remove their marker.
+            with store.transaction() as db:
+                db.execute("UPDATE employee_inbox_turn_cursor SET last_uid=? "
+                           "WHERE actor_id=? AND uidvalidity=? AND last_uid<?", (uid, *identity))
+                db.execute("DELETE FROM employee_inbox_turn_submissions "
+                           "WHERE actor_id=? AND uidvalidity=? AND uid=?", identity)
+            LOG.info("Employee inbox turn completed actor=%s uidvalidity=%s uid=%s", *identity)
+
     def _refresh_employee_inboxes(
         self, actor_id: str, event_queue: queue.Queue[dict[str, Any] | None]
     ) -> None:
@@ -346,11 +422,8 @@ class MailWorkers:
                 return
             component = "employee_inbox:" + actor_id
             try:
-                refreshed = self.engine.mail.refresh_employee_inbox_if_running(actor)
-                if refreshed:
-                    self.errors.pop(component, None)
-                else:
-                    self.errors.pop(component, None)
+                self._process_employee_inbox(actor)
+                self.errors.pop(component, None)
             except Exception as error:
                 self._failure(component, error)
             finally:
@@ -408,6 +481,12 @@ class MailWorkers:
         return components
 
     def start(self) -> None:
+        with self.engine.store.transaction() as db:
+            db.execute("CREATE TABLE IF NOT EXISTS employee_inbox_turn_cursor "
+                       "(actor_id TEXT PRIMARY KEY, uidvalidity TEXT NOT NULL, last_uid INTEGER NOT NULL)")
+            db.execute("CREATE TABLE IF NOT EXISTS employee_inbox_turn_submissions "
+                       "(actor_id TEXT NOT NULL, uidvalidity TEXT NOT NULL, uid INTEGER NOT NULL, "
+                       "PRIMARY KEY (actor_id, uidvalidity, uid))")
         self.threads = [threading.Thread(target=self._process, name="simulation-mail-processor", daemon=True)]
         self.threads += [threading.Thread(target=self._watch, args=(actor,),
                                         name="simulation-mail-" + actor["actor_id"], daemon=True)
@@ -415,6 +494,9 @@ class MailWorkers:
         startup_threads = tuple(self.threads)
         for thread in startup_threads:
             thread.start()
+        for actor in self.actors:
+            if actor.get("kind") != "counterparty":
+                self._enqueue_employee_inbox(actor)
         self.changed.set()
 
     def stop(self) -> None:
@@ -657,13 +739,17 @@ def build_app(config_path: str | Path):
     engine = SimulationEngine(store, gateway, erp_factory,
                               ERPNextSiteAdmin(config.erp_compose, config.erp_credentials_root.parent),
                               config.mail["actors"])
+    from .guest_kernel_clock import GuestKernelClockClient
+    environment_client = GuestKernelClockClient(
+        config.kernel_company_clock_url, config.kernel_company_clock_token_file, private_secret)
+    engine.company_environments = environment_client
     try:
         engine.employee_desktops = employee_desktop_manager(config)
     except ValueError as error:
         LOG.error("Employee desktop configuration is invalid exception_type=%s", type(error).__name__)
         engine.employee_desktops = None
     gateway.set_employee_desktops(engine.employee_desktops)
-    if engine.employee_desktops is not None:
+    if engine.employee_desktops is not None or config.experiment_chat_delivery == "api":
         from .experiment_chat import ExperimentChatDispatch
         employee_chat_credentials = config.employee_chat_credentials_file or config.mail_credentials_file.with_name(
             "employee-chat-credentials.json")
@@ -673,6 +759,7 @@ def build_app(config_path: str | Path):
             config.state_root,
             engine.employee_desktops,
             config.rocketchat_base_url,
+            delivery=config.experiment_chat_delivery,
         )
     else:
         engine.experiment_chat_dispatch = None
@@ -706,6 +793,7 @@ def build_app(config_path: str | Path):
     engine.evaluation_service = build_evaluation_service(
         engine, store, evaluation_evidence_directory,
     )
+    engine.viv_smtp_receipts = gateway.viv_smtp_receipts
     issue_workflow = None
     issue_configuration_error = None
     if config.company_binding is not None and config.company_issues_enabled:
@@ -727,6 +815,34 @@ def build_app(config_path: str | Path):
             engine.company_issue_reconcile = lambda: issue_action(issue_workflow.reconcile)
             engine.company_issue_observe = lambda: issue_action(issue_workflow.observe_mail)
             engine.company_issue_activity = issue_workflow.service.activity
+            engine.resend_marketplace_handoff = issue_workflow.service.resend_marketplace_handoff
+    company_packs = None
+    if config.company_binding is not None:
+        from .application_services import apply_company_applications
+        from .company_packs import CompanyPackService
+        from servers.company.owncloud import OwnCloudClient
+
+        def pack_owncloud_factory():
+            profile = json.loads(config.company_profile_file.read_text())
+            owncloud = profile["company"]["background"]["owncloud"]
+            credentials = private_json(config.company_pack_credentials_file)["owncloud"]
+            if credentials["username"] != owncloud["service_owner"]["owncloud_uid"]:
+                raise ValueError("Company pack ownCloud credentials do not match the canonical service owner")
+            return OwnCloudClient(owncloud["base_url"], credentials["username"], credentials["app_password"]), owncloud
+
+        def apply_pack_applications(applications):
+            apply_company_applications(applications, config.company_application_services_file)
+            engine.company_pack_configuration_error = None
+
+        company_packs = CompanyPackService(
+            config.state_root / "company-packs", engine=engine,
+            native=ERPNextSiteAdmin(config.erp_compose, config.erp_credentials_root.parent),
+            binding=config.company_binding,
+            profile_path=config.company_profile_file, owncloud_factory=pack_owncloud_factory,
+            erp_public_url=config.erp_public_url,
+            apply_applications=apply_pack_applications,
+        )
+        engine.company_packs = company_packs
     app = create_app(engine, private_json(config.principals_file))
     workers = MailWorkers(engine, config.mail["actors"],
                           mailbox_idle_renewal_seconds=config.mailbox_idle_renewal_seconds)
@@ -771,7 +887,7 @@ def build_app(config_path: str | Path):
         company_clock.on_company_time = company_background.wake
     else:
         engine.company_background_status = lambda: {
-            "enabled": config.company_background_enabled, "available": False,
+            "enabled": config.company_background_enabled, "available": False, "initialized": False,
             "errors": {"configuration": background_unavailable or {"code": "not_configured"}},
             "providers": {}, "obligations": [], "obligations_error": None,
         }
@@ -827,11 +943,11 @@ def build_app(config_path: str | Path):
         try:
             feedback_workflow = CompanyFeedbackRuntime(
                 config, store, private_json(config.principals_file), worker=background_worker,
-                provider_mail_observer=provider_mail_observer,
+                provider_mail_observer=provider_mail_observer, wake_handoffs=workers.changed.set,
             )
             engine.company_feedback = feedback_workflow
             engine.company_native_message_bridge = feedback_workflow.deliver_native_messages
-            engine.company_feedback_activity = feedback_workflow.pipeline.activity
+            engine.company_feedback_activity = feedback_workflow.activity
             engine.company_feedback_summary = lambda experiment_id: feedback_workflow.pipeline.report(experiment_id,evaluate_native=False)
             def feedback_observe():
                 try:
@@ -1018,14 +1134,27 @@ def build_app(config_path: str | Path):
                           type(error).__name__, frames)
                 if isinstance(error, KernelCompanyClockConfigurationError):
                     LOG.error("kernel company clock configuration failed: %s", error)
+        if company_packs is not None:
+            try:
+                company_packs.reconcile_applications()
+            except Exception as error:
+                engine.company_pack_configuration_error = type(error).__name__
+                frames = [(frame.filename, frame.lineno, frame.name)
+                          for frame in traceback.extract_tb(error.__traceback__)]
+                LOG.error("company pack application reconciliation failed exception_type=%s stack=%s",
+                          type(error).__name__, frames)
         if config.workers_enabled:
             workers.start()
             company_clock.start()
             if company_background is not None:
                 company_background.start()
+        if company_packs is not None:
+            company_packs.start()
         try:
             yield
         finally:
+            if company_packs is not None:
+                company_packs.signal_stop()
             # Stop new work in every worker before joining any of them. This
             # prevents ongoing producers from starving a draining DB operation.
             workers.stopped.set()
@@ -1035,6 +1164,8 @@ def build_app(config_path: str | Path):
             if company_background is not None:
                 company_background.stopped.set()
                 company_background.wake()
+            if company_packs is not None:
+                company_packs.stop()
             workers.stop()
             if company_background is not None:
                 company_background.stop()
@@ -1043,6 +1174,7 @@ def build_app(config_path: str | Path):
                 shared_clock_publisher.stop()
             if guest_kernel_clock is not None:
                 guest_kernel_clock.close()
+            environment_client.close()
             engine.actor_turn_client.session.close()
             provider_worker_client.session.close()
             if portal_client is not None:
@@ -1062,6 +1194,8 @@ def build_app(config_path: str | Path):
     @app.get("/health")
     def health():
         components = workers.health_components()
+        if getattr(engine, "company_pack_configuration_error", None):
+            components["company_pack_applications"] = engine.company_pack_configuration_error
         if config.company_binding is not None and provider_experiments_unavailable:
             components['provider_experiments'] = provider_experiments_unavailable['code']
         if feedback_configuration_error:

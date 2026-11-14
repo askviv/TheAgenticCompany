@@ -28,7 +28,13 @@ Company background status and due-obligation observations contain operational su
 
 Coffee source invoices and orders are reconciled as native draft Purchase/Sales Orders and Purchase/Sales Invoices. Their item quantities and source prices/amounts come from the pinned native source facts. Counterparty and item records are linked to source identity; native ERPNext defaults and dated USD exchange rates are used. A missing required native framework default or exchange rate fails reconciliation visibly. Existing documents are reused by company-scoped source identity and are never overwritten on retry, so subsequent agent edits remain intact.
 
-A Coffee payment appears as native payment evidence (an ERPNext Issue with the immutable source snapshot) because the upstream actor ledger does not identify a company bank account or authorize an ERP posting. It does not become a Payment Entry or a posted bank transaction. Draft orders/invoices remain subject to the ordinary ERPNext review, approval, and submission flow. Due/overdue obligations are read from submitted native invoices; E-Commerce does not manufacture them.
+Each nonzero settled CoffeeBench payment involving the company creates a native Bank Transaction in the dedicated simulated company bank account for its currency. Customer receipts become deposits and supplier payments become withdrawals. The statement line uses the simulated settlement date, source invoice reference and stable payment identity. It links to the existing evidence Issue and retains the immutable source snapshot. The account is provisioned on first use without changing the company default.
+
+The statement line is available for reconciliation as soon as it is imported. Viv can use it to find the corresponding invoice and reconcile a submitted Payment Entry in ERPNext. CoffeeBench does not post a Payment Entry or allocate the payment to the invoice. Draft orders and invoices still follow the normal ERPNext review and submission flow. Previously imported payments are not backfilled automatically.
+
+The company import assigns new CoffeeBench invoices and E-CommerceBench Sales Orders to the configured Accounts Manager, David Wong in the default company profile. ERPNext sends one email on David’s behalf asking Viv to invoice the customer and make sure the order gets paid. A CoffeeBench supplier invoice instead asks Viv to take care of the supplier invoice and make sure it gets paid. Settlements appear in ERPNext for Viv to discover as part of that task.
+
+See the [CoffeeBench customer behaviour catalogue](coffeebench-customer-behaviours.md) for credit terms, bankruptcy and proposed operator switches.
 
 ## Private contracts and retry behavior
 
@@ -56,8 +62,23 @@ The worker and site-admin operation failures retain safe exception types/cause c
 
 ## Shared logistics conditions
 
-The company JSON explicitly enables `background.coupling.ecommerce_to_coffee`. The reusable `ExternalSupplyCondition` contract carries the original E-Commerce event ID, pinned source revision, global category scope, multiplier, start and expiry. E-Commerce confirms its source window before Coffee advances. Durable pending requests retain the exact condition batch across failures and restarts; a failed source leaves Coffee visibly waiting while unrelated company services continue.
+The company profile enables the E-Commerce logistics feed for CoffeeBench through `background.coupling.ecommerce_to_coffee`. CoffeeBench applies delivery delays from confirmed logistics events when the source covers the current simulation window. Either benchmark can advance independently when the other is stopped, behind, or has an error. An already submitted operation keeps its original request and source evidence when retried.
 
 The coupling applies upstream global logistics events (`affected_categories: all`) to the native Coffee market's Item delivery lags, using the upstream worst-active-multiplier rule. Native Marketplace deal creation uses those lags; normal deliveries then affect inventory availability and financial activity. Company-mapped actors receive the source condition at their next native morning wake and make their own native pricing and procurement decisions. Expiry restores original native lags. Existing accepted deal commitments remain intact.
 
 Hardware-specific cost shocks do not describe coffee production costs and have no invented commodity conversion. The configured coupling therefore does not force prices, rewrite existing stock or post automatic payments. These are different native product economies linked by applicable common conditions, rather than identical databases. Snapshot schema v2 migrates the existing unconditioned Coffee checkpoint from its actual native Item fields, preserving its books and cursor.
+
+## Benchmark control API
+
+The dashboard reads benchmark controls from `GET /api/company/background`.
+A successful response includes both `coffeebench` and `ecommercebench` under
+`background.providers`, with boolean `enabled` and `in_flight` fields and a
+`status` of `stopped`, `stopping`, `starting`, `active`, or `error`.
+`enabled` is the saved switch setting. `status` describes the worker lifecycle.
+The read is independent of company activity and external benchmark requests.
+Missing control data or invalid deployment configuration returns HTTP 503 and
+logs the cause for operators.
+
+`POST /api/company/background/<provider_id>/control` returns the confirmed
+`provider_id`, `enabled`, `in_flight`, and `status`. The dashboard uses that
+response to update the switch.

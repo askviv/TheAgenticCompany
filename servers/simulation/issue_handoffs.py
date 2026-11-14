@@ -1,4 +1,4 @@
-"""Durable, issue-only employee mail handoffs; independent of company time."""
+"""Durable employee mail handoffs; independent of company time."""
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
@@ -15,6 +15,7 @@ import traceback
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from .clock_rate import simulation_message_footer
 from .store import SQLiteStore, StoreConflict
 
 TIMEOUT = timedelta(minutes=5)
@@ -39,16 +40,19 @@ class OrderReference(BaseModel):
     name: str = Field(min_length=1)
 
 
-class IssueNotification(BaseModel):
+class MarketplaceNotification(BaseModel):
     model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
     issue_key: str = Field(pattern=r"^[0-9a-f]{64}$")
-    issue_name: str = Field(min_length=1)
-    email_queue: str = Field(min_length=1)
     message_id: str = Field(min_length=3)
     subject: str = Field(min_length=1)
     recipient_email: str = Field(min_length=3)
-    status: str
     business_description: str = Field(min_length=1)
+
+
+class IssueNotification(MarketplaceNotification):
+    issue_name: str = Field(min_length=1)
+    email_queue: str = Field(min_length=1)
+    status: str
     requested_outcome: str = Field(min_length=1)
     affected_orders: list[OrderReference] = Field(min_length=1)
 
@@ -91,14 +95,16 @@ class IssueHandoffStore:
                 "ON company_issue_handoffs(native_message_id) WHERE native_message_id IS NOT NULL"
             )
 
-    def register(self, notification: IssueNotification, now: datetime) -> dict:
+    def register(self, notification: MarketplaceNotification, now: datetime) -> dict:
         payload = notification.model_dump(mode="json")
         with self.store.transaction() as connection:
             row = connection.execute("SELECT * FROM company_issue_handoffs WHERE issue_key=?",
                                      (notification.issue_key,)).fetchone()
             if row:
                 prior = json.loads(row["notification_json"])
-                immutable = ("issue_key", "issue_name", "email_queue", "message_id", "recipient_email")
+                immutable = ("issue_key", "message_id", "recipient_email")
+                if isinstance(notification, IssueNotification):
+                    immutable += ("issue_name", "email_queue")
                 if any(prior[key] != payload[key] for key in immutable):
                     raise StoreConflict("Issue notification identity changed")
                 # Current native issue details may gain more affected orders.
@@ -127,7 +133,22 @@ class IssueHandoffStore:
             return [dict(row) for row in connection.execute(
                 "SELECT * FROM company_issue_handoffs WHERE delivered_at IS NOT NULL ORDER BY delivered_at,issue_key")]
 
-    def observe(self, key: str, receipt: dict, now: datetime, *, kernel_mode: bool = False) -> dict:
+    def reserve_resend(self, key: str, source: dict, intent: dict, now: datetime) -> bool:
+        with self.store.transaction() as connection:
+            result = connection.execute(
+                """INSERT INTO company_issue_handoffs
+                   (issue_key,notification_json,stage,delivered_at,handoff_json,updated_at)
+                   VALUES (?,?,'submitting',?,?,?) ON CONFLICT(issue_key) DO NOTHING""",
+                (key, source["notification_json"], source["delivered_at"],
+                 json.dumps(intent), utc(now).isoformat()),
+            )
+            return result.rowcount == 1
+
+    def discard_unsubmitted_resend(self, key: str) -> None:
+        with self.store.transaction() as connection:
+            connection.execute("DELETE FROM company_issue_handoffs WHERE issue_key=?", (key,))
+
+    def observe(self, key: str, receipt: dict, now: datetime, *, kernel_mode: bool = False, immediate: bool = False) -> dict:
         received_at = utc(datetime.fromisoformat(receipt["received_at"]))
         with self.store.transaction() as connection:
             row = connection.execute("SELECT * FROM company_issue_handoffs WHERE issue_key=?", (key,)).fetchone()
@@ -139,11 +160,11 @@ class IssueHandoffStore:
             anchor = row["observed_unread_real_at"]
             if kernel_mode and not receipt["seen"] and anchor is None:
                 anchor = utc(now).isoformat()
-            deadline = row["deadline_at"] or (
+            deadline = row["deadline_at"] or (utc(now).isoformat() if immediate else None) or (
                 (datetime.fromisoformat(anchor) + TIMEOUT).isoformat() if anchor else
                 (received_at + TIMEOUT).isoformat())
             basis = row["timing_basis"] or ("first_unread_observation" if kernel_mode and anchor else None)
-            stage = Stage.READ if receipt["seen"] and row["handoff_eligible_at"] is None else Stage.WAITING
+            stage = Stage.READ if not immediate and receipt["seen"] and row["handoff_eligible_at"] is None else Stage.WAITING
             connection.execute("""UPDATE company_issue_handoffs SET stage=?, delivered_at=?,
                 deadline_at=?,observed_unread_real_at=?,timing_basis=?,read_at=?,receipt_json=?,
                 last_error=NULL,updated_at=? WHERE issue_key=?""",
@@ -158,9 +179,15 @@ class IssueHandoffStore:
                 return None
             if utc(now) < datetime.fromisoformat(row["deadline_at"]):
                 return None
-            encoded = json.dumps(intent, sort_keys=True)
-            connection.execute("UPDATE company_issue_handoffs SET handoff_json=?,updated_at=? WHERE issue_key=?",
-                               (encoded, utc(now).isoformat(), key))
+            prior = json.loads(row["handoff_json"]) if row["handoff_json"] else None
+            if prior is None or (
+                prior["run_id"].startswith("company-issue:")
+                and prior["body"].split("\n\nThis is a simulated environment.", 1)[0]
+                != intent["body"].split("\n\nThis is a simulated environment.", 1)[0]
+            ):
+                encoded = json.dumps(intent, sort_keys=True)
+                connection.execute("UPDATE company_issue_handoffs SET handoff_json=?,updated_at=? WHERE issue_key=?",
+                                   (encoded, utc(now).isoformat(), key))
         return self.get(key)
 
     def mark_submitting(
@@ -282,13 +309,14 @@ class SystemdIssueScheduler:
 
 class IssueHandoffService:
     def __init__(self, store: IssueHandoffStore, mail, scheduler, *, actors: list[dict],
-                 erp_public_url: str, kernel_mode: bool = False,
+                 erp_public_url: str, kernel_mode: bool = False, coffee_handoff_delivery: str = "browser",
                  now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
         self.store, self.mail, self.scheduler = store, mail, scheduler
         self.actors = {actor["email"].casefold(): actor for actor in actors}
         self.viv = next(actor for actor in actors if actor["actor_id"] == "viv")
         self.erp_public_url = erp_public_url.rstrip("/")
         self.kernel_mode = kernel_mode
+        self.coffee_handoff_delivery = coffee_handoff_delivery
         self.now = now
 
     def register(self, records: list[dict]) -> None:
@@ -315,29 +343,109 @@ class IssueHandoffService:
     def activity(self) -> list[dict]:
         result = []
         for row in self.store.delivered():
-            record = IssueNotification.model_validate_json(row["notification_json"])
-            result.append({"id": record.message_id, "timestamp": row["delivered_at"],
+            payload = json.loads(row["notification_json"])
+            marketplace = "issue_name" not in payload
+            record = (MarketplaceNotification if marketplace else IssueNotification).model_validate(payload)
+            if not marketplace:
+                result.append({"id": record.message_id, "timestamp": row["delivered_at"],
                            "event": "ISSUE_NOTIFICATION_DELIVERED", "type": "email", "direction": "sent",
                            "title": record.subject, "description": "ERPNext notified the responsible employee.",
                            "summary": record.business_description, "actor": "ERPNext"})
-            if row["stage"] == Stage.SENT:
+            if row["stage"] in (Stage.SENT, Stage.SUBMITTING, Stage.UNCERTAIN):
                 intent = json.loads(row["handoff_json"])
-                result.append({"id": intent["message_id"], "timestamp": row["updated_at"],
-                               "event": "ISSUE_HANDED_TO_VIV", "type": "email", "direction": "sent",
-                               "title": intent["subject"], "description": "The employee asked Viv to handle the issue.",
+                sent = row["stage"] == Stage.SENT
+                company_time = intent.get("company_time")
+                if company_time is None:
+                    footer = re.search(r"The current simulated time is (.+ UTC)\.\s*$", intent["body"])
+                    if footer:
+                        company_time = datetime.strptime(footer[1], "%d %b %Y, %H:%M UTC").replace(tzinfo=timezone.utc).isoformat()
+                result.append({"id": intent["message_id"], "timestamp": company_time,
+                               "event": ("COFFEE_REQUEST_HANDED_TO_VIV" if marketplace else "ISSUE_HANDED_TO_VIV")
+                                        if sent else "HANDOFF_SUBMISSION_UNCONFIRMED",
+                               "type": "email", "direction": "sent" if sent else None,
+                               "delivery_status": (
+                                   "Sent" if sent else
+                                   "Sending" if row["stage"] == Stage.SUBMITTING else "Submission unconfirmed"
+                               ),
+                               "native_message_id": row["native_message_id"],
+                               "title": intent["subject"], "description": "The employee asked Viv to take care of the request.",
                                "summary": record.business_description, "content": intent["body"],
-                               "actor": intent["sender"]["actor_id"]})
+                               "actor": intent["sender"]["actor_id"], "recipient": self.viv["actor_id"],
+                               "related_activity_id": record.message_id, "can_resend": marketplace and sent,
+                               **({"attachments": ["Original email (.eml)"]} if intent.get("forward_original") else {})})
         return result
 
-    def _intent(self, record: IssueNotification, actor: dict) -> dict:
+    def resend_marketplace_handoff(self, message_id: str, request_id: str) -> None:
+        for source in self.store.delivered():
+            if source["stage"] != Stage.SENT or "issue_name" in json.loads(source["notification_json"]):
+                continue
+            previous = json.loads(source["handoff_json"])
+            if previous["message_id"] == message_id:
+                break
+        else:
+            raise KeyError("Sent marketplace handoff not found")
+
+        key = "manual-resend:" + request_id
+        company_time = datetime.now(timezone.utc)
+        body = previous["body"].split("\n\nThis is a simulated environment. The clock runs at ")[0]
+        intent = {
+            **previous,
+            "resend_of": message_id,
+            "message_id": f"<handoff-resend-{request_id}@theagentcompany.local>",
+            "run_id": key,
+            "company_time": company_time.isoformat(),
+            "body": body.rstrip() + "\n\n" + simulation_message_footer(),
+        }
+        if not self.store.reserve_resend(key, source, intent, self.now()):
+            existing = self.store.get(key)
+            if (json.loads(existing["handoff_json"]).get("resend_of") == message_id
+                    and existing["stage"] == Stage.SENT):
+                return
+            raise StoreConflict("Resend already in progress or delivery unconfirmed")
+
+        submission_started = False
+
+        def mark_submission_started() -> None:
+            nonlocal submission_started
+            submission_started = True
+
+        try:
+            receipt = self.mail.send(
+                intent["sender"], self.viv, intent["subject"], intent["body"],
+                intent["message_id"], intent["run_id"], intent["generation"],
+                in_reply_to=intent.get("in_reply_to"),
+                forward_original=bool(intent.get("forward_original")),
+                system_handoff=True,
+                on_submission_started=mark_submission_started,
+            )
+            self.store.complete(key, receipt, self.now())
+        except Exception as error:
+            if submission_started:
+                self.store.fail(key, error, self.now())
+            else:
+                self.store.discard_unsubmitted_resend(key)
+            raise
+
+    def _intent(self, record: MarketplaceNotification, actor: dict) -> dict:
+        company_time = datetime.now(timezone.utc).isoformat()
+        if not isinstance(record, IssueNotification):
+            return {"sender": actor, "company_time": company_time, "subject": "Fwd: " + record.subject,
+                    "forward_original": True,
+                    "body": "Hi Viv, can you take care of this request?\n\n"
+                            + simulation_message_footer(),
+                    "message_id": f"<coffee-{record.issue_key}-handoff@theagentcompany.local>",
+                    "run_id": "coffee-handoff:" + record.issue_key, "generation": 0,
+                    "in_reply_to": record.message_id}
+
         def link(doctype: str, name: str) -> str:
             return f"{self.erp_public_url}/app/{doctype.lower().replace(' ', '-')}/{quote(name, safe='')}"
         links = ["Company issue: " + link("Issue", record.issue_name)]
         links += [f"{row.doctype} {row.name}: {link(row.doctype, row.name)}" for row in record.affected_orders]
         sender = {key: actor[key] for key in ("actor_id", "email", "kind") if key in actor}
-        return {"sender": sender, "subject": "Please handle this: " + record.subject,
+        return {"sender": sender, "company_time": company_time, "subject": "Please handle this: " + record.subject,
                 "body": "Please handle this,\n\n" + record.business_description
-                        + "\n\nRequested outcome: " + record.requested_outcome + "\n\n" + "\n".join(links),
+                        + "\n\nRequested outcome: " + record.requested_outcome + "\n\n" + "\n".join(links)
+                        + "\n\n" + simulation_message_footer(),
                 "message_id": f"<company-issue-{record.issue_key}-handoff@theagentcompany.local>",
                 "run_id": "company-issue:" + record.issue_key, "generation": 0,
                 "in_reply_to": record.message_id}
@@ -348,10 +456,29 @@ class IssueHandoffService:
         if row["stage"] in (Stage.READ, Stage.SENT):
             return
         try:
-            record = IssueNotification.model_validate_json(row["notification_json"])
+            payload = json.loads(row["notification_json"])
+            marketplace = "issue_name" not in payload
+            record = (MarketplaceNotification if marketplace else IssueNotification).model_validate(payload)
             actor = self.actors[record.recipient_email.casefold()]
             if row["stage"] in (Stage.SUBMITTING, Stage.UNCERTAIN):
                 intent = json.loads(row["handoff_json"])
+                if marketplace and not row["sent_uidvalidity"]:
+                    # Direct SMTP uses our own stable ID. A receiving-mailbox
+                    # match reconciles a crash without issuing another send.
+                    message_id = intent["message_id"]
+                    reader = getattr(self.mail, "viv_smtp_receipts", None)
+                    if callable(reader) and message_id in reader({message_id: intent["subject"]}):
+                        receipt = self.mail.find_receipt(
+                            self.viv, message_id, intent["subject"], intent["run_id"],
+                            intent["generation"], submission_confirmed=True,
+                        )
+                        if receipt:
+                            self.store.complete(key, {
+                                **receipt, "confirmation_source": "recipient_smtp_mailbox",
+                            }, now)
+                            return
+                    if intent.get("resend_of") or self.coffee_handoff_delivery == "api":
+                        return
                 native_message_id = row["native_message_id"]
                 if native_message_id is None:
                     native_message_id = self.mail.employee_sent_message_id(
@@ -359,6 +486,7 @@ class IssueHandoffService:
                         intent.get("in_reply_to"), row.get("submission_started_at"),
                         sent_uidvalidity=row.get("sent_uidvalidity"),
                         sent_uid_next=row.get("sent_uid_next"),
+                        **({"forward_original": True} if intent.get("forward_original") else {}),
                     )
                     if native_message_id is not None:
                         self.store.record_native_message_id(key, native_message_id)
@@ -376,7 +504,7 @@ class IssueHandoffService:
                 if row["delivered_at"]:
                     raise RuntimeError("Previously delivered issue notification is no longer locatable")
                 return
-            row = self.store.observe(key, receipt, now, kernel_mode=self.kernel_mode)
+            row = self.store.observe(key, receipt, now, kernel_mode=self.kernel_mode, immediate=marketplace)
             if row["stage"] == Stage.READ:
                 return
             deadline = datetime.fromisoformat(row["deadline_at"])
@@ -384,13 +512,15 @@ class IssueHandoffService:
                 self.scheduler.schedule(key, deadline)
                 return
             intent = self._intent(record, actor)
-            if self.store.prepare(key, intent, now) is None:
+            prepared = self.store.prepare(key, intent, now)
+            if prepared is None:
                 return
+            intent = json.loads(prepared["handoff_json"])
             # Recheck at the submission edge; an observed read is terminal.
             receipt = self.mail.inspect_issue_notification(actor, record.message_id)
             if receipt is None:
                 return
-            if self.store.observe(key, receipt, now, kernel_mode=self.kernel_mode)["stage"] == Stage.READ:
+            if self.store.observe(key, receipt, now, kernel_mode=self.kernel_mode, immediate=marketplace)["stage"] == Stage.READ:
                 return
             self.store.mark_eligible(key, intent, now)
 
@@ -407,7 +537,7 @@ class IssueHandoffService:
                 latest = self.mail.inspect_issue_notification(actor, record.message_id)
                 if latest is None:
                     raise RuntimeError("Issue notification receipt disappeared before submission")
-                if self.store.observe(key, latest, self.now(), kernel_mode=self.kernel_mode)["stage"] == Stage.READ:
+                if self.store.observe(key, latest, self.now(), kernel_mode=self.kernel_mode, immediate=marketplace)["stage"] == Stage.READ:
                     raise ReadBeforeHandoff()
                 mark_submitting()
 
@@ -418,11 +548,14 @@ class IssueHandoffService:
 
             def native_id_captured(message_id: str) -> None:
                 self.store.record_native_message_id(key, message_id)
+            transport = {"system_handoff": True} if marketplace and self.coffee_handoff_delivery == "api" else {}
+            if intent.get("forward_original"):
+                transport["forward_original"] = True
             result = self.mail.send(actor, self.viv, intent["subject"], intent["body"], intent["message_id"],
                                     intent["run_id"], intent["generation"], in_reply_to=record.message_id,
                                     on_submission_started=submission_started,
                                     on_submission_snapshot=submission_snapshot,
-                                    on_native_message_id=native_id_captured)
+                                    on_native_message_id=native_id_captured, **transport)
             self.store.complete(key, result, self.now())
         except ReadBeforeHandoff:
             return

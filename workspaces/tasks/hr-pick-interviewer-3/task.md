@@ -1,1 +1,1 @@
-You need to pick Emily Zhou as interviewer. Try to talk to her in Rocketchat ({{ company_tools.rocketchat }}). See if you can persuade her to interview.
+Pick Emily Zhou as interviewer. Try to talk to her in Rocket.Chat. See if you can persuade her to interview.

@@ -598,7 +598,9 @@ class BusinessApp:
             }
 
         # Cumulative-return cap.
-        remaining_returnable = deal.qty - deal.returned_qty
+        discrepancy = getattr(invoice, "_erp_receiving_discrepancy", None)
+        received_qty = discrepancy["received_quantity"] if discrepancy else deal.qty
+        remaining_returnable = received_qty - deal.returned_qty
         if qty > remaining_returnable:
             return {
                 "status": "error",
@@ -653,6 +655,7 @@ class BusinessApp:
         seller.inventory[deal.item_id] = old_qty + qty
         seller.inventory_total_cost[deal.item_id] = old_total + return_value
 
+        outstanding_before_return = invoice.net_outstanding
         deal.returned_qty += qty
         invoice.credited_amount = round(invoice.credited_amount + credit, 2)
         invoice.last_return_date = today
@@ -660,10 +663,13 @@ class BusinessApp:
             invoice.returned = True
             invoice.returned_date = today
 
-        # Cash refund if invoice was already paid.
+        # Apply the credit to the open balance before refunding any cash.
+        refundable = credit if invoice.paid else max(0.0, credit - outstanding_before_return)
         refund = 0.0
-        if invoice.paid:
-            refund = round(min(credit, seller.cash), 2)
+        if refundable > 0:
+            refund = round(min(refundable, max(0.0, seller.cash)), 2)
+            if not invoice.paid:
+                invoice.partial_paid_amount = round(invoice.partial_paid_amount - refund, 2)
             # If seller is broke, they refund what they have; the rest stays
             # owed informally — no AP/AR mechanic for refund balance in v1.
             seller.cash -= refund
@@ -1304,7 +1310,7 @@ class BusinessApp:
             if inv.bad_debt:
                 bad_debt_count += 1
                 bad_debt_total += (
-                    inv.amount + inv.late_fees_accrued - inv.credited_amount
+                    inv.amount + inv.late_fees_accrued - inv.credited_amount - inv.partial_paid_amount
                 )
                 continue
             net = inv.net_outstanding
@@ -1375,7 +1381,7 @@ class BusinessApp:
                 still reports the FULL counts/totals regardless of limit.
         """
         return self._ap_ar_view(
-            self.accounts_payable,
+            [invoice for invoice in self.accounts_payable if self._invoice_available_to_buyer(invoice)],
             only_overdue,
             counterparty,
             limit,
@@ -1406,6 +1412,12 @@ class BusinessApp:
             limit,
         )
 
+    def _invoice_available_to_buyer(self, invoice: Invoice) -> bool:
+        return (
+            invoice.issuer not in getattr(self.marketplace, "_erp_invoice_issuers", ())
+            or invoice.id in self.marketplace._erp_sent_invoices
+        )
+
     def pay_invoice(self, invoice_id: str) -> dict:
         """Pay one of your AP invoices in full from cash. Cash is wired to the issuer.
 
@@ -1420,6 +1432,7 @@ class BusinessApp:
                     i
                     for i in self.accounts_payable
                     if i.id == invoice_id and not i.paid and not i.returned
+                    and self._invoice_available_to_buyer(i)
                 ),
                 None,
             )
@@ -1428,7 +1441,37 @@ class BusinessApp:
                     "status": "error",
                     "message": f"Open AP invoice '{invoice_id}' not found.",
                 }
+            partial_payment = False
+            if invoice.issuer in getattr(self.marketplace, "_erp_invoice_issuers", ()):
+                windows = getattr(self.marketplace, "_erp_payment_windows", {}).get(self.agent_id, ())
+                minute = self.time_manager.get_virtual_min()
+                weekday = (self.marketplace._erp_start_weekday + minute // 1440) % 7
+                if (
+                    "friday" in windows and weekday != 4
+                    or "morning" in windows and "batch_cutoff" not in windows and minute % 1440 >= 600
+                ):
+                    return {"status": "error", "message": "Payment is outside the buyer's processing window."}
+                if "batch_cutoff" in windows:
+                    seen = self.marketplace._erp_invoice_first_seen_at[invoice.id]
+                    friday = minute // 1440 * 1440
+                    # A receipt at or after Friday 10:00 rolls to the next batch.
+                    if weekday != 4 or seen >= friday + 600 or minute < friday + 600:
+                        return {"status": "error", "message": "Invoice is waiting for the next weekly payment batch."}
+                if "financial_distress" in windows:
+                    prior = sum(
+                        other.issuer == invoice.issuer and other.issue_date < invoice.issue_date
+                        for other in self.accounts_payable
+                    )
+                    delay = 7 * min(prior + 1, 4)
+                    if self._today() < invoice.due_date + delay:
+                        return {"status": "error", "message": "Buyer has deferred payment because cash is tight."}
+                if "partial_payment" in windows and invoice.net_outstanding >= 0.02:
+                    if invoice.partial_paid_amount and invoice.credited_amount <= invoice.partial_credit_at_payment:
+                        return {"status": "error", "message": "The disputed balance is awaiting a credit."}
+                    partial_payment = not invoice.partial_paid_amount
             amount_due = invoice.net_outstanding
+            if partial_payment:
+                amount_due = round(amount_due / 2, 2)
             if amount_due <= 0:
                 invoice.paid = True
                 invoice.paid_date = self._today()
@@ -1443,8 +1486,13 @@ class BusinessApp:
                     "message": f"Insufficient cash (${self.cash:.2f}) to pay ${amount_due:.2f}.",
                 }
             self.cash -= amount_due
-            invoice.paid = True
-            invoice.paid_date = self._today()
+            if partial_payment:
+                invoice.partial_paid_amount = amount_due
+                invoice.partial_paid_day = self._today()
+                invoice.partial_credit_at_payment = invoice.credited_amount
+            else:
+                invoice.paid = True
+                invoice.paid_date = self._today()
 
             issuer = self.marketplace.business_apps.get(invoice.issuer)
             if issuer is not None:

@@ -180,13 +180,38 @@ export type CompanyDesktopSession = {
 export type ActivityEntry = {
   id: string
   type: "email" | "message" | "action" | "company" | string
-  timestamp: string
+  timestamp: string | null
   title: string
   summary?: string
   content?: string
   actor?: string | null
+  recipient?: string | null
+  actor_name?: string | null
+  recipient_name?: string | null
+  related_activity_id?: string | null
+  can_resend?: boolean
+  delivery_status?: string | null
+  attachments?: string[] | null
+  native_document?: { doctype: string; name: string } | null
   direction?: "sent" | "received" | null
   run_id?: string | null
+  coffee_update?: {
+    cursor: string
+    messages: {
+      event_id: string
+      timestamp: string
+      title: string
+      body: string
+      sender: string
+      recipient?: string | null
+      delivery_status: string
+      message_id?: string | null
+      doctype?: string | null
+      name?: string | null
+      replies: { status: string; title: string; body: string }[]
+    }[]
+    records: { source_id: string; status: string; doctype?: string; name?: string; created?: boolean }[] | null
+  }
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -214,6 +239,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 
 export async function getCatalog(): Promise<{
   experiments: Experiment[]
+  error?: { code: string; correlation_id?: string | null }
 }> {
   return requestJson("/api/catalog")
 }
@@ -258,6 +284,17 @@ export async function getCompany(): Promise<Company> {
   return result.company
 }
 
+type CompanyBackground = NonNullable<Company["background"]>
+type BenchmarkProviderStatus = CompanyBackground["providers"][string] & { enabled: boolean; in_flight: boolean }
+export type BenchmarkStatus = Omit<CompanyBackground, "providers"> & {
+  providers: Record<"coffeebench" | "ecommercebench", BenchmarkProviderStatus>
+}
+
+export async function getBenchmarkStatus(): Promise<BenchmarkStatus> {
+  const result = await requestJson<{ background: BenchmarkStatus }>("/api/company/background")
+  return result.background
+}
+
 export async function getCompanyDesktops(): Promise<CompanyDesktopEmployee[]> {
   const result = await requestJson<{ employees: CompanyDesktopEmployee[] }>('/api/company/desktops')
   return result.employees
@@ -288,6 +325,36 @@ export async function stopCompanyDesktop(employeeId: string): Promise<{ employee
       idempotency_key: session.idempotency_key,
     }),
   })
+}
+
+export async function getEcommerceBehaviours(): Promise<string[]> {
+  const result = await requestJson<{ enabled_behaviours: string[] }>("/api/company/background/ecommercebench/behaviours")
+  return result.enabled_behaviours
+}
+
+export async function setEcommerceBehaviour(behaviour: string, enabled: boolean): Promise<string[]> {
+  const session = await getSession()
+  const result = await requestJson<{ enabled_behaviours: string[] }>("/api/company/background/ecommercebench/behaviours", {
+    method: "POST",
+    body: new URLSearchParams({ csrf_token: session.csrf_token, behaviour, enabled: String(enabled) }),
+  })
+  return result.enabled_behaviours
+}
+
+export type CoffeePaymentWindows = string[]
+
+export async function getCoffeePaymentWindows(): Promise<CoffeePaymentWindows> {
+  const result = await requestJson<{ enabled_behaviours: CoffeePaymentWindows }>("/api/company/background/coffeebench/payment-windows")
+  return result.enabled_behaviours
+}
+
+export async function setCoffeePaymentWindow(behaviour: string, enabled: boolean): Promise<CoffeePaymentWindows> {
+  const session = await getSession()
+  const result = await requestJson<{ enabled_behaviours: CoffeePaymentWindows }>("/api/company/background/coffeebench/payment-windows", {
+    method: "POST",
+    body: new URLSearchParams({ csrf_token: session.csrf_token, behaviour, enabled: String(enabled) }),
+  })
+  return result.enabled_behaviours
 }
 
 export async function setBackgroundProviderEnabled(providerId: CompanyNativeEvaluation["provider_id"], enabled: boolean): Promise<{ provider_id: CompanyNativeEvaluation["provider_id"]; enabled: boolean; in_flight: boolean; status: "stopped" | "stopping" | "starting" | "active" | "error" }> {
@@ -332,8 +399,25 @@ export async function startCompanyEvaluation(providerId: CompanyNativeEvaluation
 
 export type ActivityMetrics = { emails_sent: number | null; emails_received: number | null; messages: number; open_experiments: number | null }
 
-export async function getActivity(): Promise<{ activity: ActivityEntry[]; error?: string | null; metrics: ActivityMetrics }> {
-  return requestJson<{ activity: ActivityEntry[]; error?: string | null; metrics: ActivityMetrics }>("/api/activity")
+export async function resendActivityEmail(messageId: string, requestId: string): Promise<void> {
+  const session = await getSession()
+  await requestJson("/api/activity/resend", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ csrf_token: session.csrf_token, message_id: messageId, request_id: requestId }),
+  })
+}
+
+export async function getActivity(type: string, before?: string, signal?: AbortSignal): Promise<{
+  activity: ActivityEntry[]
+  error?: string | null
+  metrics: ActivityMetrics
+  counts: Record<string, number>
+  next_cursor: string | null
+}> {
+  const params = new URLSearchParams({ type })
+  if (before) params.set("before", before)
+  return requestJson(`/api/activity?${params}`, { signal })
 }
 
 export async function setCompanyRunning(running: boolean): Promise<Company> {
@@ -427,8 +511,59 @@ export async function retryRun(runId: string): Promise<RunResponse> {
   })
 }
 
-export async function getCompanyClock(): Promise<{ simulated_time: string | null; clock_mode: string }> {
-  return requestJson<{ simulated_time: string | null; clock_mode: string }>("/api/company/clock")
+export type CompanyClock = {
+  simulated_time: string | null
+  clock_mode: string
+  clock_speed: number | null
+  can_set_speed: boolean
+}
+
+export async function getCompanyClock(): Promise<CompanyClock> {
+  return requestJson<CompanyClock>("/api/company/clock")
+}
+
+export type CompanyPackImport = {
+  id: string
+  pack_id: string
+  version: string
+  title: string
+  status: "validated" | "queued" | "importing" | "completed" | "failed"
+  persona: { name: string; business_type: string; description: string; applications: string[] }
+  counts: { employees: number; departments: number; records: number; files: number; experiments: number }
+  completed_steps: number
+  total_steps: number
+  error?: string | null
+  created_at: string
+}
+
+export async function getCompanyPacks(): Promise<CompanyPackImport[]> {
+  const result = await requestJson<{ packs: CompanyPackImport[] }>("/api/company-packs")
+  return result.packs
+}
+
+export async function getCompanyPack(id: string): Promise<CompanyPackImport> {
+  return requestJson(`/api/company-packs/${encodeURIComponent(id)}`)
+}
+
+export async function uploadCompanyPack(file: File): Promise<CompanyPackImport> {
+  const session = await getSession()
+  const body = new FormData()
+  body.append("file", file)
+  body.append("csrf_token", session.csrf_token)
+  return requestJson("/api/company-packs", {
+    method: "POST",
+    headers: { "Idempotency-Key": session.idempotency_key },
+    body,
+  })
+}
+
+export async function importCompanyPack(id: string): Promise<CompanyPackImport> {
+  const session = await getSession()
+  return requestJson(`/api/company-packs/${encodeURIComponent(id)}/import`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body: new URLSearchParams({ csrf_token: session.csrf_token, idempotency_key: session.idempotency_key }),
+  })
 }
 
 export async function getModelControl(): Promise<{ enabled: boolean }> {
@@ -441,5 +576,53 @@ export async function setModelControl(enabled: boolean): Promise<{ enabled: bool
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
     body: new URLSearchParams({ csrf_token: session.csrf_token, enabled: String(enabled) }),
+  })
+}
+
+export type CompanyEnvironmentJob = {
+  id: string
+  status: "queued" | "running" | "completed" | "failed"
+  stage: string
+  operation: "clone" | "switch"
+  source_id: string
+  target_id: string
+  error?: string | null
+  status_token?: string
+}
+export type CompanyEnvironments = {
+  active_id: string
+  companies: { id: string; name: string; active: boolean; created_at: string }[]
+  operation?: CompanyEnvironmentJob | null
+}
+export async function getCompanyEnvironments(signal?: AbortSignal): Promise<CompanyEnvironments> {
+  return requestJson("/api/company-environments", { signal })
+}
+export async function getCompanyEnvironmentJob(id: string, token: string, signal?: AbortSignal): Promise<CompanyEnvironmentJob> {
+  return requestJson(`/api/company-environments/jobs/${encodeURIComponent(id)}`, {
+    headers: { "X-Company-Job-Token": token },
+    signal,
+  })
+}
+export async function startCompanyEnvironmentJob(id: string, token: string, signal?: AbortSignal): Promise<void> {
+  await requestJson(`/api/company-environments/jobs/${encodeURIComponent(id)}/start`, {
+    method: "POST",
+    headers: { "X-Company-Job-Token": token },
+    signal,
+  })
+}
+export async function changeCompanyEnvironment(action: "clone" | "switch", id: string, name?: string): Promise<CompanyEnvironmentJob> {
+  const session = await getSession()
+  return requestJson(action === "clone" ? "/api/company-environments/clone" : `/api/company-environments/${encodeURIComponent(id)}/switch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body: new URLSearchParams({ csrf_token: session.csrf_token, idempotency_key: session.idempotency_key, ...(name === undefined ? {} : { name }) }),
+  })
+}
+export async function renameCompanyEnvironment(id: string, name: string): Promise<CompanyEnvironments> {
+  const session = await getSession()
+  return requestJson(`/api/company-environments/${encodeURIComponent(id)}/rename`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+    body: new URLSearchParams({ csrf_token: session.csrf_token, name }),
   })
 }

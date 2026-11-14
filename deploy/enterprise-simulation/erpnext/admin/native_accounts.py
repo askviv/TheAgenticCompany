@@ -138,3 +138,77 @@ def map_party_to_currency(
     account = ensure_party_account(company, party.doctype, currency, preferred_name=preferred_name)
     map_party_to_account(party, account["account"], company=company, newly_created=newly_created)
     return account
+
+
+def ensure_simulated_bank(company: str, currency: str, account_name: str, bank_name: str) -> tuple[str, str]:
+    """Provision a source-specific ERP ledger and Bank Account without changing defaults."""
+    parent_name = frappe.db.get_value(
+        "Account",
+        {"company": company, "account_name": "Bank Accounts", "is_group": 1},
+        "name",
+    )
+    if not parent_name:
+        raise RuntimeError(f"Native company {company} has no Bank Accounts parent")
+    parent = frappe.get_doc("Account", parent_name)
+    if parent.root_type != "Asset" or parent.account_type != "Bank" or not parent.is_group:
+        raise RuntimeError("Native Bank Accounts parent does not satisfy the ERPNext account contract")
+    existing_name = frappe.db.get_value(
+        "Account", {"company": company, "account_name": account_name}, "name"
+    )
+    if existing_name:
+        account = frappe.get_doc("Account", existing_name)
+        if (account.parent_account != parent_name or account.root_type != "Asset"
+                or account.account_type != "Bank" or account.is_group
+                or account.disabled or account.account_currency != currency):
+            raise RuntimeError("Existing simulated bank ledger conflicts with its source mapping")
+    else:
+        account = frappe.get_doc({
+            "doctype": "Account", "account_name": account_name, "company": company,
+            "parent_account": parent_name, "root_type": "Asset",
+            "report_type": "Balance Sheet", "account_type": "Bank",
+            "account_currency": currency, "is_group": 0,
+        })
+        account.insert(ignore_permissions=True)
+
+    if frappe.db.exists("Bank", bank_name):
+        bank = frappe.get_doc("Bank", bank_name)
+        if bank.bank_name != bank_name:
+            raise RuntimeError("Existing simulated Bank master conflicts with source identity")
+    else:
+        bank = frappe.get_doc({"doctype": "Bank", "bank_name": bank_name})
+        bank.insert(ignore_permissions=True)
+
+    existing_bank_account_name = frappe.db.get_value(
+        "Bank Account", {"account_name": account_name, "company": company}, "name"
+    )
+    if existing_bank_account_name:
+        bank_account = frappe.get_doc("Bank Account", existing_bank_account_name)
+        if (bank_account.bank != bank.name or bank_account.account != account.name
+                or not bank_account.is_company_account or bank_account.company != company
+                or bank_account.is_default):
+            raise RuntimeError("Existing simulated Bank Account conflicts with the dedicated company bank mapping")
+    else:
+        if frappe.db.exists("Bank Account", account_name):
+            raise RuntimeError("simulated Bank Account name conflicts with another native account")
+        bank_account = frappe.get_doc({
+            "doctype": "Bank Account",
+            "account_name": account_name,
+            "bank": bank.name,
+            "is_company_account": 1,
+            "company": company,
+            "account": account.name,
+            "is_default": 0,
+        })
+        bank_account.insert(ignore_permissions=True)
+    return account.name, bank_account.name
+
+
+def submit_imported_bank_transaction(transaction: Any) -> None:
+    """Match ERPNext's native bank statement import lifecycle without posting GL."""
+    if transaction.docstatus == 0:
+        transaction.submit()
+        transaction.reload()
+    if transaction.docstatus != 1 or transaction.status not in {"Unreconciled", "Reconciled", "Settled"}:
+        raise RuntimeError(
+            "Existing Bank Transaction is cancelled or has an unsupported native status"
+        )

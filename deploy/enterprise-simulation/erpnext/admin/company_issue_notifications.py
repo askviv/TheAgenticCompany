@@ -9,6 +9,8 @@ from typing import Any
 
 import frappe
 
+from finance_handoffs import simulation_message_footer
+
 
 NOTIFICATION_NAME = "Company Supplier Disruption"
 ISSUE_OWNERSHIP_FIELD = "custom_company_issue_key"
@@ -241,6 +243,7 @@ def queue_issue_notification(issue: Any) -> dict[str, Any]:
     }
     errors_before = {row.name for row in frappe.get_all("Error Log", fields=["name"])}
     started_at = frappe.utils.now_datetime()
+    notification.message += "\n\n" + simulation_message_footer()
     notification.send(issue)
     queue_names = [row.name for row in frappe.get_all(
         "Email Queue", filters={"reference_doctype": "Issue", "reference_name": issue.name},

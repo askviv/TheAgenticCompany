@@ -1827,6 +1827,18 @@ class EcommerceNativeActionCheckpoint:
                                 }
                             )
                             continue
+                        available_escrow = max(
+                            before_escrow_by_batch.get(int(row["batch_id"]), Decimal(0))
+                            - escrow_consumed_by_batch.get(int(row["batch_id"]), Decimal(0)),
+                            Decimal(0),
+                        )
+                        reclaimed = min(available_escrow, refund_amount)
+                        settled_net = row.get("settled_net_per_unit")
+                        deduction = (
+                            min(refund_amount - reclaimed, max(Decimal(0), Decimal(str(settled_net))
+                                * int(row["quantity"]) - reclaimed))
+                            if settled_net is not None else Decimal(0)
+                        )
                         refund_facts = {
                             "event_type": "refund_processed",
                             "store_type": identity["store_type"],
@@ -1839,28 +1851,9 @@ class EcommerceNativeActionCheckpoint:
                                 Decimal(str(row["refund_per_unit"])), "f"
                             ),
                             "refund_amount_native_units": format(refund_amount, "f"),
-                            "escrow_reclaimed_native_units": format(
-                                min(
-                                    max(
-                                        before_escrow_by_batch.get(int(row["batch_id"]), Decimal(0))
-                                        - escrow_consumed_by_batch.get(int(row["batch_id"]), Decimal(0)),
-                                        Decimal(0),
-                                    ),
-                                    refund_amount,
-                                ),
-                                "f",
-                            ),
-                            "commission_reversed_native_units": format(
-                                refund_amount - min(
-                                    max(
-                                        before_escrow_by_batch.get(int(row["batch_id"]), Decimal(0))
-                                        - escrow_consumed_by_batch.get(int(row["batch_id"]), Decimal(0)),
-                                        Decimal(0),
-                                    ),
-                                    refund_amount,
-                                ),
-                                "f",
-                            ),
+                            "escrow_reclaimed_native_units": format(reclaimed, "f"),
+                            "commission_reversed_native_units": format(refund_amount - reclaimed - deduction, "f"),
+                            **({"payout_deduction_native_units": format(deduction, "f")} if deduction else {}),
                             "source_delivery_note_names": list(
                                 shipment.get("delivery_note_names", [])
                             ) if shipment else [],
@@ -2272,6 +2265,7 @@ class EcommerceNativeActionCheckpoint:
         prior_batch_ids = {
             int(row["batch_id"]) for row in environment.escrow_batches
         }
+        environment._company_behaviours = self.store.ecommerce_behaviours()
         outcome = apply_native(environment, translated)
         if action_time is not None:
             outcome["company_time"] = action_time.isoformat()

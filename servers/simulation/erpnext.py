@@ -978,9 +978,9 @@ class ERPNextSiteAdmin:
     def _finance_operation(self, operation: str, payload: dict[str, Any]) -> Any:
         if self.runtime_dir is None:
             raise RuntimeError("private ERP runtime volume is required for native company operations")
-        if operation not in {"reconcile-finance-sources", "read-due-obligations",
+        if operation not in {"reconcile-finance-sources", "read-due-obligations", "read-sent-coffee-invoices",
                              "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance",
-                             "capture-evaluation-evidence"}:
+                             "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"}:
             raise ValueError("unsupported native company operation")
         operation_id = str(uuid.uuid4())
         directory = self.runtime_dir / "finance-sources"
@@ -1019,6 +1019,21 @@ class ERPNextSiteAdmin:
             temporary.unlink(missing_ok=True)
             manifest_path.unlink(missing_ok=True)
 
+    def resolve_company_pack_directory(self, payload: dict[str, Any]) -> dict[str, str]:
+        result = self._finance_operation("resolve-company-pack-directory", payload)
+        if not isinstance(result, dict) or any(not isinstance(key, str) or not isinstance(value, str) for key, value in result.items()):
+            raise ERPNextError("resolve-company-pack-directory returned invalid bindings")
+        return result
+
+    def import_company_pack(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Import an approved pack through the private native operation boundary."""
+        result = self._finance_operation("import-company-pack", payload)
+        if (not isinstance(result, dict) or not isinstance(result.get("records"), dict)
+                or not isinstance(result.get("created_count"), int)
+                or not isinstance(result.get("reused_count"), int)):
+            raise ERPNextError("import-company-pack returned an invalid receipt")
+        return result
+
     def reconcile_finance_sources(
         self, source_records: list[dict[str, Any]], company_binding: dict[str, Any], as_of: str | datetime,
     ) -> dict[str, Any]:
@@ -1040,10 +1055,28 @@ class ERPNextSiteAdmin:
             raise ERPNextError("read-due-obligations returned an invalid result")
         return result
 
+    def read_sent_coffee_invoices(self, erp_company: str) -> list[str]:
+        result = self._finance_operation("read-sent-coffee-invoices", {"erp_company": erp_company})
+        if not isinstance(result, list) or any(not isinstance(row, str) or not row for row in result):
+            raise ERPNextError("read-sent-coffee-invoices returned an invalid result")
+        return result
+
+    def read_coffee_billing_state(self, erp_company: str, behaviours: list[str]) -> dict[str, Any]:
+        result = self._finance_operation("read-sent-coffee-invoices", {
+            "erp_company": erp_company, "billing_behaviours": behaviours,
+        })
+        if (not isinstance(result, dict) or not isinstance(result.get("sent_invoice_ids"), list)
+                or not isinstance(result.get("invoice_credits"), dict)):
+            raise ERPNextError("CoffeeBench billing evidence returned an invalid result")
+        return result
+
     def finance_source_adapter(self):
         from .finance_sources import NativeFinanceSourceAdapter
 
-        return NativeFinanceSourceAdapter(self.reconcile_finance_sources, self.read_due_obligations)
+        return NativeFinanceSourceAdapter(
+            self.reconcile_finance_sources, self.read_due_obligations, self.read_sent_coffee_invoices,
+            self.read_coffee_billing_state,
+        )
 
     def reconcile_company_issues(self, events: list[dict], company_binding: dict) -> dict:
         return self._finance_operation("reconcile-company-issues", {

@@ -47,6 +47,7 @@ refund or delivery. Unsupported mappings are reported rather than invented.
 | --- | --- |
 | The Agent Company workplace | Existing chat, ownCloud documents, projects and workplace assignments |
 | ERPNext | Company customers, suppliers, orders, inventory, invoices and financial records |
+| Frappe HR, Lending, CRM and Helpdesk | Payroll, loans, sales and support using the shared company employee directory |
 | Mailu and midPoint | Employee inboxes, linked company identities and account management |
 | Simulation coordinator and SimPy | Shared company time, event ordering, source mappings, durable state and evaluation |
 | CoffeeBench | Pinned native business economy, counterparties and negotiations connected through company adapters |
@@ -69,6 +70,15 @@ are separate from the agent under test. See the [actor runtime guide](deploy/ent
 Open the configured company dashboard to view Activity, browse `/experiments`
 and track `/runs`. Application addresses and employee accounts come from the
 deployment configuration. Runtime credentials stay outside Git.
+
+The [company switcher](docs/company-environments.md) names, duplicates and switches
+whole company application datasets on the shared VM. Inactive companies retain
+their work and paused company clocks.
+
+The Experiments page also accepts a company-pack ZIP. Preview its company
+persona, then import its native business records and shared working files before
+choosing an experiment to run. See the [pack schema, validator and authoring guide](docs/company-packs/README.md)
+and the [current-company example pack](examples/company-packs/industrial-office-operations-v1.zip).
 
 Each background provider has its own Start/Stop button. Stop preserves its saved
 state. An operation already in flight can finish; the status shows **Stopping**
@@ -104,6 +114,7 @@ host requirements. Domain mappings and clock speed belong in deployment files.
 | --- | --- |
 | [Workplace deployment](deploy/single-host/README.md) | Application stack, persistent storage and service configuration |
 | [Company email and identities](deploy/single-host/company-mail.md) | Mailu, employee accounts, smtp4dev routing and midPoint |
+| [Business applications](docs/enterprise-simulation/business-apps.md) | Shared-directory payroll, lending, CRM and Helpdesk setup |
 | [ERPNext runtime](docs/enterprise-simulation/erpnext-runtime.md) | Existing company site, roles and native integration evidence |
 | [Coordinator deployment](deploy/enterprise-simulation/coordinator/README.md) | Private configuration, bootstrap, service operations and persistence |
 | [Actor workers](deploy/enterprise-simulation/actors/README.md) | Pinned upstream runtimes, isolated environments and Codex transport |
@@ -122,10 +133,14 @@ npm --prefix servers/experiments/web ci
 npm --prefix servers/experiments/web run build
 ```
 
-From a coordinator development environment with its dependencies installed,
-focused integration checks include:
+Install the coordinator dependencies, including SimPy, in a Python 3.12
+virtual environment before running the integration checks. The coordinator
+deployment uses the same requirements file.
 
 ```sh
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r servers/simulation/requirements.txt Flask==3.1.3 PyYAML==6.0.3 httpx2 pytest
 python -m pytest servers/simulation/tests/test_company_background.py \
   servers/experiments/tests/test_app.py servers/experiments/tests/test_coordinator.py
 ```

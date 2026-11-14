@@ -1,4 +1,4 @@
-Download resumes.zip from owncloud on {{ company_tools.owncloud }}/ under Documents > Human Resources Team > resumes folder and categorize them locally based on the candidates' YOE. You should place them into one of the following folders under /workspace directory:
+Download resumes.zip from ownCloud under Documents > Human Resources Team > resumes folder and categorize them locally based on the candidates' YOE. Place them into one of the following folders under /workspace directory:
 
 - early-career
 - mid-level

@@ -77,6 +77,31 @@ def _erpnext_is_installed(site: str) -> bool:
     return any(line.split() and line.split()[0] == "erpnext" for line in completed.stdout.splitlines())
 
 
+def _install_business_apps(site: str) -> dict[str, object]:
+    subprocess.run([str(BENCH_EXECUTABLE), "--site", site, "install-app", "hrms", "lending", "helpdesk", "crm", "passkeys"],
+                   cwd=BENCH_ROOT, check=True, stdout=sys.stderr,
+                   user="frappe", group=0, env={**os.environ, "HOME": "/home/frappe"})
+    sys.path.insert(0, "/opt/erpnext-admin")
+    import frappe
+    from business_apps import configure_directory, configure_passkeys
+
+    os.chdir(SITES_ROOT)
+    frappe.init(site, sites_path=str(SITES_ROOT))
+    frappe.connect()
+    frappe.set_user("Administrator")
+    try:
+        from frappe.desk.page.setup_wizard.setup_wizard import disable_future_access
+
+        result = configure_directory()
+        configure_passkeys()
+        disable_future_access()
+        frappe.db.commit()
+        return result
+    finally:
+        frappe.destroy()
+        os.chdir(BENCH_ROOT)
+
+
 def _create(site: str, *, company_only: bool = False) -> dict[str, object]:
     site_path = SITES_ROOT / site
     manifest_path = RUNTIME_ROOT / f"{site}.json"
@@ -128,7 +153,7 @@ def _create(site: str, *, company_only: bool = False) -> dict[str, object]:
                 admin_password=secret("/run/secrets/site-admin-password"),
                 no_mariadb_socket=True,
                 mariadb_user_host_login_scope="%",
-                install_app=("erpnext",),
+                install_app=("erpnext", "hrms", "lending", "helpdesk", "crm", "passkeys") if company_only else ("erpnext",),
                 set_default=False,
                 db_host="db",
                 db_port=3306,
@@ -373,9 +398,9 @@ def _observe_tau_retail(experiment_id: str, task_id: str) -> dict[str, object]:
 def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str, object]:
     if str(uuid.UUID(operation_id)) != operation_id.lower():
         raise ValueError("finance operation_id must be a canonical UUID")
-    if operation not in ("reconcile-finance-sources", "read-due-obligations",
+    if operation not in ("reconcile-finance-sources", "read-due-obligations", "read-sent-coffee-invoices",
                          "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance",
-                         "capture-evaluation-evidence"):
+                         "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"):
         raise ValueError("unsupported native finance source operation")
     payload_path = RUNTIME_ROOT / "finance-sources" / f"{operation_id}.json"
     if not payload_path.is_file() or payload_path.resolve().parent != (RUNTIME_ROOT / "finance-sources").resolve():
@@ -396,13 +421,21 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
         if operation == "capture-evaluation-evidence":
             if payload.get("erp_company") != "The Agent Company":
                 raise ValueError("Evaluation evidence capture must target the existing company")
-        elif operation in ("reconcile-finance-sources", "reconcile-company-issues", "reconcile-ecommerce-finance"):
+        elif operation in ("reconcile-finance-sources", "reconcile-company-issues", "reconcile-ecommerce-finance", "import-company-pack", "resolve-company-pack-directory"):
             binding = payload.get("company_binding")
             if (not isinstance(binding, dict) or binding.get("company_id") != "company"
                     or binding.get("erp_company") != "The Agent Company"):
                 raise ValueError("Finance source operation is not bound to the existing company")
         elif payload.get("erp_company") != "The Agent Company":
             raise ValueError("Due-obligation read must target the existing company")
+        if operation in ("reconcile-finance-sources", "reconcile-ecommerce-finance"):
+            profile = json.loads(Path("/opt/company-identities.json").read_text())
+            company = profile["company"]
+            reviewer = next(employee for employee in profile["employees"]
+                            if employee["id"] == company["providerCaseResponsibleEmployeeId"])
+            if "Accounts Manager" not in reviewer["erpRoles"]:
+                raise ValueError("Benchmark finance reviewer must be an Accounts Manager")
+            binding.update(finance_reviewer=reviewer["email"], assistant_email=company["assistantEmail"])
         with contextlib.redirect_stdout(sys.stderr):
             if operation == "capture-evaluation-evidence":
                 from evaluation_evidence import (
@@ -446,18 +479,34 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
                         capture_error.add_note(
                             f"Read-only evidence rollback failed: {type(rollback_error).__name__}"
                         )
+            elif operation == "resolve-company-pack-directory":
+                from company_packs import resolve_company_pack_directory
+                result = resolve_company_pack_directory(payload)
+                frappe.db.rollback()
+            elif operation == "import-company-pack":
+                from company_packs import import_company_pack
+                result = import_company_pack(payload)
             elif operation == "reconcile-ecommerce-finance":
                 from ecommerce_finance import reconcile
                 result = reconcile(payload["records"], payload["company_binding"], payload["as_of"])
                 frappe.db.commit()
             elif operation == "company-evidence-setup":
-                from company_evidence import ensure_evidence_webhooks, collect_mapped_records, collect_evidence_deliveries, collect_company_issue_events
+                from company_evidence import ensure_evidence_webhooks, collect_mapped_records, collect_evidence_deliveries, collect_company_issue_events, collect_invoice_mail
                 observer = ensure_evidence_webhooks(payload["endpoint"], payload["secret"])
                 frappe.db.commit()
-                result = {"observer": observer, "records": collect_mapped_records(), **collect_evidence_deliveries(payload.get("cursor")), **collect_company_issue_events()}
+                result = {"observer": observer, "records": collect_mapped_records(), **collect_evidence_deliveries(payload.get("cursor")), **collect_company_issue_events(),
+                          "invoice_mail": collect_invoice_mail(payload["erp_company"])}
             elif operation == "reconcile-finance-sources":
                 from finance_sources import reconcile
                 result = reconcile(payload["source_records"], payload["company_binding"], payload["as_of"])
+            elif operation == "read-sent-coffee-invoices":
+                from finance_sources import coffee_billing_state, read_sent_sales_invoices
+                profile = json.loads(Path("/opt/company-identities.json").read_text())
+                directory = profile["company"]["background"]["coffee"]["counterparties"]
+                if "billing_behaviours" in payload:
+                    result = coffee_billing_state(payload["erp_company"], directory, payload["billing_behaviours"])
+                else:
+                    result = read_sent_sales_invoices(payload["erp_company"], directory)
             elif operation == "read-due-obligations":
                 from finance_sources import read_due_obligations
                 result = read_due_obligations(payload["erp_company"], payload["as_of"])
@@ -505,6 +554,19 @@ def _run_finance_source_operation(operation_id: str, operation: str) -> dict[str
                                 "stack": [(frame.filename, frame.lineno, frame.name)
                                           for frame in traceback.extract_tb(error.__traceback__)],
                             })
+                from finance_handoffs import send_pending_finance_handoffs
+
+                from finance_sources import send_pending_sales_invoices
+
+                send_errors.extend(send_pending_finance_handoffs())
+                profile = json.loads(Path("/opt/company-identities.json").read_text())
+                company_profile = profile["company"]
+                reviewer = next(employee for employee in profile["employees"]
+                                if employee["id"] == company_profile["providerCaseResponsibleEmployeeId"])
+                send_errors.extend(send_pending_sales_invoices(
+                    "The Agent Company", company_profile["background"]["coffee"]["counterparties"],
+                    misroute_to=reviewer["email"],
+                ))
                 result = {"notifications": list_owned_notification_receipts(), "errors": send_errors}
         if operation == "reconcile-finance-sources":
             frappe.db.commit()
@@ -586,7 +648,7 @@ def _refresh_seed(site: str) -> dict[str, object]:
 def main() -> None:
     Path("/home/frappe/logs").mkdir(mode=0o700, parents=True, exist_ok=True)
     parser = argparse.ArgumentParser(description="Manage coordinator-owned ERPNext sites and native task imports")
-    parser.add_argument("operation", choices=("create", "company-only", "reset", "probe", "refresh-seed", "ensure-erp-contract", "seed-tau-retail", "observe-tau-retail", "reconcile-finance-sources", "read-due-obligations", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence"))
+    parser.add_argument("operation", choices=("create", "company-only", "install-business-apps", "reset", "probe", "refresh-seed", "ensure-erp-contract", "seed-tau-retail", "observe-tau-retail", "reconcile-finance-sources", "read-due-obligations", "read-sent-coffee-invoices", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"))
     parser.add_argument("run_id", help="run UUID or τ experiment UUID")
     parser.add_argument("task_id", nargs="?", help="τ retail task id for seed-tau-retail")
     args = parser.parse_args()
@@ -597,7 +659,7 @@ def main() -> None:
                   else _observe_tau_retail(args.run_id, args.task_id))
         print(json.dumps(result, sort_keys=True))
         return
-    if args.operation in ("reconcile-finance-sources", "read-due-obligations", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence"):
+    if args.operation in ("reconcile-finance-sources", "read-due-obligations", "read-sent-coffee-invoices", "reconcile-company-issues", "company-issue-notifications", "company-evidence-setup", "reconcile-ecommerce-finance", "capture-evaluation-evidence", "import-company-pack", "resolve-company-pack-directory"):
         result = _run_finance_source_operation(args.run_id, args.operation)
         print(json.dumps(result, sort_keys=True))
         return
@@ -608,6 +670,8 @@ def main() -> None:
     try:
         if args.operation in ("create", "company-only"):
             result = _create(site, company_only=args.operation == "company-only")
+        elif args.operation == "install-business-apps":
+            result = _install_business_apps(site)
         elif args.operation == "reset":
             result = _reset(site)
         elif args.operation == "refresh-seed":

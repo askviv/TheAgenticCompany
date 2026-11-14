@@ -208,12 +208,15 @@ class Invoice:
     # off rather than deleting the record.
     bad_debt: bool = False
     bad_debt_date: int | None = None
+    partial_paid_amount: float = 0.0
+    partial_paid_day: int | None = None
+    partial_credit_at_payment: float = 0.0
 
     @property
     def net_outstanding(self) -> float:
         if self.paid or self.returned or self.bad_debt:
             return 0.0
-        return max(0.0, self.amount + self.late_fees_accrued - self.credited_amount)
+        return max(0.0, self.amount + self.late_fees_accrued - self.credited_amount - self.partial_paid_amount)
 
 
 @dataclass

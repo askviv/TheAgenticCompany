@@ -535,3 +535,46 @@ def test_department_profile_reconciles_native_groups_and_distinct_folder_permiss
     assert len(client.members["department-technical"]) == 10
     assert len(client.members["company-staff"]) == 17
     assert client.members["admin"] == {"theagentcompany"}
+
+
+class PackUploadSession(WebDAVSession):
+    def __init__(self, *, mkcol_status=201, put_status=201):
+        super().__init__()
+        self.mkcol_status = mkcol_status
+        self.put_status = put_status
+
+    def request(self, method, url, **kwargs):
+        if method in {"MKCOL", "PUT"}:
+            self.calls.append((method, url, kwargs))
+            return Response(status=self.mkcol_status if method == "MKCOL" else self.put_status)
+        return super().request(method, url, **kwargs)
+
+
+@pytest.mark.parametrize("mkcol_status,put_status", [(201, 201), (405, 204), (405, 412)])
+def test_pack_upload_preserves_existing_files_and_returns_native_metadata(mkcol_status, put_status):
+    session = PackUploadSession(mkcol_status=mkcol_status, put_status=put_status)
+    client = OwnCloudClient("https://owncloud.example.test", "sarah_johnson", "private",
+                            session=session)
+    metadata = client.upload_pack_file("Documents/statement final.pdf", b"pack source")
+
+    assert metadata["file_id"] == "82415"
+    assert metadata["etag"] == '\"v7-55a\"'
+    put = next(call for call in session.calls if call[0] == "PUT")
+    assert put[1] == ("https://owncloud.example.test/remote.php/dav/files/"
+                      "sarah_johnson/Documents/statement%20final.pdf")
+    assert put[2]["data"] == b"pack source"
+    assert put[2]["headers"] == {"If-None-Match": "*"}
+    assert put[2]["allow_redirects"] is False
+
+
+@pytest.mark.parametrize("method,status", [("MKCOL", 302), ("MKCOL", 500),
+                                          ("PUT", 302), ("PUT", 409)])
+def test_pack_upload_rejects_unexpected_native_status_without_claiming_success(method, status):
+    session = PackUploadSession(**{("mkcol_status" if method == "MKCOL" else "put_status"): status})
+    client = OwnCloudClient("https://owncloud.example.test", "sarah_johnson", "private",
+                            session=session)
+    with pytest.raises(OwnCloudError, match=f"^OWNCLOUD_PACK_{method}_HTTP_{status}$"):
+        client.upload_pack_file("Documents/statement final.pdf", b"pack source")
+    assert not any(call[0] == "PROPFIND" for call in session.calls)
+    if method == "MKCOL":
+        assert not any(call[0] == "PUT" for call in session.calls)
