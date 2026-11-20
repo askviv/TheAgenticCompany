@@ -6,9 +6,9 @@ charset-normalizer==3.5.2
     # via requests
 idna==3.20
     # via requests
-imapclient==4.1.0
-    # via -r servers/company/requirements.in
+imapclient==4.2.0
+    # via -r requirements.in
 requests==2.34.2
-    # via -r servers/company/requirements.in
+    # via -r requirements.in
 urllib3==2.8.0
     # via requests
