@@ -217,13 +217,14 @@ class RocketChatClient:
 
     def setup_outgoing_webhook(
         self, token: str | None = None, *, endpoint: str = "http://192.0.2.10:8110/api/chat-events",
+        name: str = "TACExperimentTracking", channels: list[str] | None = None, enabled: bool = True,
     ) -> str:
         """Ensure the named message webhook exists without exposing its secret."""
         with self._lock:
             self._ensure_login()
             self._ensure_channel()
             token = token if token is not None else os.environ["EXPERIMENTS_WEBHOOK_TOKEN"]
-            name = "TACExperimentTracking"
+            requested_channels = channels if channels is not None else [f"#{self.channel}"]
             listed = self._request(
                 "GET",
                 "integrations.list",
@@ -234,26 +235,28 @@ class RocketChatClient:
                 None,
             )
             if existing:
-                channels = existing.get("channel") or []
-                channel_names = [item.get("name") if isinstance(item, dict) else item for item in channels]
+                existing_channels = existing.get("channel") or []
+                channel_names = [item.get("name") if isinstance(item, dict) else item for item in existing_channels]
                 matches = (
                     existing.get("event") == "sendMessage"
-                    and f"#{self.channel}" in channel_names
+                    and (set(requested_channels) == set(channel_names) if channels is not None
+                         else set(requested_channels).issubset(channel_names))
                     and existing.get("urls") == [endpoint]
                     and existing.get("scriptEnabled") is False
-                    and existing.get("enabled") is True
+                    and existing.get("enabled") is enabled
                     and existing.get("token") == token
                 )
                 if not matches:
                     # Preserve subscriptions for already-running requests while
                     # adding the configured channel for subsequent dispatches.
-                    configured_channels = sorted(set(channel_names) | {f"#{self.channel}"})
+                    configured_channels = (requested_channels if channels is not None
+                                           else sorted(set(channel_names) | set(requested_channels)))
                     self._request(
                         "PUT", "integrations.update",
                         json={
                             "integrationId": existing["_id"], "type": "webhook-outgoing",
                             "username": self.username, "channel": ",".join(configured_channels),
-                            "scriptEnabled": False, "name": name, "enabled": True,
+                            "scriptEnabled": False, "name": name, "enabled": enabled,
                             "event": "sendMessage", "urls": [endpoint], "token": token,
                         },
                     )
@@ -264,10 +267,10 @@ class RocketChatClient:
                 json={
                     "type": "webhook-outgoing",
                     "username": self.username,
-                    "channel": f"#{self.channel}",
+                    "channel": ",".join(requested_channels),
                     "scriptEnabled": False,
                     "name": name,
-                    "enabled": True,
+                    "enabled": enabled,
                     "event": "sendMessage",
                     "urls": [endpoint],
                     "token": token,
@@ -298,3 +301,29 @@ class RocketChatClient:
             "text": message.get("msg", ""),
             "timestamp": timestamp,
         }
+
+
+if __name__ == "__main__":
+    import argparse
+    from pathlib import Path
+
+    parser = argparse.ArgumentParser(description="Apply a configured native Rocket.Chat outgoing integration")
+    parser.add_argument("--webhook-config", type=Path, required=True)
+    args = parser.parse_args()
+    hook = json.loads(args.webhook_config.read_text())["webhooks"]["rocketchat"]
+    if not isinstance(hook["token"], str) or not hook["token"]:
+        parser.error("webhooks.rocketchat.token must be a nonempty string")
+    if not isinstance(hook["endpoint"], str) or not hook["endpoint"]:
+        parser.error("webhooks.rocketchat.endpoint must be a nonempty string")
+    if not isinstance(hook["channels"], list) or not hook["channels"] or not all(
+            isinstance(channel, str) and channel.startswith("#") and len(channel) > 1
+            and not any(character.isspace() or character == "," for character in channel)
+            for channel in hook["channels"]):
+        parser.error("webhooks.rocketchat.channels must be a nonempty list of #channel names")
+    if type(hook["enabled"]) is not bool:
+        parser.error("webhooks.rocketchat.enabled must be a JSON boolean")
+    RocketChatClient.from_env().setup_outgoing_webhook(
+        token=hook["token"], endpoint=hook["endpoint"], name="TACAssistantEvents",
+        channels=hook["channels"], enabled=hook["enabled"],
+    )
+    print("Configured native company outgoing webhook")

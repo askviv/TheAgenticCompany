@@ -1,5 +1,7 @@
 # Local email setup
 
+For company chat webhooks to a local receiver, see [Local webhooks](LOCAL_WEBHOOKS.md).
+
 The company uses Mailu for employee mailboxes. A local assistant can use smtp4dev
 as its SMTP capture server. Mail routing is configured by recipient address; it
 does not require the assistant to be Viv or require smtp4dev to run on a Mac.
