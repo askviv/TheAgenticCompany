@@ -16,4 +16,4 @@ python = ">=3.12,<3.14"
 optional = true
 
 [tool.poetry.group.reporting.dependencies]
-pyyaml = "6.0.3"
+pyyaml = "6.0.4"
